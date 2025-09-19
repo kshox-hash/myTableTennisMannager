@@ -13,22 +13,22 @@ const tournamentService = new TournamentService(tournamentRepository);
 const tournamentController = new TournamentController(tournamentService);
 
 // Crear un torneo
-router.post("/api/create-tournament", (req, res) => {
+router.post("/api/tournament/create-tournament", (req, res) => {
   return tournamentController.create(req, res);
 });
 
 // Listar todos los torneos
-router.get("/api/list-tournaments", (req, res) => {
+router.get("/api/tournament/list-tournaments", (req, res) => {
   return tournamentController.listTournaments(req, res);
 });
 
 // Obtener un torneo por ID
-router.get("/api/get-tournaments/:id", (req, res) => {
+router.get("/api/tournament/get-tournaments/:id", (req, res) => {
   return tournamentController.getTournament(req, res);
 });
 
 // Eliminar un torneo por ID
-router.delete("/api/delete-tournaments/:id", (req, res) => {
+router.delete("/api/tournament/delete-tournaments/:id", (req, res) => {
   return tournamentController.deleteTournament(req, res);
 });
 
