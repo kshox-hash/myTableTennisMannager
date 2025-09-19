@@ -1,8 +1,8 @@
 // src/routes/players_routes.ts
 
 import express, { Router } from "express";
-import {TournamentPlayerService} from "../../services/tournamentPlayer/tournamentPlayer_service"
-import {TournamentPlayerRepository} from "../../repositories/tournamentPlayer_repository"
+import {TournamentPlayerService} from "../services/tournamentPlayer_service"
+import {TournamentPlayerRepository} from "../repositories/tournamentPlayer_repository"
 import {TournamentPlayerController} from "../../controller/tournamentPlayer/tournamentPlayer_controller"
 
 const router: Router = express.Router();

@@ -1,5 +1,5 @@
 
-import { TournamentPlayerRepository} from "../../repositories/tournamentPlayer_repository"
+import { TournamentPlayerRepository} from "../repositories/tournamentPlayer_repository"
 
 export class TournamentPlayerService {
     constructor( private playerRepo : TournamentPlayerRepository ){}
@@ -17,3 +17,5 @@ export class TournamentPlayerService {
     async updatePlayer(){}
 
 }
+
+

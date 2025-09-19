@@ -1,15 +1,14 @@
 import { BaseRepository } from "./base_repository";
-import {IPlayer} from "../model/player/player_model";
-import {} from "../services/tournamentPlayer/tournamentPlayer_service";
+import {ITournamentPlayer} from "../model/tournamentPlayer/tournamentPlayer_model";
 import { connectDB } from "../db/db_configuration"
 
-export class TournamentPlayerRepository extends BaseRepository<IPlayer> {
+export class TournamentPlayerRepository extends BaseRepository<ITournamentPlayer> {
 
         constructor(){
             super("Participantes")
         }
 
-       async create(item: IPlayer): Promise<IPlayer> {
+       async create(item: ITournamentPlayer): Promise<ITournamentPlayer> {
             const pool = await connectDB();
 
             const result = await pool.request()
@@ -43,10 +42,10 @@ async findById(id: number): Promise<number | null> {
 
 
 
-        findAll(): Promise<IPlayer[]> {
+        findAll(): Promise<ITournamentPlayer[]> {
             throw new Error("Method not implemented.");
         }
-        update(id: number, item: Partial<IPlayer>): Promise<IPlayer | null> {
+        update(id: number, item: Partial<ITournamentPlayer>): Promise<ITournamentPlayer | null> {
             throw new Error("Method not implemented.");
         }
         delete(id: number): Promise<boolean> {

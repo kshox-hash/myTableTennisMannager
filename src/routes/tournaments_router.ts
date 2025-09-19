@@ -2,8 +2,8 @@
 
 import express, { Router } from "express";
 import { TournamentController } from "../../controller/tournament/tournament_controller";
-import { TournamentService } from "../../services/tournament_service";
-import { TournamentRepository } from "../../repositories/tournament_repository";
+import { TournamentService } from "../services/tournament_service";
+import { TournamentRepository } from "../repositories/tournament_repository";
 
 const router: Router = express.Router();
 

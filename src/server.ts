@@ -4,7 +4,7 @@ import helmet from "helmet";
 import morgan from "morgan";
 import dotenv from "dotenv";
 
-import routerTournament from "./routes/tournaments/tournaments_router";
+import routerTournament from "./routes/tournaments_router";
 import { errorHandler } from "../src/middlewares/error_handler";
 
 dotenv.config();
