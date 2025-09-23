@@ -1,7 +1,7 @@
 // src/routes/tournament_routes.ts
 
 import express, { Router } from "express";
-import { TournamentController } from "../../controller/tournament/tournament_controller";
+import { TournamentController } from "../controller/tournament_controller";
 import { TournamentService } from "../services/tournament_service";
 import { TournamentRepository } from "../repositories/tournament_repository";
 

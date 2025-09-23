@@ -1,3 +1,6 @@
+import {IBaseRepository} from "../../repositories/base_repository"
+
+
 // src/models/GroupStage.ts
 export interface IGroupStage {
   id: number;
@@ -20,3 +23,15 @@ export class GroupStage implements IGroupStage {
     this.jugadores.push(jugadorId);
   }
 }
+
+
+
+
+export class GroupStageController {
+
+}
+ 
+//repositorio
+// service
+//controller
+//router
