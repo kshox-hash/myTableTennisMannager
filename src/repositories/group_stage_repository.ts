@@ -1,4 +1,4 @@
-import { IGroupStage } from "../interfaces/IGroupStage";
+import { IGroupStage } from "../interfaces/group_stage_interface";
 import { IBaseRepository } from "../repositories/base_repository";
 import { connectDB } from "../db/db_configuration"; // ajusta la ruta según tu proyecto
 

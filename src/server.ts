@@ -3,8 +3,11 @@ import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
 import dotenv from "dotenv";
-
+//routes
 import routerTournament from "./routes/tournaments_router";
+import routerGroupStage from "./routes/group_stage_route";
+import routerAuth from "./routes/auth_routes"
+//middlewares
 import { errorHandler } from "../src/middlewares/error_handler";
 
 dotenv.config();
@@ -29,6 +32,8 @@ class Server {
 
   private routes(): void {
     this.app.use("/tournament", routerTournament);
+    this.app.use("/api", routerGroupStage);
+    this.app.use("/api/", routerAuth)
     this.app.use(errorHandler); // manejo de errores centralizado
   }
 

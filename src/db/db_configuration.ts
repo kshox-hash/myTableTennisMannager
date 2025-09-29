@@ -4,7 +4,7 @@ import sql, { config as SQLConfig, ConnectionPool } from "mssql";
 const config: SQLConfig = {
   user: "sa",
   password: "123",
-  server: "KSHOX", // o KSHOX\\SQLEXPRESS si es una instancia
+  server: "KSHOX/MSSQLSERVER01", // o KSHOX\\SQLEXPRESS si es una instancia
   database: "MYTTM",
   options: {
     encrypt: false,
