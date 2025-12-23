@@ -1,10 +1,10 @@
 // src/repositories/BaseRepository.ts
 export interface IBaseRepository<T> {
   create(item: T): Promise<T>;
-  findById(id: number): Promise<T | null>;
+  findByEmail(email: string): Promise<T | null>;
   findAll(): Promise<T[]>;
-  update(id: number, item: Partial<T>): Promise<T | null>;
-  delete(id: number): Promise<boolean>;
+  updateByEmail(email: string, item: Partial<T>): Promise<T | null>;
+  deleteByEmail(email: string): Promise<boolean>;
 }
 
 export abstract class BaseRepository<T> implements IBaseRepository<T> {
@@ -15,8 +15,8 @@ export abstract class BaseRepository<T> implements IBaseRepository<T> {
   }
 
   abstract create(item: T): Promise<T>;
-  abstract findById(id: number): Promise<T | null>;
+  abstract findByEmail(email: string): Promise<T | null>;
   abstract findAll(): Promise<T[]>;
-  abstract update(id: number, item: Partial<T>): Promise<T | null>;
-  abstract delete(id: number): Promise<boolean>;
+  abstract updateByEmail(email: string, item: Partial<T>): Promise<T | null>;
+  abstract deleteByEmail(email: string): Promise<boolean>;
 }

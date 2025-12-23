@@ -12,3 +12,4 @@ class Inscription {
     }
 }
 exports.Inscription = Inscription;
+//# sourceMappingURL=inscription_model.js.map

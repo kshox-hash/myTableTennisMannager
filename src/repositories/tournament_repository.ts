@@ -1,115 +1,123 @@
-// src/repositories/TournamentRepository.ts
+// src/repositories/tournament_repository.ts
 
-import { ITournament } from "../model/tournaments/tournament_model";
-import { BaseRepository } from "./base_repository";
-import { connectDB } from "../db/db_configuration";
+import DB from "../db/db_configuration";
+import type { PoolClient } from "pg";
+import type {
+  TournamentCreateDTO,
+  ITournament,
+  TournamentCategoryDTO,
+} from "../interfaces/dto/tournament_dto";
 
-/**
- * Repositorio que gestiona las operaciones de base de datos para torneos.
- * Extiende una clase base genérica `BaseRepository`.
- */
-export class TournamentRepository extends BaseRepository<ITournament> {
-  private db: any;
+export class TournamentRepository {
+  private tournamentsTable = "tournaments";
+  private tournamentCategoriesTable = "tournament_categories";
 
-  constructor() {
-    super("Campeonatos"); // Nombre de la tabla en la base de datos
+  // ============================
+  // Helper: insert tournament
+  // ============================
+  private async insertTournament(client: PoolClient, payload: TournamentCreateDTO) {
+    const query = `
+      INSERT INTO ${this.tournamentsTable}
+        (tournament_name, description, location, created_by)
+      VALUES
+        ($1, $2, $3, $4)
+      RETURNING *;
+    `;
+
+    const values = [
+      payload.tournament_name,
+      payload.description,
+      payload.location,
+      payload.created_by,
+    ];
+
+    const res = await client.query(query, values);
+    return res.rows[0];
   }
 
-  /**
-   * Crear un nuevo torneo en la base de datos
-   * @param item Objeto de torneo a crear
-   * @returns El mismo objeto recibido (sin ID generado)
-   */
-  async create(item: ITournament): Promise<ITournament> {
-    const pool = await connectDB();
+  // =================================
+  // Helper: insert tournament categories
+  // =================================
+  private async insertCategories(
+    client: PoolClient,
+    tournament_id: string,
+    categories: TournamentCategoryDTO[]
+  ) {
+    if (!Array.isArray(categories) || categories.length === 0) return [];
 
-    const result = await pool.request()
-      .input("nombre", item.nombre)
-      // .input("categoria", item.categoria) // Puedes habilitar esto si está en el modelo
-      .input("fecha_inicio", item.fecha_inicio)
-      .input("fecha_fin", item.fecha_fin)
-      .input("creado_por", (item as any).creador) // "creador" si existe en el modelo
-      .query(`
-        INSERT INTO ${this.tableName} (nombre, fecha_inicio, fecha_fin, creado_por)
-        VALUES (@nombre, @fecha_inicio, @fecha_fin, @creado_por)
-      `);
+    const values: any[] = [];
+    const placeholders: string[] = [];
 
-    console.log("Resultado INSERT:", result); // Para depuración
+    categories.forEach((cat, index) => {
+      const base = index * 5;
+      placeholders.push(
+        `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5})`
+      );
 
-    // Nota: Podrías retornar el objeto con ID si haces un SELECT SCOPE_IDENTITY()
-    return item;
-  }
-
-  /**
-   * Buscar un torneo por su ID
-   * @param id ID del torneo
-   * @returns El torneo si se encuentra, o null
-   */
-  async findById(id: number): Promise<ITournament | null> {
-    const pool = await connectDB();
-
-    const result = await pool.request()
-      .input("id", id)
-      .query(`SELECT * FROM ${this.tableName} WHERE id_campeonato = @id`);
-
-    return result.recordset[0] || null;
-  }
-
-  /**
-   * Obtener todos los torneos
-   * @returns Lista de torneos
-   */
-  async findAll(): Promise<ITournament[]> {
-    const pool = await connectDB();
-
-    const result = await pool.request().query(`SELECT * FROM ${this.tableName}`);
-
-    return result.recordset as ITournament[];
-  }
-
-  /**
-   * Actualizar un torneo por su ID
-   * @param id ID del torneo a actualizar
-   * @param item Campos del torneo a modificar
-   * @returns El torneo actualizado, o null si no existe
-   */
-  async update(id: number, item: Partial<ITournament>): Promise<ITournament | null> {
-    const pool = await connectDB();
-    const keys = Object.keys(item);
-
-    // Si no hay campos para actualizar, simplemente devuelve el torneo actual
-    if (keys.length === 0) return this.findById(id);
-
-    // Generar la cláusula SET dinámica
-    const setClause = keys.map((key) => `${key} = @${key}`).join(", ");
-    const request = pool.request();
-
-    // Agregar cada campo como parámetro
-    keys.forEach((key) => {
-      request.input(key, (item as any)[key]);
+      values.push(
+        tournament_id,
+        cat.category_name,
+        cat.gender,
+        cat.inscription_price,
+        cat.quotas
+      );
     });
 
-    // Ejecutar el UPDATE
-    await request.input("id", id).query(`
-      UPDATE ${this.tableName} SET ${setClause} WHERE id_campeonato = @id
-    `);
+    const query = `
+      INSERT INTO ${this.tournamentCategoriesTable}
+        (id_tournament, category_name, gender, inscription_price, quotas)
+      VALUES ${placeholders.join(",")}
+      RETURNING *;
+    `;
 
-    // Retornar el torneo actualizado
-    return this.findById(id);
+    const res = await client.query(query, values);
+    return res.rows;
   }
 
-  /**
-   * Eliminar un torneo por su ID
-   * @param id ID del torneo a eliminar
-   * @returns true si fue eliminado, false si no existía
-   */
-  async delete(id: number): Promise<boolean> {
-    const pool = await connectDB();
+  // ============================
+  // CREATE
+  // ============================
+  async create(payload: TournamentCreateDTO): Promise<ITournament> {
+    const db = new DB();                 // ✅ your DB class is fine
+    const client = (await db.connect()) as PoolClient;
 
-    const result = await pool.request()
-      .input("id", id)
-      .query(`DELETE FROM ${this.tableName} WHERE id_campeonato = @id`);
+    try {
+      await client.query("BEGIN");
 
-    return result.rowsAffected[0] > 0;
+      // 1) Insert tournament
+      const tournamentRow = await this.insertTournament(client, payload);
+      const tournament_id: string = tournamentRow.id_tournament;
+
+      // 2) Insert categories
+      const categoryRows = await this.insertCategories(
+        client,
+        tournament_id,
+        payload.categories
+      );
+
+      await client.query("COMMIT");
+
+      // Map DB rows -> DTO
+      const categoriesDTO: TournamentCategoryDTO[] = categoryRows.map((row: any) => ({
+        id_category: row.id_category,
+        category_name: row.category_name,
+        gender: row.gender,
+        inscription_price: Number(row.inscription_price),
+        quotas: Number(row.quotas),
+      }));
+
+      return {
+        id_tournament: tournament_id,
+        tournament_name: tournamentRow.tournament_name,
+        description: tournamentRow.description,
+        location: tournamentRow.location,
+        created_by: tournamentRow.created_by,
+        categories: categoriesDTO,
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      console.error("[TournamentRepository] Error:", error);
+      throw new Error("Error creating tournament");
+    } 
   }
 }

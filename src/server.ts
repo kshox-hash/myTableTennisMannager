@@ -1,52 +1,45 @@
-import express, { Application } from "express";
-import cors from "cors";
-import helmet from "helmet";
-import morgan from "morgan";
-import dotenv from "dotenv";
-//routes
-import routerTournament from "./routes/tournaments_router";
-import routerGroupStage from "./routes/group_stage_route";
-import routerAuth from "./routes/auth_routes"
-//middlewares
-import { errorHandler } from "../src/middlewares/error_handler";
+// src/app.ts
+import express from "express";
+import http from "http";
 
-dotenv.config();
+import config from "./config"
+import router from "./router"
 
 class Server {
-  public app: Application;
-  public port: number;
+    private app : express.Express;
+    private service! : http.Server;
+    private PORT : number = 3000
 
-  constructor() {
-    this.app = express();
-    this.port = Number(process.env.PORT) || 3000;
-    this.middlewares();
-    this.routes();
-  }
+    constructor( ){
+        this.app = express()
+    }
 
-  private middlewares(): void {
-    this.app.use(express.json()); // para recibir JSON
-    this.app.use(cors()); // habilita CORS
-    this.app.use(helmet()); // seguridad HTTP headers
-    this.app.use(morgan("dev")); // logs HTTP
-  }
+    async start(){
 
-  private routes(): void {
-    this.app.use("/tournament", routerTournament);
-    this.app.use("/api", routerGroupStage);
-    this.app.use("/api/", routerAuth)
-    this.app.use(errorHandler); // manejo de errores centralizado
-  }
+        config(this.app);
+        router(this.app);
 
-  public async init(): Promise<void> {
-    this.app.listen(this.port, () => {
-      console.log(`server running on${this.port}`);
-    });
-  }
+        this.service! = this.app.listen(this.PORT, () => {
+            console.log("server up")
+        })
+
+        return this.service!
+    }
+
+    async close(){
+        this.service!.close();
+        console.log("server stopped")
+
+    }
 }
 
-const server = new Server();
-server.init();
+const server = new Server()
+
+server.start();
+
+export default server;
 
 
 
 
+ 

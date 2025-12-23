@@ -2,20 +2,18 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.Tournament = void 0;
 class Tournament {
-    constructor(id, nombre, tipo, categoria, fechaInicio, fechaFin, ubicacion, sets, estado) {
-        this.id = id;
+    constructor(nombre, 
+    // public categoria: string,
+    fecha_inicio, fecha_fin, creador) {
         this.nombre = nombre;
-        this.tipo = tipo;
-        this.categoria = categoria;
-        this.fechaInicio = fechaInicio;
-        this.fechaFin = fechaFin;
-        this.ubicacion = ubicacion;
-        this.sets = sets;
-        this.estado = estado;
+        this.fecha_inicio = fecha_inicio;
+        this.fecha_fin = fecha_fin;
+        this.creador = creador;
     }
     isActive() {
         const hoy = new Date();
-        return hoy >= this.fechaInicio && hoy <= this.fechaFin;
+        return hoy >= this.fecha_inicio && hoy <= this.fecha_fin;
     }
 }
 exports.Tournament = Tournament;
+//# sourceMappingURL=tournament_model.js.map

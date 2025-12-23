@@ -16,3 +16,4 @@ class Match {
     }
 }
 exports.Match = Match;
+//# sourceMappingURL=match_model.js.map

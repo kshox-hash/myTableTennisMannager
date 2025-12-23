@@ -14,3 +14,4 @@ class KnockoutStage {
     }
 }
 exports.KnockoutStage = KnockoutStage;
+//# sourceMappingURL=knockout_stage_model.js.map
