@@ -1,8 +1,8 @@
 // src/routes/tournament_routes.ts
 import express, { Router } from "express";
-import TournamentController  from "../controller/tournament_controller";
-import { TournamentService } from "../services/tournament_service";
-import { TournamentRepository } from "../repositories/tournament_repository";
+import TournamentController  from "../tournament/tournament_controller";
+import { TournamentService } from "../tournament/tournament_service";
+import { TournamentRepository } from "../tournament/tournament_repository";
 
 const tournamentRouter: Router = express.Router();
 
@@ -13,6 +13,7 @@ const tournamentController = new TournamentController(tournamentService);
 
 // Crear campeonato
 tournamentRouter.post("/create", tournamentController.createTournament);
+tournamentRouter.get("/getList", tournamentController.listTournament);
 
 
 export default tournamentRouter; 

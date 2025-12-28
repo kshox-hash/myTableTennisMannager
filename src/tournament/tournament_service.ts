@@ -1,4 +1,4 @@
-import { TournamentRepository } from "../repositories/tournament_repository";
+import { TournamentRepository } from "./tournament_repository";
 import { TournamentCreateDTO, ITournament } from "../interfaces/dto/tournament_dto";
 
 export class TournamentService {
@@ -6,5 +6,9 @@ export class TournamentService {
 
   async createTournament(data: TournamentCreateDTO): Promise<ITournament> {
     return this.tournamentRepo.create(data);
+  }
+
+  async listTournament() : Promise<ITournament[]>{
+    return this.tournamentRepo.getAll();
   }
 }

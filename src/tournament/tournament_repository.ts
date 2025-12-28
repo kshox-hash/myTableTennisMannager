@@ -120,4 +120,68 @@ export class TournamentRepository {
       throw new Error("Error creating tournament");
     } 
   }
+
+  // ============================
+// GET ALL TOURNAMENTS
+// ============================
+async getAll(): Promise<ITournament[]> {
+  const db = new DB();
+  const client = (await db.connect()) as PoolClient;
+
+  try {
+    const query = `
+      SELECT
+        t.id_tournament,
+        t.tournament_name,
+        t.description,
+        t.location,
+        t.created_by,
+
+        c.id_category,
+        c.category_name,
+        c.gender,
+        c.inscription_price,
+        c.quotas
+      FROM ${this.tournamentsTable} t
+      LEFT JOIN ${this.tournamentCategoriesTable} c
+        ON c.id_tournament = t.id_tournament
+      ORDER BY t.created_at DESC;
+    `;
+
+    const res = await client.query(query);
+
+    // ===== Agrupar torneos =====
+    const tournamentsMap = new Map<string, ITournament>();
+
+    for (const row of res.rows) {
+      if (!tournamentsMap.has(row.id_tournament)) {
+        tournamentsMap.set(row.id_tournament, {
+          id_tournament: row.id_tournament,
+          tournament_name: row.tournament_name,
+          description: row.description,
+          location: row.location,
+          created_by: row.created_by,
+          categories: [],
+        });
+      }
+
+      // Si el torneo tiene categorías
+      if (row.id_category) {
+        tournamentsMap.get(row.id_tournament)!.categories.push({
+          id_category: row.id_category,
+          category_name: row.category_name,
+          gender: row.gender,
+          inscription_price: Number(row.inscription_price),
+          quotas: Number(row.quotas),
+        });
+      }
+    }
+
+    return Array.from(tournamentsMap.values());
+  } catch (error) {
+    console.error("[TournamentRepository] Error getAll:", error);
+    throw new Error("Error fetching tournaments");
+  }
+}
+
 }

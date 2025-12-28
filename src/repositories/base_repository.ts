@@ -20,3 +20,4 @@ export abstract class BaseRepository<T> implements IBaseRepository<T> {
   abstract updateByEmail(email: string, item: Partial<T>): Promise<T | null>;
   abstract deleteByEmail(email: string): Promise<boolean>;
 }
+ 
