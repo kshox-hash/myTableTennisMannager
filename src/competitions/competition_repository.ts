@@ -1,6 +1,4 @@
 // src/competitions/competition_repository.ts
-// ✅ Incluye getActivePlayersForCategory leyendo desde enrollments (sin depender de EnrollmentRepository)
-
 import type { PoolClient } from "pg";
 
 type CategoryRow = { status: "open" | "closed" | "generated" };
@@ -17,10 +15,8 @@ export class CompetitionRepository {
   private groupStandingsTable = "group_standings";
 
   private matchesTable = "matches";
-
   private enrollmentsTable = "enrollments";
 
-  // (Opcional) para validar admin sin auth
   private usersTable = "users";
   private rolesTable = "roles";
 
@@ -36,11 +32,7 @@ export class CompetitionRepository {
     if (res.rows.length === 0) throw new Error("USER_NOT_ADMIN");
   }
 
-  async getCategoryForUpdate(
-    client: PoolClient,
-    tournamentId: string,
-    categoryId: string
-  ): Promise<CategoryRow> {
+  async getCategoryForUpdate(client: PoolClient, tournamentId: string, categoryId: string): Promise<CategoryRow> {
     const q = `
       SELECT status
       FROM ${this.categoriesTable}
@@ -52,20 +44,12 @@ export class CompetitionRepository {
     return res.rows[0] as CategoryRow;
   }
 
-  async setCategoryStatus(
-    client: PoolClient,
-    categoryId: string,
-    status: "open" | "closed" | "generated"
-  ) {
+  async setCategoryStatus(client: PoolClient, categoryId: string, status: "open" | "closed" | "generated") {
     const q = `UPDATE ${this.categoriesTable} SET status = $1 WHERE id_category = $2;`;
     await client.query(q, [status, categoryId]);
   }
 
-  async ensureCompetition(
-    client: PoolClient,
-    tournamentId: string,
-    categoryId: string
-  ): Promise<CompetitionRow> {
+  async ensureCompetition(client: PoolClient, tournamentId: string, categoryId: string): Promise<CompetitionRow> {
     const find = `
       SELECT id_competition
       FROM ${this.competitionsTable}
@@ -98,25 +82,33 @@ export class CompetitionRepository {
     return res.rows.length > 0;
   }
 
-  // ✅ reemplaza EnrollmentRepository.getActivePlayersForCategory
-  async getActivePlayersForCategory(client: PoolClient, tournamentId: string, categoryId: string) {
-    const q = `
-      SELECT id_user
-      FROM ${this.enrollmentsTable}
-      WHERE id_tournament = $1
-        AND id_category = $2
-        AND status = 'active'
-      ORDER BY enrolled_at ASC;
-    `;
-    const res = await client.query(q, [tournamentId, categoryId]);
-    return res.rows as { id_user: string }[];
-  }
+  async getActivePlayersForCategory(
+  client: PoolClient,
+  tournamentId: string,
+  categoryId: string
+) {
+  const q = `
+    SELECT
+      e.id_user,
+      COALESCE(u.club_name, 'SIN_CLUB') AS club_name,
+      ROW_NUMBER() OVER (ORDER BY e.enrolled_at ASC) AS seed_rank
+    FROM enrollments e
+    JOIN users u ON u.id_user = e.id_user
+    WHERE e.id_tournament = $1
+      AND e.id_category = $2
+      AND e.status = 'active'
+    ORDER BY e.enrolled_at ASC;
+  `;
+  const res = await client.query(q, [tournamentId, categoryId]);
+  return res.rows as {
+    id_user: string;
+    club_name: string;
+    seed_rank: number;
+  }[];
+}
 
-  async insertCompetitionPlayers(
-    client: PoolClient,
-    competitionId: string,
-    players: { id_user: string }[]
-  ) {
+
+  async insertCompetitionPlayers(client: PoolClient, competitionId: string, players: { id_user: string }[]) {
     if (players.length === 0) return;
 
     const placeholders: string[] = [];
@@ -135,22 +127,18 @@ export class CompetitionRepository {
     await client.query(q, values);
   }
 
+  // ✅ 1 query en vez de loop
   async createGroups(client: PoolClient, competitionId: string, groupCount: number): Promise<GroupRow[]> {
-    const groups: GroupRow[] = [];
+    const names = Array.from({ length: groupCount }, (_, i) => String.fromCharCode(65 + i)); // A,B,C...
 
-    for (let i = 1; i <= groupCount; i++) {
-      const groupName = String.fromCharCode(64 + i); // A,B,C...
-
-      const q = `
-        INSERT INTO ${this.groupsTable} (id_competition, group_name)
-        VALUES ($1, $2)
-        RETURNING id_group, group_name;
-      `;
-      const res = await client.query(q, [competitionId, groupName]);
-      groups.push(res.rows[0] as GroupRow);
-    }
-
-    return groups;
+    const q = `
+      INSERT INTO ${this.groupsTable} (id_competition, group_name)
+      SELECT $1, x.group_name
+      FROM UNNEST($2::text[]) AS x(group_name)
+      RETURNING id_group, group_name;
+    `;
+    const res = await client.query(q, [competitionId, names]);
+    return res.rows as GroupRow[];
   }
 
   async insertGroupMembersAndStandings(
@@ -159,7 +147,7 @@ export class CompetitionRepository {
   ) {
     if (assignments.length === 0) return;
 
-    // group_members
+    // ✅ group_members batch + evita duplicados si se re-intenta
     {
       const values: any[] = [];
       const placeholders: string[] = [];
@@ -172,12 +160,13 @@ export class CompetitionRepository {
 
       const q = `
         INSERT INTO ${this.groupMembersTable} (id_group, id_user, seed)
-        VALUES ${placeholders.join(",")};
+        VALUES ${placeholders.join(",")}
+        ON CONFLICT DO NOTHING;
       `;
       await client.query(q, values);
     }
 
-    // group_standings
+    // ✅ group_standings batch + evita duplicados
     {
       const values: any[] = [];
       const placeholders: string[] = [];
@@ -190,17 +179,26 @@ export class CompetitionRepository {
 
       const q = `
         INSERT INTO ${this.groupStandingsTable} (id_group, id_user)
-        VALUES ${placeholders.join(",")};
+        VALUES ${placeholders.join(",")}
+        ON CONFLICT DO NOTHING;
       `;
       await client.query(q, values);
     }
   }
 
+  // ✅ evita 1 INSERT por match (más rápido). Igual respeta best_of_groups desde DB.
   async createGroupRoundRobinMatches(
     client: PoolClient,
     competitionId: string,
     groups: { id_group: string }[]
   ) {
+    // traemos best_of_groups 1 sola vez
+    const bo = await client.query(
+      `SELECT best_of_groups FROM ${this.competitionsTable} WHERE id_competition = $1 LIMIT 1;`,
+      [competitionId]
+    );
+    const bestOfGroups = bo.rows[0]?.best_of_groups as number | undefined;
+
     for (const g of groups) {
       const usersRes = await client.query(
         `SELECT id_user FROM ${this.groupMembersTable} WHERE id_group = $1 ORDER BY seed ASC`,
@@ -208,20 +206,32 @@ export class CompetitionRepository {
       );
       const users = usersRes.rows.map((r) => r.id_user as string);
 
-      // todos vs todos
+      // genera pares (i<j)
+      const pairs: { p1: string; p2: string }[] = [];
       for (let i = 0; i < users.length; i++) {
         for (let j = i + 1; j < users.length; j++) {
-          const q = `
-            INSERT INTO ${this.matchesTable}
-              (id_competition, stage, id_group, best_of_sets, player1_id, player2_id, status)
-            VALUES
-              ($1, 'group', $2,
-               (SELECT best_of_groups FROM ${this.competitionsTable} WHERE id_competition = $1),
-               $3, $4, 'scheduled');
-          `;
-          await client.query(q, [competitionId, g.id_group, users[i], users[j]]);
+          pairs.push({ p1: users[i], p2: users[j] });
         }
       }
+      if (pairs.length === 0) continue;
+
+      // batch insert
+      const values: any[] = [competitionId, g.id_group, bestOfGroups ?? 3];
+      const placeholders: string[] = [];
+
+      pairs.forEach((pair, idx) => {
+        const base = 3 + idx * 2;
+        placeholders.push(`($1, 'group', $2, $3, $${base + 1}, $${base + 2}, 'scheduled')`);
+        values.push(pair.p1, pair.p2);
+      });
+
+      const q = `
+        INSERT INTO ${this.matchesTable}
+          (id_competition, stage, id_group, best_of_sets, player1_id, player2_id, status)
+        VALUES
+          ${placeholders.join(",")};
+      `;
+      await client.query(q, values);
     }
   }
 
@@ -237,4 +247,45 @@ export class CompetitionRepository {
     `;
     await client.query(q, [status, competitionId]);
   }
+
+  // dentro de CompetitionRepository
+
+async getCompetitionId(client: PoolClient, tournamentId: string, categoryId: string) {
+  const q = `
+    SELECT id_competition
+    FROM category_competitions
+    WHERE id_tournament = $1 AND id_category = $2
+    LIMIT 1;
+  `;
+  const res = await client.query(q, [tournamentId, categoryId]);
+  if (res.rows.length === 0) throw new Error("COMPETITION_NOT_FOUND");
+  return res.rows[0].id_competition as string;
+}
+
+async getGroupsWithPlayers(client: PoolClient, competitionId: string) {
+  const q = `
+    SELECT
+      g.id_group,
+      g.group_name,
+      gm.seed,
+      u.id_user,
+      u.email,
+      COALESCE(u.club_name, 'SIN_CLUB') AS club_name
+    FROM groups g
+    JOIN group_members gm ON gm.id_group = g.id_group
+    JOIN users u ON u.id_user = gm.id_user
+    WHERE g.id_competition = $1
+    ORDER BY g.group_name ASC, gm.seed ASC;
+  `;
+  const res = await client.query(q, [competitionId]);
+  return res.rows as {
+    id_group: string;
+    group_name: string;
+    seed: number;
+    id_user: string;
+    email: string;
+    club_name: string;
+  }[];
+}
+
 }

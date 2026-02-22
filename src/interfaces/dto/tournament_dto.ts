@@ -1,22 +1,34 @@
-// Una categoría de campeonato
-export interface TournamentCategoryDTO {
+export type TournamentCategoryDTO = {
   id_category?: string;
   category_name: string;
-  gender: "male" | "female";
+  gender: "male" | "female" | "mixed";
   inscription_price: number;
-  quotas : number;
-}
+  quotas: number;
+};
 
-// Lo que recibe el backend para crear un campeonato
-export interface TournamentCreateDTO {
-  tournament_name?: string;
-  description?: string;
-  categories: TournamentCategoryDTO[];
-  location?: string;
+export type TournamentCreateDTO = {
+  tournament_name: string;
+  description?: string | null;
+  location?: string | null;
   created_by: string;
-}
 
-// Lo que devuelve el backend (campeonato + categorías)
-export interface ITournament extends TournamentCreateDTO {
+  // ✅ NUEVO (para calendario)
+  event_date: string;          // "YYYY-MM-DD"
+  event_time?: string | null;  // "HH:MM" opcional
+
+  categories?: TournamentCategoryDTO[];
+};
+
+export interface ITournament {
   id_tournament: string;
+  tournament_name: string;
+  description?: string | null;
+  location?: string | null;
+  created_by: string;
+
+  // ✅ NUEVO
+  event_date: string;
+  event_time?: string | null;
+
+  categories: TournamentCategoryDTO[];
 }

@@ -1,19 +1,14 @@
 import { Router } from "express";
-import { EnrollmentController } from "../enrollments/enrollment_controller";
+import { EnrollmentsController } from "../enrollments/enrollments_controller";
+import { EnrollmentsService } from "../enrollments/enrollments_service";
+import { EnrollmentsRepository } from "../enrollments/enrollments_repository";
 
-const router = Router();
-const controller = new EnrollmentController();
+const enrollmentsRouter = Router();
 
-// Inscribirse a una categoría de un torneo
-router.post("/enroll", controller.enroll);
+const repo = new EnrollmentsRepository();
+const service = new EnrollmentsService(repo);
+const controller = new EnrollmentsController(service);
 
-// Cancelar inscripción
-//router.delete("/:id_enrollment", controller.cancel);
+enrollmentsRouter.post("/subscribe", controller.subscribe);
 
-// Ver inscritos de un torneo (admin)
-//router.get("/tournaments/:id_tournament", controller.getByTournament);
-
-// Ver mis inscripciones
-//router.get("/me", controller.getMine);
-
-export default router;
+export default enrollmentsRouter;

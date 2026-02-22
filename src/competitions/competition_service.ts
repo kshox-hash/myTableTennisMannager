@@ -1,8 +1,3 @@
-// src/services/competition_service.ts
-// Caso de uso: generar competencia (groups + group matches) para una categoría.
-// ✅ Sin AuthRepository (mientras no tengas auth/JWT).
-// ✅ No depende de EnrollmentRepository.getActivePlayersForCategory (trae inscritos desde CompetitionRepository).
-
 import DB from "../db/db_configuration";
 import type { PoolClient } from "pg";
 import { CompetitionRepository } from "../competitions/competition_repository";
@@ -10,72 +5,106 @@ import { CompetitionRepository } from "../competitions/competition_repository";
 export type GenerateDTO = {
   tournamentId: string;
   categoryId: string;
-  createdBy?: string; // opcional por ahora (sin auth)
+  createdBy?: string;
+};
+
+type Player = {
+  id_user: string;
+  club_name: string;
+  seed_rank: number;
+};
+
+type Assignment = {
+  id_group: string;
+  id_user: string;
+  seed: number;
 };
 
 export class CompetitionService {
   private repo = new CompetitionRepository();
 
   async generateGroupsAndMatches(dto: GenerateDTO) {
-    const db = new DB();
-    const client = (await db.connect()) as PoolClient;
-
-    try {
-      await client.query("BEGIN");
-
-      // 1) (Opcional) si quieres validar admin por DB aunque no tengas JWT
-      // - si no pasas createdBy, saltamos esta validación
+    return DB.withTransaction(async (client: PoolClient) => {
       await this.assertAdminIfProvided(client, dto.createdBy);
 
-      // 2) lock + validar estado categoría + asegurar competition + no regenerar
-      const competitionId = await this.prepareCompetition(client, dto.tournamentId, dto.categoryId);
+      const competitionId = await this.prepareCompetition(
+        client,
+        dto.tournamentId,
+        dto.categoryId
+      );
 
-      // 3) obtener inscritos activos + congelarlos en competition_players
-      const players = await this.freezePlayers(client, dto.tournamentId, dto.categoryId, competitionId);
+      const players = await this.freezePlayers(
+        client,
+        dto.tournamentId,
+        dto.categoryId,
+        competitionId
+      );
 
-      // 4) crear grupos + miembros + standings
-      const { groups, groupCount } = await this.createGroupsAndMembers(client, competitionId, players);
+      const groupSizes = this.calculateGroupSizes(players.length);
 
-      // 5) crear partidos de grupos (round robin)
-      await this.createGroupMatches(client, competitionId, groups);
+      const groups = await this.repo.createGroups(
+        client,
+        competitionId,
+        groupSizes.length
+      );
 
-      // 6) marcar estados finales
-      await this.finalizeGeneration(client, dto.categoryId, competitionId);
+      const assignments = this.assignPlayers(
+        players,
+        groups.map(g => g.id_group),
+        groupSizes
+      );
 
-      await client.query("COMMIT");
+      await this.repo.insertGroupMembersAndStandings(client, assignments);
+
+      await this.repo.createGroupRoundRobinMatches(
+        client,
+        competitionId,
+        groups
+      );
+
+      await this.repo.setCompetitionStatus(
+        client,
+        competitionId,
+        "generated_groups"
+      );
 
       return {
         ok: true,
         competition_id: competitionId,
-        group_count: groupCount,
-        players: players.length,
+        group_sizes: groupSizes,
       };
-    } catch (e) {
-      await client.query("ROLLBACK");
-      throw e;
-    } finally {
-      client.release?.();
-    }
+    });
   }
 
-  // =========================================================
-  // Helpers (una responsabilidad cada uno)
-  // =========================================================
+  // =========================
+  // DB helpers
+  // =========================
 
   private async assertAdminIfProvided(client: PoolClient, createdBy?: string) {
     if (!createdBy) return;
-    await this.repo.assertUserIsAdmin(client, createdBy); // query JOIN roles/users dentro del repo
+    await this.repo.assertUserIsAdmin(client, createdBy);
   }
 
-  private async prepareCompetition(client: PoolClient, tournamentId: string, categoryId: string): Promise<string> {
-    const cat = await this.repo.getCategoryForUpdate(client, tournamentId, categoryId);
+  private async prepareCompetition(
+    client: PoolClient,
+    tournamentId: string,
+    categoryId: string
+  ): Promise<string> {
+    const cat = await this.repo.getCategoryForUpdate(
+      client,
+      tournamentId,
+      categoryId
+    );
 
-    // puedes ajustar: permitir solo "closed" si quieres ser más estricto
     if (cat.status !== "open" && cat.status !== "closed") {
       throw new Error("CATEGORY_NOT_OPEN");
     }
 
-    const comp = await this.repo.ensureCompetition(client, tournamentId, categoryId);
+    const comp = await this.repo.ensureCompetition(
+      client,
+      tournamentId,
+      categoryId
+    );
 
     const already = await this.repo.hasGroups(client, comp.id_competition);
     if (already) throw new Error("GROUPS_ALREADY_GENERATED");
@@ -88,87 +117,140 @@ export class CompetitionService {
     tournamentId: string,
     categoryId: string,
     competitionId: string
-  ): Promise<{ id_user: string }[]> {
-    // ✅ ahora lo leemos desde enrollments directamente en CompetitionRepository
-    const players = await this.repo.getActivePlayersForCategory(client, tournamentId, categoryId);
+  ): Promise<Player[]> {
+    const rows = await this.repo.getActivePlayersForCategory(
+      client,
+      tournamentId,
+      categoryId
+    );
 
-    if (players.length < 3) throw new Error("NOT_ENOUGH_PLAYERS");
+    if (rows.length < 3) throw new Error("NOT_ENOUGH_PLAYERS");
 
-    await this.repo.insertCompetitionPlayers(client, competitionId, players);
-    return players;
+    await this.repo.insertCompetitionPlayers(
+      client,
+      competitionId,
+      rows.map(r => ({ id_user: r.id_user }))
+    );
+
+    return rows;
   }
 
-  private async createGroupsAndMembers(
-    client: PoolClient,
-    competitionId: string,
-    players: { id_user: string }[]
-  ): Promise<{
-    groupCount: number;
-    groups: { id_group: string; group_name: string }[];
-  }> {
-    const groupCount = this.calculateGroupCount(players.length);
+  // =========================
+  // GROUP SIZE LOGIC (4-3 + 3-2 for 5)
+  // =========================
 
-    const groups = await this.repo.createGroups(client, competitionId, groupCount);
+  private calculateGroupSizes(n: number): number[] {
+    if (n === 3) return [3];
+    if (n === 4) return [4];
+    if (n === 5) return [3, 2];
+    if (n === 6) return [3, 3];
+    if (n === 7) return [4, 3];
+    if (n === 8) return [4, 4];
 
-    const assignments = this.snakeAssign(players, groups);
-
-    await this.repo.insertGroupMembersAndStandings(client, assignments);
-
-    return { groupCount, groups };
-  }
-
-  private async createGroupMatches(
-    client: PoolClient,
-    competitionId: string,
-    groups: { id_group: string }[]
-  ) {
-    await this.repo.createGroupRoundRobinMatches(client, competitionId, groups);
-  }
-
-  private async finalizeGeneration(client: PoolClient, categoryId: string, competitionId: string) {
-    await this.repo.setCompetitionStatus(client, competitionId, "generated_groups");
-    await this.repo.setCategoryStatus(client, categoryId, "generated");
-  }
-
-  // =========================================================
-  // Pure helpers (no DB)
-  // =========================================================
-
-  private calculateGroupCount(n: number): number {
-    if (n <= 4) return 1;
-
-    let g = Math.ceil(n / 4);
     const rem = n % 4;
+    const k = Math.floor(n / 4);
 
-    if (rem === 1) {
-      const g3 = Math.ceil(n / 3);
-      if (g3 >= 2) g = g3;
+    if (rem === 0) return Array(k).fill(4);
+    if (rem === 3) return [...Array(k).fill(4), 3];
+    if (rem === 2) return [...Array(k - 1).fill(4), 3, 3];
+    return [...Array(k - 2).fill(4), 3, 3, 3]; // rem === 1
+  }
+
+  // =========================
+  // ASSIGNMENT
+  // =========================
+
+  private assignPlayers(
+    players: Player[],
+    groupIds: string[],
+    groupSizes: number[]
+  ): Assignment[] {
+    const G = groupIds.length;
+
+    const ordered = [...players].sort(
+      (a, b) => a.seed_rank - b.seed_rank
+    );
+
+    const groupPlayers: Player[][] = Array.from({ length: G }, () => []);
+    const groupClubs: Map<string, number>[] = Array.from(
+      { length: G },
+      () => new Map()
+    );
+
+    const add = (gi: number, p: Player) => {
+      groupPlayers[gi].push(p);
+      groupClubs[gi].set(
+        p.club_name,
+        (groupClubs[gi].get(p.club_name) ?? 0) + 1
+      );
+    };
+
+    const hasClub = (gi: number, club: string) =>
+      (groupClubs[gi].get(club) ?? 0) > 0;
+
+    // Heads (1 por grupo)
+    for (let gi = 0; gi < G; gi++) {
+      if (!ordered[gi]) break;
+      add(gi, ordered[gi]);
     }
 
-    return Math.max(1, g);
-  }
+    const rest = ordered.slice(G);
 
-  private snakeAssign(
-    players: { id_user: string }[],
-    groups: { id_group: string; group_name: string }[]
-  ): { id_group: string; id_user: string; seed: number }[] {
-    const g = groups.length;
-    const assignments: { id_group: string; id_user: string; seed: number }[] = [];
+    for (let i = 0; i < rest.length; i++) {
+      const p = rest[i];
 
-    for (let i = 0; i < players.length; i++) {
-      const pos = (i % g) + 1;
-      const round = Math.floor(i / g);
+      const pos = G + 1 + i;
+      const preferred = this.snakeIndex(pos, G);
 
-      const groupIndex = round % 2 === 0 ? pos : g - pos + 1;
-      const group = groups[groupIndex - 1];
+      const candidates = [
+        preferred,
+        ...Array.from({ length: G }, (_, k) => k).filter(
+          x => x !== preferred
+        ),
+      ];
 
-      assignments.push({
-        id_group: group.id_group,
-        id_user: players[i].id_user,
-        seed: i + 1,
-      });
+      let placed = false;
+
+      // intento sin repetir club
+      for (const gi of candidates) {
+        if (groupPlayers[gi].length >= groupSizes[gi]) continue;
+        if (hasClub(gi, p.club_name)) continue;
+        add(gi, p);
+        placed = true;
+        break;
+      }
+
+      // si no se pudo, forzar por cupo (soft club rule)
+      if (!placed) {
+        for (const gi of candidates) {
+          if (groupPlayers[gi].length >= groupSizes[gi]) continue;
+          add(gi, p);
+          placed = true;
+          break;
+        }
+      }
+
+      if (!placed) throw new Error("GROUP_ASSIGNMENT_ERROR");
+    }
+
+    const assignments: Assignment[] = [];
+
+    for (let gi = 0; gi < G; gi++) {
+      for (let si = 0; si < groupPlayers[gi].length; si++) {
+        assignments.push({
+          id_group: groupIds[gi],
+          id_user: groupPlayers[gi][si].id_user,
+          seed: si + 1,
+        });
+      }
     }
 
     return assignments;
+  }
+
+  private snakeIndex(pos1Based: number, G: number): number {
+    const round = Math.floor((pos1Based - 1) / G);
+    const idx = (pos1Based - 1) % G;
+    return round % 2 === 0 ? idx : G - 1 - idx;
   }
 }

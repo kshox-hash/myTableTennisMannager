@@ -1,7 +1,5 @@
-// src/repositories/tournament_repository.ts
-
+import type { Pool, PoolClient } from "pg";
 import DB from "../db/db_configuration";
-import type { PoolClient } from "pg";
 import type {
   TournamentCreateDTO,
   ITournament,
@@ -9,39 +7,43 @@ import type {
 } from "../interfaces/dto/tournament_dto";
 
 export class TournamentRepository {
+  private pool: Pool;
+
   private tournamentsTable = "tournaments";
   private tournamentCategoriesTable = "tournament_categories";
 
-  // ============================
-  // Helper: insert tournament
-  // ============================
+  constructor(pool?: Pool) {
+    this.pool = pool ?? DB.getPool();
+  }
+
   private async insertTournament(client: PoolClient, payload: TournamentCreateDTO) {
     const query = `
       INSERT INTO ${this.tournamentsTable}
-        (tournament_name, description, location, created_by)
+        (tournament_name, description, location, created_by, event_date, event_time)
       VALUES
-        ($1, $2, $3, $4)
+        ($1, $2, $3, $4, $5::date, $6::time)
       RETURNING *;
     `;
 
     const values = [
-      payload.tournament_name,
-      payload.description,
-      payload.location,
+      payload.tournament_name?.trim(),
+      payload.description ?? null,
+      payload.location ?? null,
       payload.created_by,
+
+      // ✅ NUEVO
+      payload.event_date,
+      payload.event_time ?? null,
     ];
 
     const res = await client.query(query, values);
     return res.rows[0];
   }
 
-  // =================================
-  // Helper: insert tournament categories
-  // =================================
   private async insertCategories(
     client: PoolClient,
     tournament_id: string,
-    categories: TournamentCategoryDTO[]
+    categories?: TournamentCategoryDTO[]
   ) {
     if (!Array.isArray(categories) || categories.length === 0) return [];
 
@@ -56,7 +58,7 @@ export class TournamentRepository {
 
       values.push(
         tournament_id,
-        cat.category_name,
+        cat.category_name.trim(),
         cat.gender,
         cat.inscription_price,
         cat.quotas
@@ -74,21 +76,15 @@ export class TournamentRepository {
     return res.rows;
   }
 
-  // ============================
-  // CREATE
-  // ============================
   async create(payload: TournamentCreateDTO): Promise<ITournament> {
-    const db = new DB();                 // ✅ your DB class is fine
-    const client = (await db.connect()) as PoolClient;
+    const client = await this.pool.connect();
 
     try {
       await client.query("BEGIN");
 
-      // 1) Insert tournament
       const tournamentRow = await this.insertTournament(client, payload);
       const tournament_id: string = tournamentRow.id_tournament;
 
-      // 2) Insert categories
       const categoryRows = await this.insertCategories(
         client,
         tournament_id,
@@ -97,7 +93,6 @@ export class TournamentRepository {
 
       await client.query("COMMIT");
 
-      // Map DB rows -> DTO
       const categoriesDTO: TournamentCategoryDTO[] = categoryRows.map((row: any) => ({
         id_category: row.id_category,
         category_name: row.category_name,
@@ -112,76 +107,97 @@ export class TournamentRepository {
         description: tournamentRow.description,
         location: tournamentRow.location,
         created_by: tournamentRow.created_by,
+
+        // ✅ NUEVO
+        event_date: tournamentRow.event_date?.toString() ?? "",
+        event_time: tournamentRow.event_time ? tournamentRow.event_time.toString() : null,
+
         categories: categoriesDTO,
       };
-    } catch (error) {
+    } catch (error: any) {
       await client.query("ROLLBACK");
-      console.error("[TournamentRepository] Error:", error);
-      throw new Error("Error creating tournament");
-    } 
-  }
 
-  // ============================
-// GET ALL TOURNAMENTS
-// ============================
-async getAll(): Promise<ITournament[]> {
-  const db = new DB();
-  const client = (await db.connect()) as PoolClient;
-
-  try {
-    const query = `
-      SELECT
-        t.id_tournament,
-        t.tournament_name,
-        t.description,
-        t.location,
-        t.created_by,
-
-        c.id_category,
-        c.category_name,
-        c.gender,
-        c.inscription_price,
-        c.quotas
-      FROM ${this.tournamentsTable} t
-      LEFT JOIN ${this.tournamentCategoriesTable} c
-        ON c.id_tournament = t.id_tournament
-      ORDER BY t.created_at DESC;
-    `;
-
-    const res = await client.query(query);
-
-    // ===== Agrupar torneos =====
-    const tournamentsMap = new Map<string, ITournament>();
-
-    for (const row of res.rows) {
-      if (!tournamentsMap.has(row.id_tournament)) {
-        tournamentsMap.set(row.id_tournament, {
-          id_tournament: row.id_tournament,
-          tournament_name: row.tournament_name,
-          description: row.description,
-          location: row.location,
-          created_by: row.created_by,
-          categories: [],
-        });
+      if (error?.code === "23505") {
+        throw new Error("Conflicto: ya existe una categoría igual en este torneo");
       }
 
-      // Si el torneo tiene categorías
-      if (row.id_category) {
-        tournamentsMap.get(row.id_tournament)!.categories.push({
-          id_category: row.id_category,
-          category_name: row.category_name,
-          gender: row.gender,
-          inscription_price: Number(row.inscription_price),
-          quotas: Number(row.quotas),
-        });
-      }
+      console.error("[TournamentRepository.create] Error:", error);
+      throw new Error(error?.message || "Error creating tournament");
+    } finally {
+      client.release();
     }
-
-    return Array.from(tournamentsMap.values());
-  } catch (error) {
-    console.error("[TournamentRepository] Error getAll:", error);
-    throw new Error("Error fetching tournaments");
   }
-}
 
+  async getAll(): Promise<ITournament[]> {
+    const client = await this.pool.connect();
+
+    try {
+      const query = `
+        SELECT
+          t.id_tournament,
+          t.tournament_name,
+          t.description,
+          t.location,
+          t.created_by,
+
+          -- ✅ NUEVO
+          t.event_date,
+          t.event_time,
+
+          t.created_at,
+
+          c.id_category,
+          c.category_name,
+          c.gender,
+          c.inscription_price,
+          c.quotas
+        FROM ${this.tournamentsTable} t
+        LEFT JOIN ${this.tournamentCategoriesTable} c
+          ON c.id_tournament = t.id_tournament
+        ORDER BY
+          t.event_date DESC NULLS LAST,
+          t.created_at DESC,
+          c.category_name ASC,
+          c.gender ASC;
+      `;
+
+      const res = await client.query(query);
+      const map = new Map<string, ITournament>();
+
+      for (const row of res.rows) {
+        if (!map.has(row.id_tournament)) {
+          map.set(row.id_tournament, {
+            id_tournament: row.id_tournament,
+            tournament_name: row.tournament_name,
+            description: row.description,
+            location: row.location,
+            created_by: row.created_by,
+
+            // ✅ NUEVO
+            event_date: row.event_date?.toString() ?? "",
+            event_time: row.event_time ? row.event_time.toString() : null,
+
+            categories: [],
+          });
+        }
+
+        if (row.id_category) {
+          map.get(row.id_tournament)!.categories.push({
+            id_category: row.id_category,
+            category_name: row.category_name,
+            gender: row.gender,
+            inscription_price: Number(row.inscription_price),
+            quotas: Number(row.quotas),
+          });
+        }
+      }
+
+      return Array.from(map.values());
+    } catch (error: any) {
+      console.error("[TournamentRepository.getAll] Error:", error);
+      throw new Error(error?.message || "Error fetching tournaments");
+    } finally {
+      client.release();
+    }
+  }
 }

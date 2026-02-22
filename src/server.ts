@@ -2,8 +2,9 @@
 import express from "express";
 import http from "http";
 
-import config from "./config"
-import router from "./router"
+import config from "./config";
+import router from "./router";
+import "dotenv/config";
 
 class Server {
     private app : express.Express;
@@ -19,7 +20,7 @@ class Server {
         config(this.app);
         router(this.app);
 
-        this.service! = this.app.listen(this.PORT, () => {
+        this.service! = this.app.listen(this.PORT,"0.0.0.0", () => {
             console.log("server up")
         })
 
