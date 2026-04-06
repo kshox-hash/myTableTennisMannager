@@ -1,25 +1,18 @@
 import type { Express } from "express";
-import tournamentRouter from "./routes/tournament_router";
-import enrollmentsRouter from "./routes/enrollments_router";
-import authRouter from "./routes/auth_router";
-import userRouter from "./routes/user_router";
+
+import enrollmentsRouter from "./enrollment/router/enrollment_router";
+//AUTH
+import authRouter from "./auth/router/auth_router"
 import calendarRouter from "./routes/calendar_router";
-import locationsRoutes from "./routes/locations_routes";
-
-
-
-
+//TOURNAMENT
+import tournamentRouter from "./tournament/router/tournament_router";
 const path = "api";
 const version = "v1";
 
 export default function registerRoutes(app: Express) {
-  //  Auth (login/register)
+  //AUTH
   app.use(`/${path}/${version}/auth`, authRouter);
-
-  // perfil 
-  app.use(`/${path}/${version}/users`, userRouter);
-
-  // Torneos
+  //TOURNAMENTS
   app.use(`/${path}/${version}/tournament`, tournamentRouter);
 
   // Inscripciones
@@ -28,6 +21,5 @@ export default function registerRoutes(app: Express) {
   // Calendario 
   app.use(`/${path}/${version}/calendar`, calendarRouter);
   
-  //lcoatioons
-  app.use("/api/locations", locationsRoutes);
+
 }

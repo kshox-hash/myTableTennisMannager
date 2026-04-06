@@ -1,6 +1,7 @@
 import express from "express";
 import helmet  from "helmet";
 import cors from "cors";
+import { errorMiddleware } from "./middlewares/error_middleware";
 
 export default (app : express.Express) => {
     app.disable("x-powerded-by");
@@ -10,5 +11,6 @@ export default (app : express.Express) => {
 
     app.use(cors());
     app.use(helmet());
+    app.use(errorMiddleware);
 
 }

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { authRequired } from "../middlewares/auth_required";
+import { authRequired } from "../middlewares/auth_required_middleware";
 import { CalendarRepository } from "../calendar/calendar_repository";
 import { CalendarService } from "../calendar/calendar_service";
 import { CalendarController } from "../calendar/calendar_controller";

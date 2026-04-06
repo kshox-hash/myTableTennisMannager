@@ -1,94 +1,64 @@
-import bcrypt from "bcrypt";
-import { z } from "zod";
-import jwt, { type Secret, type SignOptions } from "jsonwebtoken";
-
-import type { RegisterDTO, LoginDTO, RoleName } from "../interfaces/dto/auth_dto";
+import { ERRORS, type AuthError, type AuthSuccess } from "../auth/dto/auth_dto";
 import { AuthRepository } from "./auth_repository";
-
-const registerSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(6),
-  role: z.enum(["admin", "player"]).optional(),
-});
-
-const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(1),
-});
+import type { SignInDTO, SignUpDTO } from "./schema/auth_schema";
+import { Result, ok, fail } from "../core/constants/result";
+import { hashPassword, comparePassword } from "../bcrypt/bcrypt";
+import { signToken } from "../jwt/jwt";
 
 export class AuthService {
   constructor(private repo: AuthRepository) {}
-private signToken(payload: { id_user: string; role: RoleName }) {
-  const secret = process.env.JWT_SECRET;
 
-  if (!secret) {
-    throw new Error("JWT_SECRET_MISSING");
-  }
+  async register(input: SignUpDTO): Promise<Result<AuthSuccess, AuthError>> {
+    const existing = await this.repo.findUserByEmail(input.email);
 
-  const options: SignOptions = {
-    expiresIn: (process.env.JWT_EXPIRES_IN ?? "7d") as any,
-  };
+    if (existing) {
+      return fail<AuthError>(ERRORS.EMAIL_ALREADY_EXISTS);
+    }
 
-  return jwt.sign(payload, secret as Secret, options);
-}
+    const password_hash = await hashPassword(input.password);
 
-  async register(input: RegisterDTO) {
-    const data = registerSchema.parse(input);
+    const userCreated = await this.repo.createUser({
+      email: input.email,
+      password_hash,
+    });
 
-    // ✅ en PROD: fuerza player
-    const role: RoleName = data.role ?? "player";
+    const token = signToken({ id_user: userCreated.id_user });
 
-    const email = data.email.trim().toLowerCase();
-
-    const existing = await this.repo.findUserByEmail(email);
-    if (existing) throw new Error("EMAIL_ALREADY_EXISTS");
-
-    const id_role = await this.repo.findRoleIdByName(role);
-
-    const password_hash = await bcrypt.hash(data.password, 10);
-
-    const userRow = await this.repo.createUser({ email, password_hash, id_role });
-
-    const token = this.signToken({ id_user: userRow.id_user, role });
-
-    return {
+    return ok<AuthSuccess>({
       token,
       user: {
-        id_user: userRow.id_user,
-        email: userRow.email,
-        role,
+        id_user: userCreated.id_user,
+        email: userCreated.email,
+        role: "player",
       },
-    };
+    });
   }
 
-  async login(input: LoginDTO) {
-    const data = loginSchema.parse(input);
+  async login(input: SignInDTO): Promise<Result<AuthSuccess, AuthError>> {
+    const user = await this.repo.findUserByEmail(input.email);
 
-    const email = data.email.trim().toLowerCase();
+    if (!user) {
+      return fail<AuthError>(ERRORS.INVALID_CREDENTIALS);
+    }
 
-    const user = await this.repo.findUserByEmail(email);
-    if (!user) throw new Error("INVALID_CREDENTIALS");
+    const isPasswordValid = await comparePassword(
+      input.password,
+      user.password_hash
+    );
 
-    const ok = await bcrypt.compare(data.password, user.password_hash);
-    if (!ok) throw new Error("INVALID_CREDENTIALS");
+    if (!isPasswordValid) {
+      return fail<AuthError>(ERRORS.INVALID_CREDENTIALS);
+    }
 
-    const role = (user.role as string).toLowerCase() as RoleName;
+    const token = signToken({ id_user: user.id_user });
 
-    const token = this.signToken({ id_user: user.id_user, role });
-
-    return {
+    return ok<AuthSuccess>({
       token,
       user: {
         id_user: user.id_user,
         email: user.email,
-        role,
+        role: user.role,
       },
-    };
-  }
-
-  async me(id_user: string) {
-    // si quieres, puedes traer más data por id_user.
-    // por ahora basta con el token payload y/o buscar por email.
-    return { id_user };
+    });
   }
 }

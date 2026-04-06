@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { authRequired } from "../middlewares/auth_required";
+import { authRequired } from "../middlewares/auth_required_middleware";
 import { UserRepository } from "../users/user_repository";
 import { UserService } from "../users/user_service";
 import { UserController } from "../users/user_controller";
