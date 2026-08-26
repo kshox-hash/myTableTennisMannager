@@ -7,7 +7,7 @@ import { validateBody } from "../../middlewares/validate_body_middleware";
 import { asyncHandler } from "../../middlewares/wrap_async_middleware";
 import { authRequired } from "../../middlewares/auth_required_middleware";
 
-import { enrollmentSchema } from "../schema/enrollent_schema";
+import { enrollmentSchema } from "../schema/enrollment_schema";
 
 const enrollmentsRouter = Router();
 

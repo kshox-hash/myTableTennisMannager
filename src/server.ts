@@ -4,18 +4,20 @@ import http from "http";
 
 import config from "./config";
 import router from "./router";
+import { runMigrations } from "./db/run_migrations";
 import "dotenv/config";
 
 class Server {
     private app : express.Express;
     private service! : http.Server;
-    private PORT : number = 3000
+    private PORT : number = parseInt(process.env.PORT ?? "3000", 10)
 
     constructor( ){
         this.app = express()
     }
 
     async start(){
+        await runMigrations();
 
         config(this.app);
         router(this.app);

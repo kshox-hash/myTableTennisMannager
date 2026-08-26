@@ -1,6 +1,7 @@
 export const ERRORS = {
   EMAIL_ALREADY_EXISTS: "EMAIL_ALREADY_EXISTS",
   INVALID_CREDENTIALS: "INVALID_CREDENTIALS",
+  INVALID_ADMIN_SECRET: "INVALID_ADMIN_SECRET",
 } as const;
 
 export type AuthError = typeof ERRORS[keyof typeof ERRORS];
@@ -19,6 +20,15 @@ export type AuthSuccess = {
 export type CreateUserInput = {
   email: string;
   password_hash: string;
+  id_role?: string;
+  first_name?: string;
+  last_name?: string;
+  gender?: "male" | "female" | "other";
+  club_name?: string;
+  birth_date?: string;
+  country?: string;
+  id_document?: string;
+  category?: string;
 };
 
 export type UserCreatedDB = {

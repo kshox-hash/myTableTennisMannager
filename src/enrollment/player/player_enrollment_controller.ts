@@ -6,17 +6,57 @@ export class EnrollmentsController {
 
   subscribe = async (req: Request, res: Response) => {
     try {
-      const data = await this.service.enRoll(req.body);
+      // id_user viene del token (authRequired garantiza que req.user existe)
+      const data = await this.service.enRoll(req.user!.id_user, req.body);
 
-      return res.status(201).json({
-        ok: true,
-        data,
-      });
+      return res.status(201).json({ ok: true, data });
     } catch (error: any) {
       if (error?.message === "CONFLICT_ALREADY_ENROLLED") {
         return res.status(409).json({
           ok: false,
           message: "Ya estás inscrito en esta categoría",
+        });
+      }
+
+      if (error?.message === "QUOTA_EXCEEDED") {
+        return res.status(409).json({
+          ok: false,
+          message: "Esta categoría ya no tiene cupos disponibles",
+        });
+      }
+
+      if (error?.message === "TOURNAMENT_CANCELLED") {
+        return res.status(409).json({
+          ok: false,
+          message: "Este campeonato fue cancelado por el organizador",
+        });
+      }
+
+      if (error?.message === "CATEGORY_NOT_OPEN") {
+        return res.status(409).json({
+          ok: false,
+          message: "Esta categoría no está abierta para inscripciones",
+        });
+      }
+
+      if (error?.message === "CATEGORY_ALREADY_STARTED") {
+        return res.status(409).json({
+          ok: false,
+          message: "Esta categoría ya arrancó (grupos o llave en curso): no se puede inscribir",
+        });
+      }
+
+      if (error?.message === "GENDER_REQUIRED") {
+        return res.status(409).json({
+          ok: false,
+          message: "Completá tu género en tu perfil para poder inscribirte en esta categoría",
+        });
+      }
+
+      if (error?.message === "GENDER_MISMATCH") {
+        return res.status(409).json({
+          ok: false,
+          message: "Esta categoría no es de tu género",
         });
       }
 

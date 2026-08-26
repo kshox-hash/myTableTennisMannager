@@ -16,6 +16,13 @@ export class AuthController {
         });
       }
 
+      if (result.error === ERRORS.INVALID_ADMIN_SECRET) {
+        return res.status(403).json({
+          ok: false,
+          message: "Código de administrador inválido",
+        });
+      }
+
       return res.status(400).json({
         ok: false,
         message: result.error,

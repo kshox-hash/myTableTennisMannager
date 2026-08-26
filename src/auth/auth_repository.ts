@@ -18,21 +18,53 @@ export class AuthRepository {
     this.pool = pool ?? DB.getPool();
   }
 
+  private async findOrCreateClub(clubName: string): Promise<string> {
+    const existing = await this.pool.query<{ id_club: string }>(
+      `SELECT id_club FROM clubs WHERE LOWER(name) = LOWER($1) LIMIT 1`,
+      [clubName]
+    );
+    if (existing.rows[0]) return existing.rows[0].id_club;
+
+    const created = await this.pool.query<{ id_club: string }>(
+      `INSERT INTO clubs (name) VALUES ($1) RETURNING id_club`,
+      [clubName]
+    );
+    return created.rows[0].id_club;
+  }
+
   async createUser(params: CreateUserInput): Promise<UserCreatedDB> {
+    const idClub = params.club_name ? await this.findOrCreateClub(params.club_name) : null;
+
     const query = `
       INSERT INTO ${this.usersTable} (
         email,
         password_hash,
-        id_role
+        id_role,
+        first_name,
+        last_name,
+        gender,
+        id_club,
+        birth_date,
+        country,
+        id_document,
+        category
       )
-      VALUES ($1, $2, $3)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       RETURNING id_user, email, created_at;
     `;
 
     const values = [
       params.email,
       params.password_hash,
-      ROLE_IDS.player,
+      params.id_role ?? ROLE_IDS.player,
+      params.first_name ?? null,
+      params.last_name ?? null,
+      params.gender ?? null,
+      idClub,
+      params.birth_date ?? null,
+      params.country ?? null,
+      params.id_document ?? null,
+      params.category ?? null,
     ];
 
     const res = await this.pool.query<UserCreatedDB>(query, values);

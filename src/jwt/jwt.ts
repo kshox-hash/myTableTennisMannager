@@ -1,6 +1,6 @@
 import jwt, { type Secret, type SignOptions } from "jsonwebtoken";
 
-export function signToken(payload: { id_user: string; }) {
+export function signToken(payload: { id_user: string; role: string }) {
   const secret = process.env.JWT_SECRET;
 
   if (!secret) {

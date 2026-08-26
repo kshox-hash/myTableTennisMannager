@@ -34,6 +34,9 @@ export type GeneratedGroupMember = {
   id_user: string;
   seed: number | null;
   assignment_type: AssignmentType;
+  // Puesto del jugador DENTRO del grupo (1, 2, 3...) — mismo orden que usa
+  // generateRoundRobinMatches para armar los partidos, no la semilla global.
+  group_position: number;
 };
 
 export type GeneratedStanding = {
@@ -42,9 +45,10 @@ export type GeneratedStanding = {
   played: number;
   won: number;
   lost: number;
-  points: number;
   sets_for: number;
   sets_against: number;
+  points_for: number;
+  points_against: number;
   position: number | null;
   qualified_to_bracket: boolean;
   qualification_label: "first" | "second" | null;
@@ -96,16 +100,7 @@ function normalizeClubName(clubName: string | null): string | null {
 }
 
 function buildGroupName(index: number): string {
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-
-  if (index < alphabet.length) {
-    return alphabet[index];
-  }
-
-  const first = Math.floor(index / alphabet.length) - 1;
-  const second = index % alphabet.length;
-
-  return `${alphabet[first]}${alphabet[second]}`;
+  return `GR-${index + 1}`;
 }
 
 function buildTempGroupId(index: number): string {
@@ -117,11 +112,15 @@ function buildTempMatchId(groupIndex: number, matchIndex: number): string {
 }
 
 /**
- * Regla base acordada:
+ * Regla base acordada (spec "Proyecto de Sistema de Torneos TDM", Punto 2):
  * - grupos idealmente de 3
- * - si sobra 1 => un grupo de 4
- * - si sobran 2 => un grupo de 2
+ * - si sobra 1 => el ÚLTIMO grupo pasa a 4
+ * - si sobran 2 => los ÚLTIMOS DOS grupos pasan a 4 cada uno
  * - si sobran 0 => todos de 3
+ *
+ * Excepción: con un solo grupo base (3 jugadores) y resto 2 (total 5), no
+ * hay "últimos dos grupos" para agrandar — ahí se arma un segundo grupo de 2
+ * en vez de estirar el único grupo a 5 (viola el máximo de 4 por grupo).
  *
  * Casos mínimos:
  * - 2 jugadores => [2]
@@ -144,13 +143,19 @@ export function calculateGroupPlan(totalPlayers: number): Array<2 | 3 | 4> {
     return Array(baseGroups).fill(3) as Array<2 | 3 | 4>;
   }
 
+  const groups = Array(baseGroups).fill(3) as Array<2 | 3 | 4>;
+
   if (remainder === 1) {
-    const groups = Array(baseGroups).fill(3) as Array<2 | 3 | 4>;
-    groups[0] = 4;
+    groups[groups.length - 1] = 4;
     return groups;
   }
 
-  const groups = Array(baseGroups).fill(3) as Array<2 | 3 | 4>;
+  // remainder === 2
+  if (baseGroups >= 2) {
+    groups[groups.length - 1] = 4;
+    groups[groups.length - 2] = 4;
+    return groups;
+  }
   groups.push(2);
   return groups;
 }
@@ -195,7 +200,7 @@ export function sortPlayersForGrouping(
 
 /**
  * Serpentina clásica:
- * grupos A..J y luego J..A, y así sucesivamente.
+ * grupos GR-1..GR-4 y luego GR-4..GR-1, y así sucesivamente.
  *
  * Ejemplo con 4 grupos y 10 jugadores:
  * [0,1,2,3,3,2,1,0,0,1]
@@ -352,8 +357,12 @@ export function generateRoundRobinMatches(
   const matches: GeneratedMatch[] = [];
   let matchNumber = 1;
 
+  // Orden de papeleta: el jugador 1 juega primero contra el último del
+  // grupo y va bajando (1vN, 1v(N-1), ..., 1v2), luego el 2 contra los que
+  // quedan de mayor a menor, y así — no el orden lexicográfico simple
+  // (1v2, 1v3, ..., 2v3) que daría el loop ascendente de siempre.
   for (let i = 0; i < group.players.length; i++) {
-    for (let j = i + 1; j < group.players.length; j++) {
+    for (let j = group.players.length - 1; j > i; j--) {
       matches.push({
         temp_match_id: buildTempMatchId(groupIndex, matchNumber - 1),
         temp_group_id: group.temp_group_id,
@@ -375,12 +384,16 @@ export function generateRoundRobinMatches(
   return matches;
 }
 
-function buildMembers(group: InternalGroupBucket): GeneratedGroupMember[] {
-  return group.players.map((player) => ({
+function buildMembers(
+  group: InternalGroupBucket,
+  assignmentType: AssignmentType = "auto"
+): GeneratedGroupMember[] {
+  return group.players.map((player, index) => ({
     temp_group_id: group.temp_group_id,
     id_user: player.id_user,
     seed: player.seed_number ?? null,
-    assignment_type: "auto",
+    assignment_type: assignmentType,
+    group_position: index + 1,
   }));
 }
 
@@ -391,9 +404,10 @@ function buildStandings(group: InternalGroupBucket): GeneratedStanding[] {
     played: 0,
     won: 0,
     lost: 0,
-    points: 0,
     sets_for: 0,
     sets_against: 0,
+    points_for: 0,
+    points_against: 0,
     position: null,
     qualified_to_bracket: false,
     qualification_label: null,
@@ -443,5 +457,50 @@ export function generateGroupsFromPlayers(
     members,
     standings,
     matches,
+  };
+}
+
+/**
+ * Igual que generateGroupsFromPlayers, pero la composición de cada grupo la
+ * define el admin (no el algoritmo de ranking/serpentina) — para corregir a
+ * mano un armado que no quedó como se esperaba, o replicar un sorteo hecho
+ * por fuera del sistema. Cada sub-array de `groups` es un grupo completo, en
+ * el orden en que se van a nombrar (GR-1, GR-2, GR-3...).
+ */
+export function buildManualGroups(
+  groups: CompetitionPlayerInput[][],
+  bestOfSets: 3 | 5 | 7 = 3
+): GeneratedGroupsResult {
+  if (!Array.isArray(groups) || groups.length === 0) {
+    throw new Error("Se requiere al menos un grupo");
+  }
+  for (const players of groups) {
+    if (players.length < 2 || players.length > 4) {
+      throw new Error("Cada grupo debe tener entre 2 y 4 jugadores");
+    }
+  }
+
+  const buckets: InternalGroupBucket[] = groups.map((players, index) => ({
+    temp_group_id: buildTempGroupId(index),
+    group_name: buildGroupName(index),
+    target_size: players.length as 2 | 3 | 4,
+    sort_order: index + 1,
+    status: "draft",
+    group_kind: players.length === 2 ? "playoff_two" : "normal",
+    players,
+  }));
+
+  return {
+    groups: buckets.map((group) => ({
+      temp_group_id: group.temp_group_id,
+      group_name: group.group_name,
+      target_size: group.target_size,
+      sort_order: group.sort_order,
+      status: group.status,
+      group_kind: group.group_kind,
+    })),
+    members: buckets.flatMap((group) => buildMembers(group, "manual")),
+    standings: buckets.flatMap((group) => buildStandings(group)),
+    matches: buckets.flatMap((group, index) => generateRoundRobinMatches(group, index, bestOfSets)),
   };
 }

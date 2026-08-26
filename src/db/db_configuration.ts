@@ -14,7 +14,10 @@ export default class DB {
         user: process.env.PGUSER ?? "postgres",
         password: process.env.PGPASSWORD ?? "123",
         database: process.env.PGDATABASE ?? "myttm",
-        max: 10,
+        // Techo de conexiones simultáneas a Postgres — debe quedar por debajo
+        // del max_connections del plan de DB contratado (con margen para
+        // otros clientes: migraciones, psql manual, etc.).
+        max: Number(process.env.PG_POOL_MAX ?? 40),
         idleTimeoutMillis: 30_000,
         connectionTimeoutMillis: 5_000,
       });

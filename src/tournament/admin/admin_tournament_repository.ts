@@ -1,14 +1,20 @@
 import type { Pool, PoolClient, QueryResult } from "pg";
 import DB from "../../db/db_configuration";
+import { NotificationsRepository } from "../../notifications/notifications_repository";
+import { ActivityLogRepository, type ActivityLogRow } from "../../activity/activity_log_repository";
 
 import type {
   TournamentCreateDTO,
+  TournamentUpdateDTO,
   ITournament,
   TournamentCategoryDTO,
   AdminTournamentRow,
   EnrollmentRow,
   AdminCategoryRow,
   AdminCategoryPlayerRow,
+  AdminAddPlayerInput,
+  AdminAddPlayerResult,
+  PaginatedTournamentResult,
 } from "../dto/tournament_dto";
 
 type TournamentRow = {
@@ -23,6 +29,7 @@ type TournamentRow = {
   event_date: string | Date | null;
   event_time: string | null;
   created_at?: string | Date | null;
+  status?: "active" | "cancelled";
 };
 
 type CategoryRow = {
@@ -34,6 +41,7 @@ type CategoryRow = {
   inscription_price: number | string;
   quotas: number | string | null;
   status: string;
+  qualifiers_per_group: number | string;
   created_at?: string | Date | null;
 };
 
@@ -57,10 +65,15 @@ type TournamentWithCategoryRow = {
   inscription_price: number | string | null;
   quotas: number | string | null;
   status: string | null;
+  phase: string | null;
+  enrolled_count?: number | string | null;
+  is_enrolled?: boolean | null;
 };
 
 export class AdminTournamentRepository {
   private pool: Pool;
+  private notifications: NotificationsRepository;
+  private activityLog: ActivityLogRepository;
 
   private tournamentsTable = "tournaments";
   private enrollmentsTable = "enrollments";
@@ -70,6 +83,8 @@ export class AdminTournamentRepository {
 
   constructor(pool?: Pool) {
     this.pool = pool ?? DB.getPool();
+    this.notifications = new NotificationsRepository(this.pool);
+    this.activityLog = new ActivityLogRepository(this.pool);
   }
 
   // -----------------------
@@ -104,6 +119,23 @@ export class AdminTournamentRepository {
     }
   }
 
+  // Dueño del torneo O coorganizador invitado — mismo criterio para editar y
+  // cancelar. Invitar/sacar coorganizadores en sí queda restringido a solo el
+  // dueño (ver tournament_organizers_repository.ts).
+  private async isOwnerOrOrganizer(
+    client: Pool | PoolClient,
+    idTournament: string,
+    userId: string,
+    createdBy: string
+  ): Promise<boolean> {
+    if (createdBy === userId) return true;
+    const res = await client.query(
+      `SELECT 1 FROM tournament_organizers WHERE id_tournament = $1 AND id_user = $2`,
+      [idTournament, userId]
+    );
+    return (res.rowCount ?? 0) > 0;
+  }
+
   private formatDate(value: string | Date | null | undefined): string {
     if (!value) return "";
     if (value instanceof Date) return value.toISOString().slice(0, 10);
@@ -124,6 +156,7 @@ export class AdminTournamentRepository {
       inscription_price: Number(row.inscription_price),
       quotas: row.quotas === null ? null : Number(row.quotas),
       status: row.status,
+      qualifiers_per_group: Number(row.qualifiers_per_group ?? 2),
     };
   }
 
@@ -172,9 +205,10 @@ export class AdminTournamentRepository {
       allow_olympic: row.allow_olympic,
       address: row.address ?? null,
       region: row.region ?? null,
-      event_date: row.event_date ? row.event_date.toString() : null,
-      event_time: row.event_time ? row.event_time.toString() : null,
+      event_date: row.event_date ? this.formatDate(row.event_date) : null,
+      event_time: row.event_time ? this.formatTime(row.event_time) : null,
       created_at: row.created_at ? row.created_at.toString() : "",
+      status: row.status ?? "active",
     };
   }
 
@@ -196,6 +230,7 @@ export class AdminTournamentRepository {
       inscription_price: Number(row.inscription_price),
       quotas: row.quotas === null ? null : Number(row.quotas),
       enrolled_count: Number(row.enrolled_count),
+      qualifiers_per_group: Number(row.qualifiers_per_group ?? 2),
     };
   }
 
@@ -265,10 +300,10 @@ export class AdminTournamentRepository {
     const placeholders: string[] = [];
 
     categories.forEach((cat, index) => {
-      const base = index * 7;
+      const base = index * 8;
 
       placeholders.push(
-        `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7})`
+        `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8})`
       );
 
       values.push(
@@ -278,7 +313,8 @@ export class AdminTournamentRepository {
         cat.gender,
         cat.inscription_price,
         cat.quotas ?? null,
-        cat.status ?? "active"
+        cat.status ?? "active",
+        cat.qualifiers_per_group ?? 2
       );
     });
 
@@ -291,7 +327,8 @@ export class AdminTournamentRepository {
           gender,
           inscription_price,
           quotas,
-          status
+          status,
+          qualifiers_per_group
         )
       VALUES ${placeholders.join(",")}
       RETURNING *;
@@ -328,85 +365,281 @@ export class AdminTournamentRepository {
   }
 
   // -----------------------
-  // LIST TOURNAMENTS
+  // ADMIN: UPDATE TOURNAMENT (solo el organizador; categorías con inscritos son inmutables)
   // -----------------------
-  async findAll(filters?: { q?: string; region?: string }): Promise<ITournament[]> {
+  async updateTournament(
+    tournamentId: string,
+    requestedBy: string,
+    payload: TournamentUpdateDTO
+  ): Promise<{
+    tournament: ITournament | null;
+    error?: "TOURNAMENT_NOT_FOUND" | "NOT_TOURNAMENT_OWNER" | "TOURNAMENT_ALREADY_CANCELLED";
+  }> {
     const client = await this.pool.connect();
 
     try {
-      const where: string[] = [];
-      const values: string[] = [];
+      await client.query("BEGIN");
+
+      const tRes = await client.query<{ created_by: string; status: string }>(
+        `SELECT created_by, status FROM ${this.tournamentsTable} WHERE id_tournament = $1 FOR UPDATE`,
+        [tournamentId]
+      );
+      const t = tRes.rows[0];
+
+      if (!t) {
+        await client.query("ROLLBACK");
+        return { tournament: null, error: "TOURNAMENT_NOT_FOUND" };
+      }
+      if (!(await this.isOwnerOrOrganizer(client, tournamentId, requestedBy, t.created_by))) {
+        await client.query("ROLLBACK");
+        return { tournament: null, error: "NOT_TOURNAMENT_OWNER" };
+      }
+      if (t.status === "cancelled") {
+        await client.query("ROLLBACK");
+        return { tournament: null, error: "TOURNAMENT_ALREADY_CANCELLED" };
+      }
+
+      const fields: string[] = [];
+      const values: Array<string | null> = [];
       let i = 1;
 
-      const q = (filters?.q ?? "").trim();
-      const region = (filters?.region ?? "").trim();
-
-      if (region) {
-        where.push(`t.region = $${i++}`);
-        values.push(region);
+      if (payload.tournament_name !== undefined) {
+        fields.push(`tournament_name = $${i++}`);
+        values.push(payload.tournament_name.trim());
+      }
+      if (payload.description !== undefined) {
+        fields.push(`description = $${i++}`);
+        values.push(payload.description);
+      }
+      if (payload.address !== undefined) {
+        fields.push(`address = $${i++}`);
+        values.push(payload.address);
+      }
+      if (payload.region !== undefined) {
+        fields.push(`region = $${i++}`);
+        values.push(payload.region);
+      }
+      if (payload.event_date !== undefined) {
+        fields.push(`event_date = $${i++}::date`);
+        values.push(payload.event_date);
+      }
+      if (payload.event_time !== undefined) {
+        fields.push(`event_time = $${i++}::time`);
+        values.push(payload.event_time);
       }
 
-      if (q) {
-        where.push(`
-          (
-            t.tournament_name ILIKE $${i}
-            OR COALESCE(t.region, '') ILIKE $${i}
-            OR COALESCE(t.address, '') ILIKE $${i}
-            OR COALESCE(c.category_type, '') ILIKE $${i}
-            OR COALESCE(c.category_range, '') ILIKE $${i}
-          )
-        `);
-        values.push(`%${q}%`);
-        i++;
+      if (fields.length > 0) {
+        values.push(tournamentId);
+        await client.query(
+          `UPDATE ${this.tournamentsTable} SET ${fields.join(", ")} WHERE id_tournament = $${i}`,
+          values
+        );
       }
 
-      const query = `
-        SELECT
-          t.id_tournament,
-          t.tournament_name,
-          t.description,
-          t.created_by,
-          t.allow_mixed,
-          t.allow_olympic,
-          t.address,
-          t.region,
-          t.event_date,
-          t.event_time,
-          t.created_at,
+      if (payload.categories) {
+        await this.syncCategories(client, tournamentId, payload.categories);
+      }
 
-          c.id_category,
-          c.category_type,
-          c.category_range,
-          c.gender,
-          c.inscription_price,
-          c.quotas,
-          c.status
-        FROM ${this.tournamentsTable} t
-        LEFT JOIN ${this.tournamentCategoriesTable} c
-          ON c.id_tournament = t.id_tournament
-        ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
-        ORDER BY
-          t.event_date DESC NULLS LAST,
-          t.created_at DESC,
-          c.category_type ASC,
-          c.category_range ASC,
-          c.gender ASC;
-      `;
-
-      const res: QueryResult<TournamentWithCategoryRow> = await client.query(
-        query,
-        values
+      const tournamentRes = await client.query<TournamentRow>(
+        `SELECT * FROM ${this.tournamentsTable} WHERE id_tournament = $1`,
+        [tournamentId]
+      );
+      const categoryRes = await client.query<CategoryRow>(
+        `SELECT * FROM ${this.tournamentCategoriesTable}
+         WHERE id_tournament = $1
+         ORDER BY category_type ASC, category_range ASC, gender ASC`,
+        [tournamentId]
       );
 
+      await this.activityLog.record(tournamentId, requestedBy, "tournament_updated", null, client);
+
+      await client.query("COMMIT");
+
+      return {
+        tournament: this.mapTournamentRowToITournament(tournamentRes.rows[0], categoryRes.rows),
+      };
+    } catch (error: any) {
+      await this.safeRollback(client);
+
+      if (error?.code === "23505") {
+        throw new Error("CATEGORY_DUPLICATE");
+      }
+
+      console.error("[AdminTournamentRepository.updateTournament] Error:", error);
+      throw new Error(error?.message || "UPDATE_TOURNAMENT_FAILED");
+    } finally {
+      client.release();
+    }
+  }
+
+  // Categorías con inscritos activos son inmutables: se actualizan/insertan/eliminan
+  // únicamente las que no tienen inscripciones.
+  private async syncCategories(
+    client: PoolClient,
+    tournamentId: string,
+    categories: TournamentCategoryDTO[]
+  ): Promise<void> {
+    const existingRes = await client.query<CategoryRow & { enrolled_count: number }>(
+      `SELECT c.*, COUNT(e.id_enrollment) FILTER (WHERE e.status = 'active')::int AS enrolled_count
+       FROM ${this.tournamentCategoriesTable} c
+       LEFT JOIN ${this.enrollmentsTable} e
+         ON e.id_category = c.id_category AND e.id_tournament = c.id_tournament
+       WHERE c.id_tournament = $1
+       GROUP BY c.id_category`,
+      [tournamentId]
+    );
+    const existingById = new Map(existingRes.rows.map((row) => [row.id_category, row]));
+    const incomingIds = new Set(
+      categories.filter((c) => c.id_category).map((c) => c.id_category as string)
+    );
+
+    for (const cat of categories) {
+      const existing = cat.id_category ? existingById.get(cat.id_category) : undefined;
+
+      if (existing) {
+        if (Number(existing.enrolled_count) > 0) continue; // categoría con inscritos: inmutable
+
+        await client.query(
+          `UPDATE ${this.tournamentCategoriesTable}
+             SET category_type = $1, category_range = $2, gender = $3,
+                 inscription_price = $4, quotas = $5, qualifiers_per_group = $6
+           WHERE id_category = $7`,
+          [
+            cat.category_type.trim(),
+            cat.category_range.trim(),
+            cat.gender,
+            cat.inscription_price,
+            cat.quotas ?? null,
+            cat.qualifiers_per_group ?? 2,
+            cat.id_category,
+          ]
+        );
+      } else {
+        await client.query(
+          `INSERT INTO ${this.tournamentCategoriesTable}
+             (id_tournament, category_type, category_range, gender, inscription_price, quotas, status, qualifiers_per_group)
+           VALUES ($1, $2, $3, $4, $5, $6, 'active', $7)`,
+          [
+            tournamentId,
+            cat.category_type.trim(),
+            cat.category_range.trim(),
+            cat.gender,
+            cat.inscription_price,
+            cat.quotas ?? null,
+            cat.qualifiers_per_group ?? 2,
+          ]
+        );
+      }
+    }
+
+    for (const existing of existingRes.rows) {
+      if (!incomingIds.has(existing.id_category) && Number(existing.enrolled_count) === 0) {
+        await client.query(
+          `DELETE FROM ${this.tournamentCategoriesTable} WHERE id_category = $1`,
+          [existing.id_category]
+        );
+      }
+    }
+  }
+
+  // -----------------------
+  // LIST TOURNAMENTS (paginado)
+  // -----------------------
+  async findAll(
+    filters?: { q?: string; region?: string },
+    pagination?: { page: number; limit: number },
+    userId?: string
+  ): Promise<PaginatedTournamentResult> {
+    const page  = Math.max(1, pagination?.page  ?? 1);
+    const limit = Math.min(100, Math.max(1, pagination?.limit ?? 20));
+    const offset = (page - 1) * limit;
+
+    const where: string[] = ["t.status = 'active'"];
+    const values: (string | number)[] = [];
+    let i = 1;
+
+    const q      = (filters?.q      ?? "").trim();
+    const region = (filters?.region ?? "").trim();
+
+    if (region) {
+      where.push(`t.region = $${i++}`);
+      values.push(region);
+    }
+
+    if (q) {
+      where.push(`(
+        t.tournament_name ILIKE $${i}
+        OR COALESCE(t.region, '')        ILIKE $${i}
+        OR COALESCE(t.address, '')       ILIKE $${i}
+        OR COALESCE(c.category_type, '') ILIKE $${i}
+        OR COALESCE(c.category_range, '') ILIKE $${i}
+      )`);
+      values.push(`%${q}%`);
+      i++;
+    }
+
+    const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+    try {
+      // 1. Total de torneos distintos que cumplen el filtro
+      const countRes = await this.pool.query<{ total: number }>(
+        `SELECT COUNT(DISTINCT t.id_tournament)::int AS total
+         FROM ${this.tournamentsTable} t
+         LEFT JOIN ${this.tournamentCategoriesTable} c ON c.id_tournament = t.id_tournament
+         ${whereClause}`,
+        values
+      );
+      const total = countRes.rows[0]?.total ?? 0;
+
+      if (total === 0) {
+        return { data: [], total: 0, page, limit, total_pages: 0 };
+      }
+
+      // 2. IDs paginados (evita OFFSET + JOIN duplicando filas)
+      const idsRes = await this.pool.query<{ id_tournament: string }>(
+        `SELECT t.id_tournament
+         FROM ${this.tournamentsTable} t
+         LEFT JOIN ${this.tournamentCategoriesTable} c ON c.id_tournament = t.id_tournament
+         ${whereClause}
+         GROUP BY t.id_tournament, t.event_date, t.created_at
+         ORDER BY t.event_date DESC NULLS LAST, t.created_at DESC, t.id_tournament DESC
+         LIMIT $${i} OFFSET $${i + 1}`,
+        [...values, limit, offset]
+      );
+
+      const ids = idsRes.rows.map((r) => r.id_tournament);
+
+      // 3. Datos completos para esos torneos
+      const dataRes = await this.pool.query<TournamentWithCategoryRow>(
+        `SELECT
+           t.id_tournament, t.tournament_name, t.description, t.created_by,
+           t.allow_mixed, t.allow_olympic, t.address, t.region,
+           t.event_date, t.event_time, t.created_at,
+           c.id_category, c.category_type, c.category_range, c.gender,
+           c.inscription_price, c.quotas, c.status, c.phase,
+           (SELECT COUNT(*)::int FROM ${this.enrollmentsTable} e
+            WHERE e.id_category = c.id_category AND e.status = 'active') AS enrolled_count,
+           EXISTS (
+             SELECT 1 FROM ${this.enrollmentsTable} e
+             WHERE e.id_category = c.id_category AND e.status = 'active' AND e.id_user = $2
+           ) AS is_enrolled
+         FROM ${this.tournamentsTable} t
+         LEFT JOIN ${this.tournamentCategoriesTable} c ON c.id_tournament = t.id_tournament
+         WHERE t.id_tournament = ANY($1::uuid[])
+         ORDER BY t.event_date DESC NULLS LAST, t.created_at DESC,
+                  c.category_type ASC, c.category_range ASC, c.gender ASC`,
+        [ids, userId ?? null]
+      );
+
+      // Mantener el orden de paginación usando el array de IDs
       const map = new Map<string, ITournament>();
-
-      for (const row of res.rows) {
-        if (!map.has(row.id_tournament)) {
-          map.set(row.id_tournament, this.mapTournamentListBase(row));
-        }
-
+      for (const id of ids) {
+        const row = dataRes.rows.find((r) => r.id_tournament === id);
+        if (row) map.set(id, this.mapTournamentListBase(row));
+      }
+      for (const row of dataRes.rows) {
         if (row.id_category) {
-          map.get(row.id_tournament)!.categories.push({
+          map.get(row.id_tournament)?.categories.push({
             id_category: row.id_category,
             category_type: row.category_type ?? "",
             category_range: row.category_range ?? "",
@@ -414,21 +647,76 @@ export class AdminTournamentRepository {
             inscription_price: Number(row.inscription_price),
             quotas: row.quotas === null ? null : Number(row.quotas),
             status: row.status ?? "active",
+            phase: row.phase ?? "enrollment",
+            enrolled_count: Number(row.enrolled_count ?? 0),
+            is_enrolled: Boolean(row.is_enrolled),
           });
         }
       }
 
-      return Array.from(map.values());
+      return {
+        data: Array.from(map.values()),
+        total,
+        page,
+        limit,
+        total_pages: Math.ceil(total / limit),
+      };
     } catch (error: any) {
       console.error("[AdminTournamentRepository.findAll] Error:", error);
       throw new Error(error?.message || "Error fetching tournaments");
-    } finally {
-      client.release();
     }
   }
 
   // -----------------------
-  // TOURNAMENTS CREATED BY ADMIN
+  // UN TORNEO PUNTUAL CON SUS CATEGORÍAS (jugador toca un evento del
+  // calendario o vuelve a un torneo desde afuera de la lista paginada) —
+  // mismo shape que findAll, solo que filtrado a un solo id_tournament.
+  // -----------------------
+  async findById(id_tournament: string, userId?: string): Promise<ITournament | null> {
+    const dataRes = await this.pool.query<TournamentWithCategoryRow>(
+      `SELECT
+         t.id_tournament, t.tournament_name, t.description, t.created_by,
+         t.allow_mixed, t.allow_olympic, t.address, t.region,
+         t.event_date, t.event_time, t.created_at,
+         c.id_category, c.category_type, c.category_range, c.gender,
+         c.inscription_price, c.quotas, c.status, c.phase,
+         (SELECT COUNT(*)::int FROM ${this.enrollmentsTable} e
+          WHERE e.id_category = c.id_category AND e.status = 'active') AS enrolled_count,
+         EXISTS (
+           SELECT 1 FROM ${this.enrollmentsTable} e
+           WHERE e.id_category = c.id_category AND e.status = 'active' AND e.id_user = $2
+         ) AS is_enrolled
+       FROM ${this.tournamentsTable} t
+       LEFT JOIN ${this.tournamentCategoriesTable} c ON c.id_tournament = t.id_tournament
+       WHERE t.id_tournament = $1
+       ORDER BY c.category_type ASC, c.category_range ASC, c.gender ASC`,
+      [id_tournament, userId ?? null]
+    );
+
+    if (dataRes.rows.length === 0) return null;
+
+    const tournament = this.mapTournamentListBase(dataRes.rows[0]);
+    for (const row of dataRes.rows) {
+      if (row.id_category) {
+        tournament.categories.push({
+          id_category: row.id_category,
+          category_type: row.category_type ?? "",
+          category_range: row.category_range ?? "",
+          gender: row.gender ?? "mixed",
+          inscription_price: Number(row.inscription_price),
+          quotas: row.quotas === null ? null : Number(row.quotas),
+          status: row.status ?? "active",
+          phase: row.phase ?? "enrollment",
+          enrolled_count: Number(row.enrolled_count ?? 0),
+          is_enrolled: Boolean(row.is_enrolled),
+        });
+      }
+    }
+    return tournament;
+  }
+
+  // -----------------------
+  // TOURNAMENTS CREATED BY ADMIN (o donde es coorganizador invitado)
   // -----------------------
   async findByCreator(createdBy: string): Promise<AdminTournamentRow[]> {
     const client = await this.pool.connect();
@@ -446,10 +734,15 @@ export class AdminTournamentRepository {
           t.region,
           t.event_date,
           t.event_time,
-          t.created_at
+          t.created_at,
+          t.status
         FROM ${this.tournamentsTable} t
         WHERE t.created_by = $1
-        ORDER BY t.created_at DESC;
+           OR EXISTS (
+             SELECT 1 FROM tournament_organizers o
+             WHERE o.id_tournament = t.id_tournament AND o.id_user = $1
+           )
+        ORDER BY t.created_at DESC, t.id_tournament DESC;
       `;
 
       const res: QueryResult<TournamentRow> = await client.query(query, [createdBy]);
@@ -458,6 +751,27 @@ export class AdminTournamentRepository {
     } finally {
       client.release();
     }
+  }
+
+  // -----------------------
+  // BITÁCORA DE ACTIVIDAD (dueño o coorganizador)
+  // -----------------------
+  async getActivity(
+    idTournament: string,
+    requestedBy: string,
+    limit?: number
+  ): Promise<{ data: ActivityLogRow[]; error?: "TOURNAMENT_NOT_FOUND" | "NOT_TOURNAMENT_OWNER" }> {
+    const tRes = await this.pool.query<{ created_by: string }>(
+      `SELECT created_by FROM ${this.tournamentsTable} WHERE id_tournament = $1`,
+      [idTournament]
+    );
+    const t = tRes.rows[0];
+    if (!t) return { data: [], error: "TOURNAMENT_NOT_FOUND" };
+    if (!(await this.isOwnerOrOrganizer(this.pool, idTournament, requestedBy, t.created_by))) {
+      return { data: [], error: "NOT_TOURNAMENT_OWNER" };
+    }
+    const data = await this.activityLog.listByTournament(idTournament, limit);
+    return { data };
   }
 
   // -----------------------
@@ -473,6 +787,7 @@ export class AdminTournamentRepository {
           e.id_category,
           e.status,
           e.enrolled_at,
+          e.checked_in,
 
           u.email,
           u.first_name,
@@ -520,6 +835,7 @@ export class AdminTournamentRepository {
         c.inscription_price,
         c.quotas,
         c.status,
+        c.qualifiers_per_group,
         COUNT(e.id_enrollment) FILTER (WHERE e.status = 'active')::int AS enrolled_count
       FROM ${this.tournamentCategoriesTable} c
       LEFT JOIN ${this.enrollmentsTable} e
@@ -575,16 +891,191 @@ export class AdminTournamentRepository {
   }
 
   // -----------------------
+  // ADMIN ADD PLAYER
+  // -----------------------
+  async adminAddPlayer(input: AdminAddPlayerInput): Promise<AdminAddPlayerResult> {
+    try {
+      return await this.withTransaction(async (client) => {
+        // El insert no tiene FK ni CHECK que impida esto: sin este chequeo el
+        // admin puede agregar (y el jugador recibe notificación de "inscripción
+        // confirmada" para) un torneo que ya está cancelado.
+        const statusRes = await client.query<{ status: string }>(
+          `SELECT status FROM ${this.tournamentsTable} WHERE id_tournament = $1`,
+          [input.tournamentId]
+        );
+        if (statusRes.rows[0]?.status === "cancelled") {
+          throw new Error("TOURNAMENT_ALREADY_CANCELLED");
+        }
+
+        // ON CONFLICT en vez de un INSERT liso: si a este jugador ya lo
+        // habían sacado de la categoría antes, su fila queda con
+        // status='cancelled' (no se borra) y un INSERT normal chocaba con
+        // el UNIQUE (id_user, id_tournament, id_category) — el 23505 se
+        // traducía en un falso "ya está inscrito". Volver a agregarlo revive
+        // esa fila en vez de intentar crear una nueva.
+        // La condición WHERE en el DO UPDATE es la que evita "revivir" a
+        // alguien que ya está activo (nada que hacer ahí más que avisar que
+        // ya está inscrito, como antes) — solo pisa la fila cuando lo que
+        // había era una inscripción cancelada.
+        const insertRes = await client.query<AdminAddPlayerResult>(
+          `INSERT INTO ${this.enrollmentsTable}
+             (id_user, id_tournament, id_category, qualification_type)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (id_user, id_tournament, id_category)
+           DO UPDATE SET
+             status = 'active',
+             enrolled_at = NOW(),
+             qualification_type = EXCLUDED.qualification_type,
+             seed = NULL,
+             checked_in = true
+           WHERE ${this.enrollmentsTable}.status <> 'active'
+           RETURNING
+             id_enrollment,
+             id_user,
+             id_tournament,
+             id_category,
+             qualification_type,
+             status;`,
+          [input.userId, input.tournamentId, input.categoryId, input.qualificationType]
+        );
+        if (insertRes.rowCount === 0) {
+          throw new Error("PLAYER_ALREADY_ENROLLED");
+        }
+        const enrollment = insertRes.rows[0];
+
+        const ctxRes = await client.query<{
+          tournament_name: string;
+          category_type: string;
+          category_range: string;
+        }>(
+          `SELECT t.tournament_name, tc.category_type, tc.category_range
+           FROM tournaments t
+           JOIN tournament_categories tc ON tc.id_category = $1
+           WHERE t.id_tournament = $2`,
+          [input.categoryId, input.tournamentId]
+        );
+        const ctx = ctxRes.rows[0];
+        if (ctx) {
+          await this.notifications.create(
+            {
+              idUser: input.userId,
+              type: "enrollment_confirmed",
+              title: "Inscripción confirmada",
+              message: `Fuiste inscrito en ${ctx.category_type} ${ctx.category_range} (${ctx.tournament_name})`,
+              idTournament: input.tournamentId,
+              idCategory: input.categoryId,
+            },
+            client
+          );
+        }
+
+        return enrollment;
+      });
+    } catch (error: any) {
+      if (error?.message === "TOURNAMENT_ALREADY_CANCELLED") throw error;
+      if (error?.code === "23505") throw new Error("PLAYER_ALREADY_ENROLLED");
+      if (error?.code === "23503") throw new Error("INVALID_IDS");
+      throw error;
+    }
+  }
+
+  // -----------------------
   // CANCEL ENROLLMENT
   // -----------------------
+  // -----------------------
+  // CANCEL TOURNAMENT (real, no simulado)
+  // -----------------------
+  async cancelTournament(
+    idTournament: string,
+    requestedBy: string
+  ): Promise<{ cancelled: boolean; error?: "TOURNAMENT_NOT_FOUND" | "NOT_TOURNAMENT_OWNER" | "TOURNAMENT_ALREADY_CANCELLED" }> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      const tRes = await client.query<{ created_by: string; status: string; tournament_name: string }>(
+        `SELECT created_by, status, tournament_name FROM ${this.tournamentsTable}
+         WHERE id_tournament = $1 FOR UPDATE`,
+        [idTournament]
+      );
+      const t = tRes.rows[0];
+
+      if (!t) {
+        await client.query("ROLLBACK");
+        return { cancelled: false, error: "TOURNAMENT_NOT_FOUND" };
+      }
+      if (!(await this.isOwnerOrOrganizer(client, idTournament, requestedBy, t.created_by))) {
+        await client.query("ROLLBACK");
+        return { cancelled: false, error: "NOT_TOURNAMENT_OWNER" };
+      }
+      if (t.status === "cancelled") {
+        await client.query("ROLLBACK");
+        return { cancelled: false, error: "TOURNAMENT_ALREADY_CANCELLED" };
+      }
+
+      await client.query(
+        `UPDATE ${this.tournamentsTable} SET status = 'cancelled' WHERE id_tournament = $1`,
+        [idTournament]
+      );
+
+      const enrolledRes = await client.query<{ id_user: string }>(
+        `SELECT DISTINCT id_user FROM ${this.enrollmentsTable}
+         WHERE id_tournament = $1 AND status = 'active'`,
+        [idTournament]
+      );
+      const userIds = enrolledRes.rows.map((r) => r.id_user);
+
+      if (userIds.length > 0) {
+        await this.notifications.createForMany(
+          userIds,
+          {
+            type: "tournament_cancelled",
+            title: "Campeonato cancelado",
+            message: `El campeonato "${t.tournament_name}" fue cancelado por el organizador.`,
+            idTournament,
+          },
+          client
+        );
+      }
+
+      await this.activityLog.record(idTournament, requestedBy, "tournament_cancelled", null, client);
+
+      await client.query("COMMIT");
+      return { cancelled: true };
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        /* ignore */
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async cancelEnrollment(params: {
     tournamentId: string;
     userId: string;
     categoryId: string;
-  }): Promise<{ cancelled: boolean }> {
+  }): Promise<{ cancelled: boolean; error?: "CATEGORY_ALREADY_STARTED" }> {
     const client = await this.pool.connect();
 
     try {
+      await client.query("BEGIN");
+
+      // Una vez que la categoría salió de "enrollment" (ya se generaron grupos)
+      // ya no se puede sacar gente: rompería los grupos/cuadros ya armados.
+      const phaseRes = await client.query<{ phase: string }>(
+        `SELECT phase FROM ${this.tournamentCategoriesTable} WHERE id_category = $1 FOR UPDATE`,
+        [params.categoryId]
+      );
+      const phase = phaseRes.rows[0]?.phase ?? "enrollment";
+      if (phase !== "enrollment") {
+        await client.query("ROLLBACK");
+        return { cancelled: false, error: "CATEGORY_ALREADY_STARTED" };
+      }
+
       const query = `
         UPDATE ${this.enrollmentsTable}
            SET status = 'cancelled'
@@ -601,7 +1092,100 @@ export class AdminTournamentRepository {
         params.categoryId,
       ]);
 
-      return { cancelled: (res.rowCount ?? 0) > 0 };
+      const cancelled = (res.rowCount ?? 0) > 0;
+
+      if (cancelled) {
+        const ctxRes = await client.query<{
+          tournament_name: string;
+          category_type: string;
+          category_range: string;
+        }>(
+          `SELECT t.tournament_name, tc.category_type, tc.category_range
+           FROM tournaments t
+           JOIN tournament_categories tc ON tc.id_category = $1
+           WHERE t.id_tournament = $2`,
+          [params.categoryId, params.tournamentId]
+        );
+        const ctx = ctxRes.rows[0];
+        if (ctx) {
+          await this.notifications.create(
+            {
+              idUser: params.userId,
+              type: "enrollment_removed",
+              title: "Inscripción cancelada",
+              message: `Tu inscripción en ${ctx.category_type} ${ctx.category_range} (${ctx.tournament_name}) fue cancelada por el organizador`,
+              idTournament: params.tournamentId,
+              idCategory: params.categoryId,
+            },
+            client
+          );
+        }
+      }
+
+      await client.query("COMMIT");
+      return { cancelled };
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        /* ignore */
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async setCheckIn(params: {
+    tournamentId: string;
+    userId: string;
+    categoryId: string;
+    checkedIn: boolean;
+  }): Promise<{ ok: boolean; error?: "CATEGORY_ALREADY_STARTED" }> {
+    const client = await this.pool.connect();
+
+    try {
+      await client.query("BEGIN");
+
+      // Mismo criterio que cancelEnrollment: una vez que la categoría salió
+      // de "enrollment" (ya se generaron grupos) el check-in ya no tiene
+      // efecto — no tiene sentido dejar tocarlo.
+      const phaseRes = await client.query<{ phase: string }>(
+        `SELECT phase FROM ${this.tournamentCategoriesTable} WHERE id_category = $1 FOR UPDATE`,
+        [params.categoryId]
+      );
+      const phase = phaseRes.rows[0]?.phase ?? "enrollment";
+      if (phase !== "enrollment") {
+        await client.query("ROLLBACK");
+        return { ok: false, error: "CATEGORY_ALREADY_STARTED" };
+      }
+
+      const query = `
+        UPDATE ${this.enrollmentsTable}
+           SET checked_in = $4
+         WHERE id_tournament = $1
+           AND id_user = $2
+           AND id_category = $3
+           AND status = 'active'
+         RETURNING id_enrollment;
+      `;
+
+      const res = await client.query(query, [
+        params.tournamentId,
+        params.userId,
+        params.categoryId,
+        params.checkedIn,
+      ]);
+
+      await client.query("COMMIT");
+      return { ok: (res.rowCount ?? 0) > 0 };
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        /* ignore */
+      }
+      throw error;
     } finally {
       client.release();
     }
