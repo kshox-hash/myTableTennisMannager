@@ -62,8 +62,10 @@ export async function runMigrations(): Promise<void> {
 
       const filePath = path.join(MIGRATIONS_DIR, file);
       if (!fs.existsSync(filePath)) {
-        console.warn(`[migrations] archivo no encontrado: ${file}`);
-        continue;
+        // Antes esto era un warning y seguía de largo — en producción el
+        // build no copiaba los .sql a dist/ y todas las migraciones se
+        // saltaban en silencio sin que el server nunca se enterara.
+        throw new Error(`[migrations] archivo no encontrado: ${file} (¿el build copió src/db/migrations a dist/?)`);
       }
 
       const sql = fs.readFileSync(filePath, "utf8");
