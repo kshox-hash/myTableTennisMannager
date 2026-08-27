@@ -1,0 +1,19 @@
+name: Keep backend awake
+
+# Render duerme los web services del plan gratis tras ~15 minutos sin
+# tráfico — el primer request después de eso tarda 20-30s en responder
+# mientras el servicio arranca de nuevo. Este workflow le pega a un
+# endpoint público bien liviano cada 10 minutos para que nunca llegue a
+# dormirse, sin costo (el plan free de GitHub Actions alcanza de sobra
+# para esto) y sin tocar el plan de Render.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping health endpoint
+        run: curl -sf --max-time 25 "https://mytabletennismannager.onrender.com/api/v1/tournament/public/stats"
