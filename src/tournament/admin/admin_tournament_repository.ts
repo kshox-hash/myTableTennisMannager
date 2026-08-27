@@ -718,10 +718,54 @@ export class AdminTournamentRepository {
   // -----------------------
   // TOURNAMENTS CREATED BY ADMIN (o donde es coorganizador invitado)
   // -----------------------
-  async findByCreator(createdBy: string): Promise<AdminTournamentRow[]> {
-    const client = await this.pool.connect();
+  // Antes traía TODOS los campeonatos del admin de una — sin límite, y cada
+  // uno "activo" disparaba además su propio request de dashboard en
+  // paralelo (ver AdminHomePage en el frontend). Paginado igual que el
+  // listado público (COUNT aparte + LIMIT/OFFSET), con el mismo filtro de
+  // texto y un filtro de "incluir cancelados" — así el fan-out de
+  // dashboards queda acotado al tamaño de página, no al total histórico.
+  async findByCreator(
+    createdBy: string,
+    filters: { q?: string; includeCancelled?: boolean },
+    pagination: { page: number; limit: number }
+  ): Promise<{ rows: AdminTournamentRow[]; total: number; cancelledCount: number }> {
+    const ownerClause = `(t.created_by = $1 OR EXISTS (
+         SELECT 1 FROM tournament_organizers o
+         WHERE o.id_tournament = t.id_tournament AND o.id_user = $1
+       ))`;
+    const conditions: string[] = [ownerClause];
+    const values: unknown[] = [createdBy];
+    let i = 2;
 
+    if (filters.q) {
+      conditions.push(
+        `(t.tournament_name ILIKE $${i} OR t.address ILIKE $${i} OR t.region ILIKE $${i})`
+      );
+      values.push(`%${filters.q}%`);
+      i++;
+    }
+    if (!filters.includeCancelled) {
+      conditions.push(`t.status <> 'cancelled'`);
+    }
+    const where = `WHERE ${conditions.join(" AND ")}`;
+
+    const client = await this.pool.connect();
     try {
+      const countRes = await client.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count FROM ${this.tournamentsTable} t ${where}`,
+        values
+      );
+      const total = Number(countRes.rows[0]?.count ?? 0);
+
+      // Para el label "Mostrar cancelados (N)" — cuenta aparte, sin el
+      // filtro de status <> 'cancelled' que ya metimos arriba en `where`.
+      const cancelledRes = await client.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count FROM ${this.tournamentsTable} t WHERE ${ownerClause} AND t.status = 'cancelled'`,
+        [createdBy]
+      );
+      const cancelledCount = Number(cancelledRes.rows[0]?.count ?? 0);
+
+      const offset = (pagination.page - 1) * pagination.limit;
       const query = `
         SELECT
           t.id_tournament,
@@ -737,17 +781,18 @@ export class AdminTournamentRepository {
           t.created_at,
           t.status
         FROM ${this.tournamentsTable} t
-        WHERE t.created_by = $1
-           OR EXISTS (
-             SELECT 1 FROM tournament_organizers o
-             WHERE o.id_tournament = t.id_tournament AND o.id_user = $1
-           )
-        ORDER BY t.created_at DESC, t.id_tournament DESC;
+        ${where}
+        ORDER BY t.created_at DESC, t.id_tournament DESC
+        LIMIT $${i++} OFFSET $${i++};
       `;
 
-      const res: QueryResult<TournamentRow> = await client.query(query, [createdBy]);
+      const res: QueryResult<TournamentRow> = await client.query(query, [
+        ...values,
+        pagination.limit,
+        offset,
+      ]);
 
-      return res.rows.map((row) => this.mapAdminTournamentRow(row));
+      return { rows: res.rows.map((row) => this.mapAdminTournamentRow(row)), total, cancelledCount };
     } finally {
       client.release();
     }

@@ -114,15 +114,37 @@ export class AdminTournamentController {
     return res.json({ ok: true, data: result.data });
   };
 
-  // GET /admin/get/tournaments/my  (usa id del token, no query param)
+  // GET /admin/get/tournaments/my?page=&limit=&q=&include_cancelled=
+  // (usa id del token, no query param) — antes traía todos los campeonatos
+  // del admin sin límite; paginado igual que el listado público.
   adminGetMyTournaments = async (req: Request, res: Response) => {
-    const result = await this.service.listTournamentsByCreator(req.user!.id_user);
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 12));
+    const q = typeof req.query.q === "string" ? req.query.q.trim() || undefined : undefined;
+    const includeCancelled = req.query.include_cancelled === "true";
+
+    const result = await this.service.listTournamentsByCreator(
+      req.user!.id_user,
+      { q, includeCancelled },
+      { page, limit }
+    );
 
     if (!result.ok) {
       return res.status(400).json({ ok: false, message: result.error });
     }
 
-    return res.json({ ok: true, data: result.data });
+    const { rows, total, cancelledCount } = result.data;
+    return res.json({
+      ok: true,
+      data: {
+        page,
+        limit,
+        total,
+        total_pages: Math.max(1, Math.ceil(total / limit)),
+        cancelled_count: cancelledCount,
+        tournaments: rows,
+      },
+    });
   };
 
   // GET /admin/tournaments/:id_tournament/activity?limit=

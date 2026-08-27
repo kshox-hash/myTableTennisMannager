@@ -70,9 +70,16 @@ export class AdminTournamentService {
 
   // TOURNAMENTS BY CREATOR (id viene del token, nunca es undefined)
   async listTournamentsByCreator(
-    createdBy: string
-  ): Promise<Result<AdminTournamentRow[], AdminTournamentError>> {
-    const data = await this.repo.findByCreator(createdBy);
+    createdBy: string,
+    filters: { q?: string; includeCancelled?: boolean },
+    pagination: { page: number; limit: number }
+  ): Promise<
+    Result<
+      { rows: AdminTournamentRow[]; total: number; cancelledCount: number },
+      AdminTournamentError
+    >
+  > {
+    const data = await this.repo.findByCreator(createdBy, filters, pagination);
     return ok(data);
   }
 
