@@ -92,6 +92,22 @@ describe("simulateSchedule", () => {
     expect(m2.start_minute).toBe(m1.end_minute);
   });
 
+  it("con categoryOrder, la categoría prioritaria entra primero a la cola aunque su nombre vaya después alfabéticamente", () => {
+    const matches = [
+      match("a1", "catA", "A", "a1p1", "a1p2"),
+      match("a2", "catA", "A", "a1p3", "a1p4"),
+      match("b1", "catB", "B", "b1p1", "b1p2"),
+    ];
+    // Sin categoryOrder el fair-order alfabético pondría A primero (test de
+    // arriba). Con catB como prioridad, tiene que arrancar primero.
+    const result = simulateSchedule(matches, {
+      numTables: 1,
+      avgMatchMinutes: 10,
+      categoryOrder: ["catB", "catA"],
+    });
+    expect(result.map((r) => r.id_category)).toEqual(["catB", "catA", "catA"]);
+  });
+
   it("respeta el número de mesas: ninguna mesa tiene dos partidos solapados", () => {
     const matches = Array.from({ length: 8 }, (_, i) =>
       match(`m${i}`, "cat1", "A", `p${i * 2}`, `p${i * 2 + 1}`)

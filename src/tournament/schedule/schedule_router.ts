@@ -27,6 +27,12 @@ router.get(
     const minRest = Math.min(Math.max(Number.isFinite(minRestRaw) ? minRestRaw : 5, 0), 30);
     const startParam = typeof req.query.start === "string" ? req.query.start : "09:00";
     const [startH, startM] = startParam.split(":").map((n) => Number(n) || 0);
+    // Prioridad de categorías — ids separados por coma, en el orden que
+    // eligió el admin (la primera de la lista consigue mesa antes).
+    const categoryOrder =
+      typeof req.query.category_order === "string" && req.query.category_order.length > 0
+        ? req.query.category_order.split(",")
+        : undefined;
 
     const [numTables, matches] = await Promise.all([
       repo.getNumTables(id_tournament),
@@ -44,6 +50,7 @@ router.get(
       numTables,
       avgMatchMinutes: avgMinutes,
       minRestMinutes: minRest,
+      categoryOrder,
     });
 
     const toClock = (minutesFromStart: number) => {
@@ -87,6 +94,9 @@ router.post(
     const minRest = Math.min(Math.max(Number.isFinite(minRestRaw) ? minRestRaw : 5, 0), 30);
     const startParam: string = typeof req.body.start === "string" ? req.body.start : "09:00";
     const [startH, startM] = startParam.split(":").map((n: string) => Number(n) || 0);
+    const categoryOrder: string[] | undefined = Array.isArray(req.body.category_order)
+      ? req.body.category_order.filter((id: unknown) => typeof id === "string")
+      : undefined;
 
     const [numTables, matches, tournament] = await Promise.all([
       repo.getNumTables(id_tournament),
@@ -108,6 +118,7 @@ router.post(
       numTables,
       avgMatchMinutes: avgMinutes,
       minRestMinutes: minRest,
+      categoryOrder,
     });
 
     // event_date llega como "YYYY-MM-DD" (::text en el repo) — se arma la

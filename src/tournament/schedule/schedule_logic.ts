@@ -34,13 +34,19 @@ export type SimulateScheduleOptions = {
   // para no simular un cronograma más agresivo que el que la propia ITTF
   // considera aceptable.
   minRestMinutes?: number;
+  // Prioridad de categorías, de mayor a menor (ids de categoría) — la
+  // primera de la lista entra primero a la cola de reparto justo, así que
+  // consigue mesa antes que el resto cuando varias categorías compiten por
+  // las mismas mesas libres. Categorías no incluidas en la lista quedan al
+  // final, en el orden alfabético de siempre.
+  categoryOrder?: string[];
 };
 
 // Reparto justo entre categorías: mismo criterio que applyFairOrder en
 // tables_repository — ninguna categoría acapara todas las mesas mientras
 // otra espera su turno. Se aplica antes de simular para decidir el ORDEN de
 // entrada a la cola, no el horario en sí.
-function applyFairOrder(matches: ScheduleMatchInput[]): ScheduleMatchInput[] {
+function applyFairOrder(matches: ScheduleMatchInput[], categoryOrder?: string[]): ScheduleMatchInput[] {
   const byCategory = new Map<string, ScheduleMatchInput[]>();
   for (const m of matches) {
     const list = byCategory.get(m.id_category);
@@ -48,7 +54,13 @@ function applyFairOrder(matches: ScheduleMatchInput[]): ScheduleMatchInput[] {
     else byCategory.set(m.id_category, [m]);
   }
 
+  const priority = new Map((categoryOrder ?? []).map((id, i) => [id, i]));
   const categoryIds = [...byCategory.keys()].sort((a, b) => {
+    const pa = priority.get(a);
+    const pb = priority.get(b);
+    if (pa !== undefined && pb !== undefined) return pa - pb;
+    if (pa !== undefined) return -1;
+    if (pb !== undefined) return 1;
     const first = byCategory.get(a)![0];
     const second = byCategory.get(b)![0];
     return first.category_type.localeCompare(second.category_type);
@@ -82,12 +94,12 @@ export function simulateSchedule(
   matches: ScheduleMatchInput[],
   options: SimulateScheduleOptions
 ): ScheduledMatch[] {
-  const { numTables, avgMatchMinutes, minRestMinutes = 5 } = options;
+  const { numTables, avgMatchMinutes, minRestMinutes = 5, categoryOrder } = options;
   if (numTables < 1) throw new Error("numTables debe ser al menos 1");
   if (avgMatchMinutes < 1) throw new Error("avgMatchMinutes debe ser al menos 1");
   if (minRestMinutes < 0) throw new Error("minRestMinutes no puede ser negativo");
 
-  const queue = applyFairOrder(matches);
+  const queue = applyFairOrder(matches, categoryOrder);
   const tableFreeAt = Array<number>(numTables).fill(0);
   const playerBusyUntil = new Map<string, number>();
   const scheduled: ScheduledMatch[] = [];
