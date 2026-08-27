@@ -23,6 +23,11 @@ export interface PublicCategoryRow {
   enrolled_count: number;
   has_bracket: boolean;
   is_finished: boolean;
+  // Fase real de la categoría (enrollment/groups/bracket/finished) — el
+  // frontend público la usaba solo indirecto (has_bracket/is_finished),
+  // así que "enrollment" (todavía no se generaron grupos) y "groups" (ya
+  // hay grupos jugándose) se veían igual, ambos como "Group stage".
+  phase: string;
 }
 
 export interface PublicTournamentDetailRow {
@@ -394,7 +399,7 @@ export class PublicTournamentRepository {
   async getCategories(id_tournament: string): Promise<PublicCategoryRow[]> {
     const res = await this.pool.query<PublicCategoryRow>(
       `SELECT
-         c.id_category, c.category_type, c.category_range, c.gender, c.status,
+         c.id_category, c.category_type, c.category_range, c.gender, c.status, c.phase,
          COUNT(e.id_enrollment) FILTER (WHERE e.status = 'active')::int AS enrolled_count,
          EXISTS(SELECT 1 FROM bracket_matches bm WHERE bm.id_category = c.id_category) AS has_bracket,
          EXISTS(

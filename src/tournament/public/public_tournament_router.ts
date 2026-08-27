@@ -114,6 +114,7 @@ router.get(
           enrolled_count: c.enrolled_count,
           has_bracket: c.has_bracket,
           is_finished: c.is_finished,
+          phase: c.phase,
         })),
       },
     });
