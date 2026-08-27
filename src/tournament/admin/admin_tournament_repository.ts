@@ -580,13 +580,30 @@ export class AdminTournamentRepository {
 
     const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
+    // El JOIN contra tournament_categories solo hace falta para el texto
+    // libre (busca en category_type/category_range) — sin `q`, unirlo
+    // igual produce el producto cruzado de TODOS los torneos × TODAS sus
+    // categorías antes del GROUP BY/DISTINCT, solo para terminar
+    // devolviendo el mismo id_tournament que ya estaba en `tournaments`.
+    // Con 1000 torneos y ~3 categorías c/u eso son ~3000 filas de más en
+    // el caso común (navegar sin buscar nada), por una sola columna que
+    // ya estaba disponible sin el join.
+    const needsCategoryJoin = q.length > 0;
+    const categoryJoin = needsCategoryJoin
+      ? `LEFT JOIN ${this.tournamentCategoriesTable} c ON c.id_tournament = t.id_tournament`
+      : "";
+
     try {
       // 1. Total de torneos distintos que cumplen el filtro
       const countRes = await this.pool.query<{ total: number }>(
-        `SELECT COUNT(DISTINCT t.id_tournament)::int AS total
-         FROM ${this.tournamentsTable} t
-         LEFT JOIN ${this.tournamentCategoriesTable} c ON c.id_tournament = t.id_tournament
-         ${whereClause}`,
+        needsCategoryJoin
+          ? `SELECT COUNT(DISTINCT t.id_tournament)::int AS total
+             FROM ${this.tournamentsTable} t
+             ${categoryJoin}
+             ${whereClause}`
+          : `SELECT COUNT(*)::int AS total
+             FROM ${this.tournamentsTable} t
+             ${whereClause}`,
         values
       );
       const total = countRes.rows[0]?.total ?? 0;
@@ -597,13 +614,19 @@ export class AdminTournamentRepository {
 
       // 2. IDs paginados (evita OFFSET + JOIN duplicando filas)
       const idsRes = await this.pool.query<{ id_tournament: string }>(
-        `SELECT t.id_tournament
-         FROM ${this.tournamentsTable} t
-         LEFT JOIN ${this.tournamentCategoriesTable} c ON c.id_tournament = t.id_tournament
-         ${whereClause}
-         GROUP BY t.id_tournament, t.event_date, t.created_at
-         ORDER BY t.event_date DESC NULLS LAST, t.created_at DESC, t.id_tournament DESC
-         LIMIT $${i} OFFSET $${i + 1}`,
+        needsCategoryJoin
+          ? `SELECT t.id_tournament
+             FROM ${this.tournamentsTable} t
+             ${categoryJoin}
+             ${whereClause}
+             GROUP BY t.id_tournament, t.event_date, t.created_at
+             ORDER BY t.event_date DESC NULLS LAST, t.created_at DESC, t.id_tournament DESC
+             LIMIT $${i} OFFSET $${i + 1}`
+          : `SELECT t.id_tournament
+             FROM ${this.tournamentsTable} t
+             ${whereClause}
+             ORDER BY t.event_date DESC NULLS LAST, t.created_at DESC, t.id_tournament DESC
+             LIMIT $${i} OFFSET $${i + 1}`,
         [...values, limit, offset]
       );
 
