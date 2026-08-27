@@ -42,7 +42,7 @@ router.get(
     if (matches.length === 0) {
       return res.json({
         ok: true,
-        data: { num_tables: numTables, avg_minutes: avgMinutes, min_rest: minRest, matches: [] },
+        data: { num_tables: numTables, avg_minutes: avgMinutes, min_rest: minRest, total_minutes: 0, matches: [] },
       });
     }
 
@@ -52,6 +52,11 @@ router.get(
       minRestMinutes: minRest,
       categoryOrder,
     });
+    // Duración total del cronograma (todas las mesas en paralelo) — el
+    // último partido en terminar, no la suma de todos los partidos. Sirve
+    // para sugerir en cuántos días conviene repartir el torneo dado un
+    // bloque de horas jugables por día (ver el cálculo en el frontend).
+    const totalMinutes = Math.max(...scheduled.map((m) => m.end_minute));
 
     const toClock = (minutesFromStart: number) => {
       const total = startH * 60 + startM + minutesFromStart;
@@ -72,7 +77,10 @@ router.get(
       end_time: toClock(m.end_minute),
     }));
 
-    return res.json({ ok: true, data: { num_tables: numTables, avg_minutes: avgMinutes, matches: data } });
+    return res.json({
+      ok: true,
+      data: { num_tables: numTables, avg_minutes: avgMinutes, min_rest: minRest, total_minutes: totalMinutes, matches: data },
+    });
   })
 );
 
