@@ -20,6 +20,7 @@ import organizersRouter     from "./tournament/organizers/tournament_organizers_
 
 import { errorMiddleware } from "./middlewares/error_middleware";
 import { startPhaseScheduler } from "./tournament/phases/phase_scheduler";
+import { startTableScheduleScheduler } from "./tournament/schedule/table_schedule_scheduler";
 
 const path    = "api";
 const version = "v1";
@@ -45,6 +46,9 @@ export default function registerRoutes(app: Express) {
 
   // Scheduler: revisa cada 30s si hay torneos programados para iniciar
   startPhaseScheduler();
+  // Scheduler: revisa cada 30s si hay partidos con horario confirmado
+  // (SchedulePanel → "Confirmar y guardar") que ya deban activarse en mesa
+  startTableScheduleScheduler();
 
   // Debe ir después de todas las rutas
   app.use(errorMiddleware);

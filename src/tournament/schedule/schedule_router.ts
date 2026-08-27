@@ -69,4 +69,64 @@ router.get(
   })
 );
 
+// POST /api/v1/tournament/:id_tournament/schedule/confirm
+// Corre la misma simulación que el GET, pero esta vez la graba: cada
+// partido de grupo pendiente queda con mesa y hora programada
+// (scheduled_table_number / scheduled_start_at). El scheduler de
+// activación (table_schedule_scheduler.ts) las va copiando al estado en
+// vivo de a una, a medida que llega la hora de cada partido — no cambia
+// nada del panel de Mesas en vivo, solo lo alimenta con antelación en vez
+// de depender de que alguien lo dispare a mano.
+router.post(
+  "/:id_tournament/schedule/confirm",
+  authRequired,
+  asyncHandler(async (req, res) => {
+    const { id_tournament } = req.params;
+    const avgMinutes = Math.min(Math.max(Number(req.body.avg_minutes) || 15, 5), 60);
+    const minRestRaw = req.body.min_rest !== undefined ? Number(req.body.min_rest) : 5;
+    const minRest = Math.min(Math.max(Number.isFinite(minRestRaw) ? minRestRaw : 5, 0), 30);
+    const startParam: string = typeof req.body.start === "string" ? req.body.start : "09:00";
+    const [startH, startM] = startParam.split(":").map((n: string) => Number(n) || 0);
+
+    const [numTables, matches, tournament] = await Promise.all([
+      repo.getNumTables(id_tournament),
+      repo.getPendingGroupMatches(id_tournament),
+      repo.getTournamentDate(id_tournament),
+    ]);
+
+    if (!tournament.event_date) {
+      return res.status(400).json({
+        ok: false,
+        message: "El torneo no tiene fecha de evento configurada — no se puede confirmar un horario sin fecha.",
+      });
+    }
+    if (matches.length === 0) {
+      return res.json({ ok: true, data: { confirmed: 0 } });
+    }
+
+    const scheduled = simulateSchedule(matches, {
+      numTables,
+      avgMatchMinutes: avgMinutes,
+      minRestMinutes: minRest,
+    });
+
+    // event_date llega como "YYYY-MM-DD" (::text en el repo) — se arma la
+    // hora de inicio en esa fecha y se le suman los minutos simulados.
+    // Construido con componentes en vez de un string armado a mano para
+    // que Date interprete todo en un solo huso horario consistente.
+    const [y, mo, d] = tournament.event_date.split("-").map(Number);
+    const dayStart = new Date(y, (mo ?? 1) - 1, d ?? 1, startH, startM, 0, 0);
+
+    const toPersist = scheduled.map((m) => ({
+      id_match: m.id_match,
+      table_number: m.table_number,
+      start_at: new Date(dayStart.getTime() + m.start_minute * 60_000).toISOString(),
+    }));
+
+    await repo.persistSchedule(id_tournament, avgMinutes, toPersist);
+
+    return res.json({ ok: true, data: { confirmed: toPersist.length } });
+  })
+);
+
 export default router;
