@@ -104,7 +104,7 @@ router.get(
         event_date: formatDate(tournament.event_date),
         event_time: tournament.event_time,
         status: displayStatus(tournament.status, tournament.event_date),
-        organizer_club_name: tournament.organizer_club_name,
+        organizer_club_name: tournament.organizer_club_name ?? tournament.organizer_user_name,
         categories: categories.map((c) => ({
           id_category: c.id_category,
           category_type: c.category_type,

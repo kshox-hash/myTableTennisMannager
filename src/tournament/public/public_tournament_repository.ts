@@ -40,6 +40,10 @@ export interface PublicTournamentDetailRow {
   event_time: string | null;
   status: string;
   organizer_club_name: string | null;
+  // El admin que crea el torneo no siempre tiene un club asignado — sin
+  // esto, "organizer_club_name" quedaba null y la vitrina pública no
+  // mostraba quién organiza.
+  organizer_user_name: string | null;
 }
 
 export class PublicTournamentRepository {
@@ -110,7 +114,8 @@ export class PublicTournamentRepository {
   async getById(id_tournament: string): Promise<PublicTournamentDetailRow | null> {
     const res = await this.pool.query<PublicTournamentDetailRow>(
       `SELECT t.id_tournament, t.tournament_name, t.description, t.address, t.region,
-              t.event_date, t.event_time, t.status, c.name AS organizer_club_name
+              t.event_date, t.event_time, t.status, c.name AS organizer_club_name,
+              NULLIF(TRIM(CONCAT(u.first_name, ' ', u.last_name)), '') AS organizer_user_name
        FROM tournaments t
        LEFT JOIN users u ON u.id_user = t.created_by
        LEFT JOIN clubs c ON c.id_club = u.id_club
