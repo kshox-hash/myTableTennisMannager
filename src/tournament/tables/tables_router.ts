@@ -88,12 +88,19 @@ router.patch(
   requireRole("admin"),
   asyncHandler(async (req, res) => {
     const { id_match, match_type, table_number } = req.body as {
-      id_match: string;
-      match_type: "group" | "bracket";
-      table_number: number;
+      id_match?: string;
+      match_type?: string;
+      table_number?: number;
     };
     if (!id_match || !match_type || !table_number) {
       return res.status(400).json({ ok: false, message: "id_match, match_type y table_number son obligatorios" });
+    }
+    // Antes solo era un type assertion de TS (sin chequeo real en runtime) —
+    // no era explotable porque assignTable solo produce dos literales fijos
+    // a partir de esto, pero conviene validar de verdad en vez de confiar
+    // en el tipo declarado del body.
+    if (match_type !== "group" && match_type !== "bracket") {
+      return res.status(400).json({ ok: false, message: "match_type debe ser 'group' o 'bracket'" });
     }
     try {
       await repo.assignTable(id_match, match_type, Number(table_number), req.user!.id_user);

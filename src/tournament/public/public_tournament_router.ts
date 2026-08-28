@@ -131,7 +131,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const { id_tournament } = req.params;
     const page = Math.max(1, Number(req.query.page) || 1);
-    const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
     const { rows, total } = await repo.getAllMatches(id_tournament, { page, limit });
     return res.json({
       ok: true,
