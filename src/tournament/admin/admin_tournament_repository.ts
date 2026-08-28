@@ -827,7 +827,8 @@ export class AdminTournamentRepository {
   async getActivity(
     idTournament: string,
     requestedBy: string,
-    limit?: number
+    limit?: number,
+    offset?: number
   ): Promise<{ data: ActivityLogRow[]; error?: "TOURNAMENT_NOT_FOUND" | "NOT_TOURNAMENT_OWNER" }> {
     const tRes = await this.pool.query<{ created_by: string }>(
       `SELECT created_by FROM ${this.tournamentsTable} WHERE id_tournament = $1`,
@@ -838,7 +839,7 @@ export class AdminTournamentRepository {
     if (!(await this.isOwnerOrOrganizer(this.pool, idTournament, requestedBy, t.created_by))) {
       return { data: [], error: "NOT_TOURNAMENT_OWNER" };
     }
-    const data = await this.activityLog.listByTournament(idTournament, limit);
+    const data = await this.activityLog.listByTournament(idTournament, limit, offset);
     return { data };
   }
 

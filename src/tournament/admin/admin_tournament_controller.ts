@@ -147,15 +147,16 @@ export class AdminTournamentController {
     });
   };
 
-  // GET /admin/tournaments/:id_tournament/activity?limit=
+  // GET /admin/tournaments/:id_tournament/activity?limit=&offset=
   adminGetActivity = async (req: Request, res: Response) => {
     const tournamentId = req.params.id_tournament?.trim();
     if (!tournamentId) {
       return res.status(400).json({ ok: false, message: "Falta param: id_tournament" });
     }
     const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
+    const offset = req.query.offset ? parseInt(req.query.offset as string, 10) : undefined;
 
-    const result = await this.service.getActivity(tournamentId, req.user!.id_user, limit);
+    const result = await this.service.getActivity(tournamentId, req.user!.id_user, limit, offset);
 
     if (!result.ok) {
       if (result.error === ADMIN_TOURNAMENT_ERRORS.TOURNAMENT_NOT_FOUND) {

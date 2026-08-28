@@ -121,37 +121,47 @@ router.get(
   })
 );
 
-// GET /api/v1/tournament/public/tournaments/:id_tournament/matches
-// Grilla combinada de TODOS los partidos (grupos + llave) de TODAS las
-// categorías del torneo — la pestaña "Matches" a nivel torneo.
+// GET /api/v1/tournament/public/tournaments/:id_tournament/matches?page=&limit=
+// Grilla combinada de partidos (grupos + llave) de TODAS las categorías del
+// torneo — la pestaña "Matches" a nivel torneo. Paginado: antes de esto
+// traía el torneo entero de una sola pasada, sin límite, para tráfico
+// anónimo (el de mayor volumen del sitio).
 router.get(
   "/public/tournaments/:id_tournament/matches",
   asyncHandler(async (req, res) => {
     const { id_tournament } = req.params;
-    const rows = await repo.getAllMatches(id_tournament);
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
+    const { rows, total } = await repo.getAllMatches(id_tournament, { page, limit });
     return res.json({
       ok: true,
-      data: rows.map((m) => ({
-        id_match: m.id_match,
-        stage: m.stage,
-        category_type: m.category_type,
-        category_range: m.category_range,
-        gender: m.gender,
-        round: m.round,
-        player1_id: m.player1_id,
-        player1_name: m.player1_id ? `${m.player1_first ?? ""} ${m.player1_last ?? ""}`.trim() : null,
-        player1_club: m.player1_club,
-        player2_id: m.player2_id,
-        player2_name: m.player2_id ? `${m.player2_first ?? ""} ${m.player2_last ?? ""}`.trim() : null,
-        player2_club: m.player2_club,
-        winner_id: m.winner_id,
-        sets_player1: m.sets_player1,
-        sets_player2: m.sets_player2,
-        status: m.status,
-        best_of_sets: m.best_of_sets,
-        played_at: formatTimestamp(m.played_at),
-        set_scores: m.set_scores ?? null,
-      })),
+      data: {
+        page,
+        limit,
+        total,
+        total_pages: Math.max(1, Math.ceil(total / limit)),
+        matches: rows.map((m) => ({
+          id_match: m.id_match,
+          stage: m.stage,
+          category_type: m.category_type,
+          category_range: m.category_range,
+          gender: m.gender,
+          round: m.round,
+          player1_id: m.player1_id,
+          player1_name: m.player1_id ? `${m.player1_first ?? ""} ${m.player1_last ?? ""}`.trim() : null,
+          player1_club: m.player1_club,
+          player2_id: m.player2_id,
+          player2_name: m.player2_id ? `${m.player2_first ?? ""} ${m.player2_last ?? ""}`.trim() : null,
+          player2_club: m.player2_club,
+          winner_id: m.winner_id,
+          sets_player1: m.sets_player1,
+          sets_player2: m.sets_player2,
+          status: m.status,
+          best_of_sets: m.best_of_sets,
+          played_at: formatTimestamp(m.played_at),
+          set_scores: m.set_scores ?? null,
+        })),
+      },
     });
   })
 );

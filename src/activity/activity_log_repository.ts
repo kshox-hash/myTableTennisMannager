@@ -45,7 +45,10 @@ export class ActivityLogRepository {
     );
   }
 
-  async listByTournament(idTournament: string, limit = 100): Promise<ActivityLogRow[]> {
+  // offset permite "Cargar más" en vez de traer el historial entero del
+  // torneo de una — antes solo había un límite fijo (100) sin forma de
+  // pedir lo que quedaba después.
+  async listByTournament(idTournament: string, limit = 100, offset = 0): Promise<ActivityLogRow[]> {
     const res = await this.pool.query<ActivityLogRow>(
       `SELECT a.id_activity, a.id_user, a.action, a.detail, a.created_at::text,
               u.email, u.first_name, u.last_name
@@ -53,8 +56,8 @@ export class ActivityLogRepository {
        JOIN users u ON u.id_user = a.id_user
        WHERE a.id_tournament = $1
        ORDER BY a.created_at DESC
-       LIMIT $2`,
-      [idTournament, limit]
+       LIMIT $2 OFFSET $3`,
+      [idTournament, limit, offset]
     );
     return res.rows;
   }

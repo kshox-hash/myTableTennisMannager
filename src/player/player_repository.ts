@@ -464,10 +464,11 @@ export class PlayerRepository {
   // jugar) | 'finished' (jugado o walkover).
   async getTournamentMatches(
     id_tournament: string,
-    opts: { status?: "all" | "scheduled" | "live" | "finished"; limit?: number } = {}
+    opts: { status?: "all" | "scheduled" | "live" | "finished"; limit?: number; offset?: number } = {}
   ) {
     const status = opts.status ?? "all";
-    const limit = Math.min(opts.limit ?? 100, 1000);
+    const limit = Math.min(opts.limit ?? 100, 100);
+    const offset = Math.max(opts.offset ?? 0, 0);
 
     let statusClause = "";
     if (status === "finished") statusClause = "AND status IN ('played', 'walkover')";
@@ -537,11 +538,35 @@ export class PlayerRepository {
       SELECT * FROM matches
       WHERE NOT (player1_id IS NULL AND player2_id IS NULL) ${statusClause}
       ${orderClause}
-      LIMIT $2
+      LIMIT $2 OFFSET $3
     `;
 
-    const res = await this.pool.query(query, [id_tournament, limit]);
-    return res.rows;
+    // Antes el frontend pedía limit=1000 fijo para "traer todo" — sin forma
+    // de pedir más, los partidos que sobraban ese límite desaparecían de la
+    // lista sin ningún aviso. Con offset real hace falta el total para que
+    // el frontend sepa cuántas páginas mostrar.
+    const countQuery = `
+      WITH matches AS (
+        SELECT gm.player1_id, gm.player2_id, gm.status
+        FROM group_matches gm
+        JOIN category_groups cg ON cg.id_group = gm.id_group
+        WHERE cg.id_tournament = $1
+
+        UNION ALL
+
+        SELECT bm.player1_id, bm.player2_id, bm.status
+        FROM bracket_matches bm
+        WHERE bm.id_tournament = $1
+      )
+      SELECT COUNT(*)::text AS count FROM matches
+      WHERE NOT (player1_id IS NULL AND player2_id IS NULL) ${statusClause}
+    `;
+
+    const [res, countRes] = await Promise.all([
+      this.pool.query(query, [id_tournament, limit, offset]),
+      this.pool.query<{ count: string }>(countQuery, [id_tournament]),
+    ]);
+    return { rows: res.rows, total: Number(countRes.rows[0]?.count ?? 0) };
   }
 
   // Detalle completo de UN partido (grupo o llave) — alimenta la página de

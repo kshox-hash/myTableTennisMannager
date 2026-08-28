@@ -86,9 +86,10 @@ export class AdminTournamentService {
   async getActivity(
     tournamentId: string,
     requestedBy: string,
-    limit?: number
+    limit?: number,
+    offset?: number
   ): Promise<Result<ActivityLogRow[], AdminTournamentError>> {
-    const result = await this.repo.getActivity(tournamentId, requestedBy, limit);
+    const result = await this.repo.getActivity(tournamentId, requestedBy, limit, offset);
     if (result.error === "TOURNAMENT_NOT_FOUND") return fail(ADMIN_TOURNAMENT_ERRORS.TOURNAMENT_NOT_FOUND);
     if (result.error === "NOT_TOURNAMENT_OWNER") return fail(ADMIN_TOURNAMENT_ERRORS.NOT_TOURNAMENT_OWNER);
     return ok(result.data);

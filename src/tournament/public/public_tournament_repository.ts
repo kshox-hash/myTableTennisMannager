@@ -151,8 +151,15 @@ export class PublicTournamentRepository {
   // Todos los partidos del torneo (grupos + llave, de todas las categorías)
   // en una sola grilla — es lo que en la referencia es la pestaña "Matches"
   // a nivel torneo, en vez de tener que entrar categoría por categoría.
-  async getAllMatches(id_tournament: string): Promise<
-    Array<{
+  // Grilla combinada de grupos + llave, paginada — antes traía TODOS los
+  // partidos del torneo de una sola vez (tráfico anónimo, el de mayor
+  // volumen del sitio), sin límite. El UNION ALL queda igual, solo se
+  // envuelve para poder contar y paginar sobre el resultado combinado.
+  async getAllMatches(
+    id_tournament: string,
+    pagination: { page: number; limit: number }
+  ): Promise<{
+    rows: Array<{
       id_match: string;
       stage: "group" | "bracket";
       category_type: string;
@@ -174,41 +181,53 @@ export class PublicTournamentRepository {
       best_of_sets: number;
       played_at: string | Date | null;
       set_scores: unknown;
-    }>
-  > {
-    const res = await this.pool.query(
-      `SELECT gm.id_match, 'group' AS stage, tc.category_type, tc.category_range, tc.gender,
-              NULL::int AS round,
-              gm.player1_id, u1.first_name AS player1_first, u1.last_name AS player1_last, c1.name AS player1_club,
-              gm.player2_id, u2.first_name AS player2_first, u2.last_name AS player2_last, c2.name AS player2_club,
-              gm.winner_id, gm.sets_player1, gm.sets_player2, gm.status, gm.best_of_sets, gm.played_at, gm.set_scores
-       FROM group_matches gm
-       JOIN tournament_categories tc ON tc.id_category = gm.id_category
-       JOIN users u1 ON u1.id_user = gm.player1_id
-       JOIN users u2 ON u2.id_user = gm.player2_id
-       LEFT JOIN clubs c1 ON c1.id_club = u1.id_club
-       LEFT JOIN clubs c2 ON c2.id_club = u2.id_club
-       WHERE gm.id_tournament = $1
+    }>;
+    total: number;
+  }> {
+    const union = `
+      SELECT gm.id_match, 'group' AS stage, tc.category_type, tc.category_range, tc.gender,
+             NULL::int AS round,
+             gm.player1_id, u1.first_name AS player1_first, u1.last_name AS player1_last, c1.name AS player1_club,
+             gm.player2_id, u2.first_name AS player2_first, u2.last_name AS player2_last, c2.name AS player2_club,
+             gm.winner_id, gm.sets_player1, gm.sets_player2, gm.status, gm.best_of_sets, gm.played_at, gm.set_scores
+      FROM group_matches gm
+      JOIN tournament_categories tc ON tc.id_category = gm.id_category
+      JOIN users u1 ON u1.id_user = gm.player1_id
+      JOIN users u2 ON u2.id_user = gm.player2_id
+      LEFT JOIN clubs c1 ON c1.id_club = u1.id_club
+      LEFT JOIN clubs c2 ON c2.id_club = u2.id_club
+      WHERE gm.id_tournament = $1
 
-       UNION ALL
+      UNION ALL
 
-       SELECT bm.id_match, 'bracket' AS stage, tc.category_type, tc.category_range, tc.gender,
-              bm.round,
-              bm.player1_id, u1.first_name AS player1_first, u1.last_name AS player1_last, c1.name AS player1_club,
-              bm.player2_id, u2.first_name AS player2_first, u2.last_name AS player2_last, c2.name AS player2_club,
-              bm.winner_id, bm.sets_player1, bm.sets_player2, bm.status, bm.best_of_sets, bm.played_at, bm.set_scores
-       FROM bracket_matches bm
-       JOIN tournament_categories tc ON tc.id_category = bm.id_category
-       LEFT JOIN users u1 ON u1.id_user = bm.player1_id
-       LEFT JOIN users u2 ON u2.id_user = bm.player2_id
-       LEFT JOIN clubs c1 ON c1.id_club = u1.id_club
-       LEFT JOIN clubs c2 ON c2.id_club = u2.id_club
-       WHERE bm.id_tournament = $1 AND bm.is_bye = FALSE AND bm.player1_id IS NOT NULL AND bm.player2_id IS NOT NULL
+      SELECT bm.id_match, 'bracket' AS stage, tc.category_type, tc.category_range, tc.gender,
+             bm.round,
+             bm.player1_id, u1.first_name AS player1_first, u1.last_name AS player1_last, c1.name AS player1_club,
+             bm.player2_id, u2.first_name AS player2_first, u2.last_name AS player2_last, c2.name AS player2_club,
+             bm.winner_id, bm.sets_player1, bm.sets_player2, bm.status, bm.best_of_sets, bm.played_at, bm.set_scores
+      FROM bracket_matches bm
+      JOIN tournament_categories tc ON tc.id_category = bm.id_category
+      LEFT JOIN users u1 ON u1.id_user = bm.player1_id
+      LEFT JOIN users u2 ON u2.id_user = bm.player2_id
+      LEFT JOIN clubs c1 ON c1.id_club = u1.id_club
+      LEFT JOIN clubs c2 ON c2.id_club = u2.id_club
+      WHERE bm.id_tournament = $1 AND bm.is_bye = FALSE AND bm.player1_id IS NOT NULL AND bm.player2_id IS NOT NULL
+    `;
 
-       ORDER BY played_at DESC NULLS LAST, status ASC, category_type ASC`,
+    const countRes = await this.pool.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM (${union}) sub`,
       [id_tournament]
     );
-    return res.rows;
+    const total = Number(countRes.rows[0]?.count ?? 0);
+
+    const offset = (pagination.page - 1) * pagination.limit;
+    const rowsRes = await this.pool.query(
+      `SELECT * FROM (${union}) sub
+       ORDER BY played_at DESC NULLS LAST, status ASC, category_type ASC
+       LIMIT $2 OFFSET $3`,
+      [id_tournament, pagination.limit, offset]
+    );
+    return { rows: rowsRes.rows, total };
   }
 
   async getCategoryDetail(id_category: string): Promise<{
