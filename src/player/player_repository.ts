@@ -156,10 +156,7 @@ export class PlayerRepository {
     const queuesByTournament = new Map<string, { queue: { id_match: string }[]; blocked: { id_match: string }[] }>();
     await Promise.all(
       tournamentIds.map(async (tid) => {
-        const [queue, blocked] = await Promise.all([
-          this.tablesRepo.getDispatchQueue(tid),
-          this.tablesRepo.getBlockedMatches(tid),
-        ]);
+        const { queue, blocked } = await this.tablesRepo.getQueueAndBlocked(tid);
         queuesByTournament.set(tid, { queue, blocked });
       })
     );

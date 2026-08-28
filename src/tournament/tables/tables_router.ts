@@ -15,12 +15,12 @@ router.get(
   requireRole("admin"),
   asyncHandler(async (req, res) => {
     const { id_tournament } = req.params;
-    const [numTables, active, ready, blocked] = await Promise.all([
+    const [numTables, active, readyAndBlocked] = await Promise.all([
       repo.getNumTables(id_tournament),
       repo.getActiveTables(id_tournament),
-      repo.getReadyMatches(id_tournament),
-      repo.getBlockedMatches(id_tournament),
+      repo.getReadyAndBlocked(id_tournament),
     ]);
+    const { ready, blocked } = readyAndBlocked;
 
     // Construir grid de mesas
     const activeByTable = new Map(active.map(m => [m.table_number, m]));

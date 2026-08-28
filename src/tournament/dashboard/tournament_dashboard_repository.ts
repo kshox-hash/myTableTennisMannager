@@ -47,7 +47,22 @@ export class TournamentDashboardRepository {
     if (tRes.rowCount === 0) return null;
     const t = tRes.rows[0];
 
-    // Stats por categoría en una sola query
+    // Stats por categoría — subconsultas escalares en vez de LEFT JOIN +
+    // GROUP BY: unir enrollments, group_matches Y bracket_matches directo
+    // contra tournament_categories producía el producto cruzado de las
+    // tres tablas por cada categoría ANTES de que el GROUP BY lo volviera
+    // a juntar (mismo bug ya arreglado en public_tournament_repository.ts
+    // y admin_tournament_repository.ts, acá con tres joins fanning en vez
+    // de dos).
+    //
+    // Las subconsultas de group_matches repiten `cg.id_tournament = $1`
+    // a propósito, aunque ya se sepa por el WHERE de afuera: category_groups
+    // solo tiene el índice compuesto (id_tournament, id_category) — sin la
+    // columna líder, Postgres no puede usarlo para filtrar por id_category
+    // sola y cae a Seq Scan. Verificado con EXPLAIN ANALYZE: la primera
+    // versión (solo id_category) terminaba escaneando group_matches entera
+    // y salía MÁS LENTA que el LEFT JOIN original (35ms vs 4.5ms) — esta
+    // versión, con las dos columnas, usa el índice como corresponde.
     const catRes = await this.pool.query<CategoryDashboard>(
       `SELECT
          tc.id_category,
@@ -56,28 +71,23 @@ export class TournamentDashboardRepository {
          tc.gender,
          COALESCE(tc.phase, 'enrollment') AS phase,
 
-         -- Inscritos activos
-         COUNT(DISTINCT e.id_user) FILTER (WHERE e.status = 'active') AS enrolled,
+         (SELECT COUNT(*) FROM enrollments e
+          WHERE e.id_category = tc.id_category AND e.status = 'active') AS enrolled,
 
-         -- Partidos de grupo
-         COUNT(DISTINCT gm.id_match)                                    AS group_matches_total,
-         COUNT(DISTINCT gm.id_match) FILTER (WHERE gm.winner_id IS NOT NULL) AS group_matches_played,
+         (SELECT COUNT(*) FROM group_matches gm
+          JOIN category_groups cg ON cg.id_group = gm.id_group
+          WHERE cg.id_tournament = $1 AND cg.id_category = tc.id_category) AS group_matches_total,
+         (SELECT COUNT(*) FROM group_matches gm
+          JOIN category_groups cg ON cg.id_group = gm.id_group
+          WHERE cg.id_tournament = $1 AND cg.id_category = tc.id_category AND gm.winner_id IS NOT NULL) AS group_matches_played,
 
-         -- Partidos de llave
-         COUNT(DISTINCT bm.id_match)                                    AS bracket_matches_total,
-         COUNT(DISTINCT bm.id_match) FILTER (WHERE bm.winner_id IS NOT NULL) AS bracket_matches_played
+         (SELECT COUNT(*) FROM bracket_matches bm
+          WHERE bm.id_tournament = $1 AND bm.id_category = tc.id_category) AS bracket_matches_total,
+         (SELECT COUNT(*) FROM bracket_matches bm
+          WHERE bm.id_tournament = $1 AND bm.id_category = tc.id_category AND bm.winner_id IS NOT NULL) AS bracket_matches_played
 
        FROM tournament_categories tc
-       LEFT JOIN enrollments e
-              ON e.id_category = tc.id_category
-       LEFT JOIN category_groups cg
-              ON cg.id_category = tc.id_category
-       LEFT JOIN group_matches gm
-              ON gm.id_group = cg.id_group
-       LEFT JOIN bracket_matches bm
-              ON bm.id_category = tc.id_category
        WHERE tc.id_tournament = $1
-       GROUP BY tc.id_category, tc.category_type, tc.category_range, tc.gender, tc.phase
        ORDER BY tc.category_type, tc.category_range`,
       [id_tournament]
     );

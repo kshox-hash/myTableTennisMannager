@@ -223,11 +223,8 @@ export class TablesRepository {
   // forma justa entre categorías (ver applyFairOrder): ninguna categoría
   // puede acaparar todas las mesas mientras otra espera.
   async getReadyMatches(id_tournament: string): Promise<ReadyMatch[]> {
-    const { combined, busyPlayers } = await this.loadCandidateMatches(id_tournament);
-    const ready = combined.filter(
-      (m) => !busyPlayers.has(m.player1_id) && !busyPlayers.has(m.player2_id)
-    );
-    return this.applyFairOrder(ready);
+    const { ready } = await this.getReadyAndBlocked(id_tournament);
+    return ready;
   }
 
   // Partidos que YA tienen a los dos jugadores definidos pero no se pueden
@@ -235,23 +232,38 @@ export class TablesRepository {
   // cualquier categoría). Se muestran aparte para que la cola no "desaparezca"
   // cuando todas las mesas están ocupadas — solo cambia de sección.
   async getBlockedMatches(id_tournament: string): Promise<ReadyMatch[]> {
+    const { blocked } = await this.getReadyAndBlocked(id_tournament);
+    return blocked;
+  }
+
+  // Ready + blocked juntos, calculando loadCandidateMatches (3 queries) una
+  // sola vez — antes getReadyMatches y getBlockedMatches lo recalculaban
+  // cada uno por su cuenta, así que cualquier llamador que necesitara ambos
+  // (el panel de Mesas del admin, el dashboard del jugador) terminaba
+  // disparando 6 queries en vez de 3, y como los dos se sondean seguido la
+  // redundancia se repetía en cada refresco, no era un costo único.
+  async getReadyAndBlocked(
+    id_tournament: string
+  ): Promise<{ ready: ReadyMatch[]; blocked: ReadyMatch[] }> {
     const { combined, busyPlayers } = await this.loadCandidateMatches(id_tournament);
+    const ready = combined.filter(
+      (m) => !busyPlayers.has(m.player1_id) && !busyPlayers.has(m.player2_id)
+    );
     const blocked = combined.filter(
       (m) => busyPlayers.has(m.player1_id) || busyPlayers.has(m.player2_id)
     );
-    return this.applyFairOrder(blocked);
+    return { ready: this.applyFairOrder(ready), blocked: this.applyFairOrder(blocked) };
   }
 
-  // La cola real de despacho: getReadyMatches ya excluye jugadores ocupados
-  // en OTRA mesa existente, pero acá además hay que evitar que dos partidos
-  // de la MISMA tanda (ninguno tenía mesa todavía) le den dos mesas al mismo
+  // La cola real de despacho: ready ya excluye jugadores ocupados en OTRA
+  // mesa existente, pero acá además hay que evitar que dos partidos de la
+  // MISMA tanda (ninguno tenía mesa todavía) le den dos mesas al mismo
   // jugador — se van marcando "ocupados" a medida que se toman y se saltan
   // los partidos siguientes que los involucren. Este es el mismo orden que
   // usa el panel de Mesas para sugerir a qué mesa asignar cada partido, así
   // que refleja la cola real (aunque la asignación final la hace el admin
   // a mano, mesa por mesa, no automática).
-  async getDispatchQueue(id_tournament: string): Promise<ReadyMatch[]> {
-    const ready = await this.getReadyMatches(id_tournament);
+  private buildQueue(ready: ReadyMatch[]): ReadyMatch[] {
     const busyThisBatch = new Set<string>();
     const queue: ReadyMatch[] = [];
     for (const m of ready) {
@@ -261,6 +273,20 @@ export class TablesRepository {
       busyThisBatch.add(m.player2_id);
     }
     return queue;
+  }
+
+  async getDispatchQueue(id_tournament: string): Promise<ReadyMatch[]> {
+    const { ready } = await this.getReadyAndBlocked(id_tournament);
+    return this.buildQueue(ready);
+  }
+
+  // Cola + bloqueados en un solo cálculo — para los llamadores que
+  // necesitan ambos (ver comentario de getReadyAndBlocked).
+  async getQueueAndBlocked(
+    id_tournament: string
+  ): Promise<{ queue: ReadyMatch[]; blocked: ReadyMatch[] }> {
+    const { ready, blocked } = await this.getReadyAndBlocked(id_tournament);
+    return { queue: this.buildQueue(ready), blocked };
   }
 
   // Reparto justo entre categorías: agrupa los partidos listos por categoría
