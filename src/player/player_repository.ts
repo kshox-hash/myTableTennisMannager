@@ -446,7 +446,14 @@ export class PlayerRepository {
          u.gender,
          tc.id_category,
          tc.category_type, tc.category_range,
-         e.enrolled_at
+         e.enrolled_at,
+         -- Los "jugadores rápidos" que crea el admin (walk-in sin cuenta
+         -- propia, ver createQuickPlayer) reciben un email sintético
+         -- sin-registro+<uuid>@myttm.local y una password que nadie
+         -- conoce — nunca se pueden loguear. Este flag distingue esos
+         -- "walk-in" de una cuenta real para que la UI los pinte distinto,
+         -- sin exponer el email real de nadie en la respuesta.
+         (u.email NOT LIKE 'sin-registro+%@myttm.local') AS is_registered
        FROM enrollments e
        JOIN users u ON u.id_user = e.id_user
        JOIN tournament_categories tc ON tc.id_category = e.id_category
