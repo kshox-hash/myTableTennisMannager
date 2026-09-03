@@ -6,6 +6,17 @@ name: Keep backend awake
 # endpoint público bien liviano cada 10 minutos para que nunca llegue a
 # dormirse, sin costo (el plan free de GitHub Actions alcanza de sobra
 # para esto) y sin tocar el plan de Render.
+#
+# Sirve doble: al pasar el backend a un plan pago (sin sleep), este mismo
+# workflow queda funcionando como monitor de salud — si el servidor se cae
+# de verdad, el paso falla y GitHub manda un email de "workflow falló" al
+# dueño del repo automáticamente (viene activado por default; confirmar en
+# github.com -> tu foto de perfil -> Settings -> Notifications -> "Actions"
+# que esté tildado "Send notifications for failed workflows").
+#
+# Reintenta 2 veces con 10s de espera antes de declarar la falla, para no
+# generar una alerta falsa por un corte de red de un segundo — si falla
+# las 3 veces, es una caída real.
 on:
   schedule:
     - cron: "*/10 * * * *"
@@ -15,5 +26,15 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping health endpoint
-        run: curl -sf --max-time 25 "https://mytabletennismannager.onrender.com/api/v1/tournament/public/stats"
+      - name: Ping health endpoint (con reintentos)
+        run: |
+          for i in 1 2 3; do
+            if curl -sf --max-time 25 "https://mytabletennismannager.onrender.com/api/v1/tournament/public/stats"; then
+              echo "OK (intento $i)"
+              exit 0
+            fi
+            echo "Intento $i falló, reintentando en 10s..."
+            sleep 10
+          done
+          echo "El backend no respondió después de 3 intentos."
+          exit 1
