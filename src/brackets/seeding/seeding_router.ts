@@ -2,6 +2,7 @@ import { Router } from "express";
 import { asyncHandler } from "../../middlewares/wrap_async_middleware";
 import { authRequired } from "../../middlewares/auth_required_middleware";
 import { requireRole } from "../../middlewares/require_role_middleware";
+import { requireTournamentOwnership } from "../../middlewares/require_tournament_ownership_middleware";
 import { SeedingRepository } from "./seeding_repository";
 
 const router = Router();
@@ -12,6 +13,7 @@ router.get(
   "/tournaments/:id_tournament/categories/:id_category/seeds",
   authRequired,
   requireRole("admin"),
+  requireTournamentOwnership(),
   asyncHandler(async (req, res) => {
     const rows = await repo.getSeeds(req.params.id_tournament, req.params.id_category);
     return res.json({ ok: true, data: rows });
@@ -24,6 +26,7 @@ router.put(
   "/tournaments/:id_tournament/categories/:id_category/seeds",
   authRequired,
   requireRole("admin"),
+  requireTournamentOwnership(),
   asyncHandler(async (req, res) => {
     const seeds = req.body as { id_enrollment: string; seed: number }[];
     if (!Array.isArray(seeds) || seeds.some(s => !s.id_enrollment || s.seed == null)) {
@@ -39,6 +42,7 @@ router.delete(
   "/tournaments/:id_tournament/categories/:id_category/seeds",
   authRequired,
   requireRole("admin"),
+  requireTournamentOwnership(),
   asyncHandler(async (req, res) => {
     await repo.clearSeeds(req.params.id_tournament, req.params.id_category);
     return res.json({ ok: true });

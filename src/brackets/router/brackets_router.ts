@@ -8,7 +8,10 @@ import { TournamentPhaseService } from "../../tournament/phases/tournament_phase
 import { authRequired } from "../../middlewares/auth_required_middleware";
 import { requireRole } from "../../middlewares/require_role_middleware";
 import { validateBody } from "../../middlewares/validate_body_middleware";
+import type { Request } from "express";
 import { asyncHandler } from "../../middlewares/wrap_async_middleware";
+import { requireTournamentOwnership } from "../../middlewares/require_tournament_ownership_middleware";
+import DB from "../../db/db_configuration";
 
 import {
   generateGroupsSchema,
@@ -29,6 +32,41 @@ const controller   = new BracketsController(service, phaseService);
 
 const router = Router();
 
+// Varias rutas de esta llave solo traen id_group o id_match, no
+// id_tournament directo — hay que resolverlo antes de poder validar
+// organizador. Encontrado en la auditoría de seguridad: ninguna de estas
+// rutas verificaba antes que quien pide el cambio sea organizador de ESE
+// torneo puntual, solo que fuera "algún" admin.
+async function resolveTournamentFromGroup(req: Request): Promise<string | null> {
+  const idGroup = req.params.id_group;
+  if (!idGroup) return null;
+  const res = await DB.getPool().query<{ id_tournament: string }>(
+    `SELECT id_tournament FROM category_groups WHERE id_group = $1`,
+    [idGroup]
+  );
+  return res.rows[0]?.id_tournament ?? null;
+}
+
+async function resolveTournamentFromGroupMatch(req: Request): Promise<string | null> {
+  const idMatch = req.params.id_match;
+  if (!idMatch) return null;
+  const res = await DB.getPool().query<{ id_tournament: string }>(
+    `SELECT id_tournament FROM group_matches WHERE id_match = $1`,
+    [idMatch]
+  );
+  return res.rows[0]?.id_tournament ?? null;
+}
+
+async function resolveTournamentFromBracketMatch(req: Request): Promise<string | null> {
+  const idMatch = req.params.id_match;
+  if (!idMatch) return null;
+  const res = await DB.getPool().query<{ id_tournament: string }>(
+    `SELECT id_tournament FROM bracket_matches WHERE id_match = $1`,
+    [idMatch]
+  );
+  return res.rows[0]?.id_tournament ?? null;
+}
+
 // ─── FASE DE GRUPOS ───────────────────────────────────────────────────────────
 
 // Generar grupos para una categoría
@@ -37,6 +75,7 @@ router.post(
   "/tournaments/:id_tournament/categories/:id_category/generate",
   authRequired,
   requireRole("admin"),
+  requireTournamentOwnership(),
   validateBody(generateGroupsSchema),
   asyncHandler(controller.generateGroups)
 );
@@ -55,6 +94,7 @@ router.post(
   "/tournaments/:id_tournament/categories/:id_category/regenerate-groups",
   authRequired,
   requireRole("admin"),
+  requireTournamentOwnership(),
   validateBody(generateGroupsSchema),
   asyncHandler(controller.regenerateGroups)
 );
@@ -65,6 +105,7 @@ router.post(
   "/tournaments/:id_tournament/categories/:id_category/set-groups-manual",
   authRequired,
   requireRole("admin"),
+  requireTournamentOwnership(),
   validateBody(setGroupsManualSchema),
   asyncHandler(controller.setGroupsManual)
 );
@@ -75,6 +116,7 @@ router.post(
   "/groups/:id_group/members",
   authRequired,
   requireRole("admin"),
+  requireTournamentOwnership(resolveTournamentFromGroup),
   validateBody(addPlayerToGroupSchema),
   asyncHandler(controller.addPlayerToGroup)
 );
@@ -85,6 +127,7 @@ router.patch(
   "/groups/:id_group/qualifiers",
   authRequired,
   requireRole("admin"),
+  requireTournamentOwnership(resolveTournamentFromGroup),
   validateBody(updateGroupQualifiersSchema),
   asyncHandler(controller.updateGroupQualifiers)
 );
@@ -95,6 +138,7 @@ router.patch(
   "/tournaments/:id_tournament/categories/:id_category/move-player",
   authRequired,
   requireRole("admin"),
+  requireTournamentOwnership(),
   validateBody(moveGroupMemberSchema),
   asyncHandler(controller.moveGroupMember)
 );
@@ -105,6 +149,7 @@ router.post(
   "/matches/:id_match/result",
   authRequired,
   requireRole("admin"),
+  requireTournamentOwnership(resolveTournamentFromGroupMatch),
   validateBody(matchResultSchema),
   asyncHandler(controller.recordResult)
 );
@@ -115,6 +160,7 @@ router.post(
   "/matches/:id_match/undo",
   authRequired,
   requireRole("admin"),
+  requireTournamentOwnership(resolveTournamentFromGroupMatch),
   asyncHandler(controller.undoResult)
 );
 
@@ -124,6 +170,7 @@ router.patch(
   "/matches/:id_match/referee",
   authRequired,
   requireRole("admin"),
+  requireTournamentOwnership(resolveTournamentFromGroupMatch),
   validateBody(setMatchRefereeSchema),
   asyncHandler(controller.setGroupMatchReferee)
 );
@@ -136,6 +183,7 @@ router.post(
   "/tournaments/:id_tournament/categories/:id_category/generate-bracket",
   authRequired,
   requireRole("admin"),
+  requireTournamentOwnership(),
   validateBody(generateBracketSchema),
   asyncHandler(controller.generateBracket)
 );
@@ -154,6 +202,7 @@ router.post(
   "/bracket-matches/:id_match/result",
   authRequired,
   requireRole("admin"),
+  requireTournamentOwnership(resolveTournamentFromBracketMatch),
   validateBody(matchResultSchema),
   asyncHandler(controller.recordBracketResult)
 );
@@ -164,6 +213,7 @@ router.patch(
   "/bracket-matches/:id_match/referee",
   authRequired,
   requireRole("admin"),
+  requireTournamentOwnership(resolveTournamentFromBracketMatch),
   validateBody(setMatchRefereeSchema),
   asyncHandler(controller.setBracketMatchReferee)
 );

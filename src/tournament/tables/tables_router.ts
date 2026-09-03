@@ -1,11 +1,28 @@
+import type { Request } from "express";
 import { Router } from "express";
 import { asyncHandler } from "../../middlewares/wrap_async_middleware";
 import { authRequired } from "../../middlewares/auth_required_middleware";
 import { requireRole } from "../../middlewares/require_role_middleware";
+import { requireTournamentOwnership } from "../../middlewares/require_tournament_ownership_middleware";
 import { TablesRepository } from "./tables_repository";
+import DB from "../../db/db_configuration";
 
 const router = Router();
 const repo   = new TablesRepository();
+
+// /tables/assign y /tables/release solo traen id_match + match_type en el
+// body, no id_tournament — hay que buscarlo primero para poder validar que
+// quien pide esto es organizador de ESE torneo, no de cualquier otro.
+async function resolveTournamentFromMatch(req: Request): Promise<string | null> {
+  const { id_match, match_type } = req.body as { id_match?: string; match_type?: string };
+  if (!id_match || (match_type !== "group" && match_type !== "bracket")) return null;
+  const table = match_type === "group" ? "group_matches" : "bracket_matches";
+  const res = await DB.getPool().query<{ id_tournament: string }>(
+    `SELECT id_tournament FROM ${table} WHERE id_match = $1`,
+    [id_match]
+  );
+  return res.rows[0]?.id_tournament ?? null;
+}
 
 // GET /api/v1/tournament/:id_tournament/tables
 // Devuelve num_tables, qué mesa tiene qué partido, y lista de partidos listos
@@ -13,6 +30,7 @@ router.get(
   "/:id_tournament/tables",
   authRequired,
   requireRole("admin"),
+  requireTournamentOwnership(),
   asyncHandler(async (req, res) => {
     const { id_tournament } = req.params;
     const [numTables, active, readyAndBlocked] = await Promise.all([
@@ -70,6 +88,7 @@ router.put(
   "/:id_tournament/tables/config",
   authRequired,
   requireRole("admin"),
+  requireTournamentOwnership(),
   asyncHandler(async (req, res) => {
     const num_tables = Number(req.body.num_tables);
     if (!num_tables || num_tables < 1 || num_tables > 50) {
@@ -86,6 +105,7 @@ router.patch(
   "/tables/assign",
   authRequired,
   requireRole("admin"),
+  requireTournamentOwnership(resolveTournamentFromMatch),
   asyncHandler(async (req, res) => {
     const { id_match, match_type, table_number } = req.body as {
       id_match?: string;
@@ -126,13 +146,17 @@ router.patch(
   "/tables/release",
   authRequired,
   requireRole("admin"),
+  requireTournamentOwnership(resolveTournamentFromMatch),
   asyncHandler(async (req, res) => {
     const { id_match, match_type } = req.body as {
-      id_match: string;
-      match_type: "group" | "bracket";
+      id_match?: string;
+      match_type?: string;
     };
     if (!id_match || !match_type) {
       return res.status(400).json({ ok: false, message: "id_match y match_type son obligatorios" });
+    }
+    if (match_type !== "group" && match_type !== "bracket") {
+      return res.status(400).json({ ok: false, message: "match_type debe ser 'group' o 'bracket'" });
     }
     await repo.releaseTable(id_match, match_type, req.user!.id_user);
     return res.json({ ok: true });

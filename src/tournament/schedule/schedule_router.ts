@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { asyncHandler } from "../../middlewares/wrap_async_middleware";
 import { authRequired } from "../../middlewares/auth_required_middleware";
+import { requireRole } from "../../middlewares/require_role_middleware";
+import { requireTournamentOwnership } from "../../middlewares/require_tournament_ownership_middleware";
 import { ScheduleRepository } from "./schedule_repository";
 import { simulateSchedule } from "./schedule_logic";
 
@@ -14,6 +16,8 @@ const repo = new ScheduleRepository();
 router.get(
   "/:id_tournament/schedule",
   authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(),
   asyncHandler(async (req, res) => {
     const { id_tournament } = req.params;
     const avgMinutes = Math.min(Math.max(Number(req.query.avg_minutes) || 15, 5), 60);
@@ -95,6 +99,8 @@ router.get(
 router.post(
   "/:id_tournament/schedule/confirm",
   authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(),
   asyncHandler(async (req, res) => {
     const { id_tournament } = req.params;
     const avgMinutes = Math.min(Math.max(Number(req.body.avg_minutes) || 15, 5), 60);

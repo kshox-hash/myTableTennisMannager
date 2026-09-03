@@ -7,6 +7,7 @@ import { authRequired } from "../../middlewares/auth_required_middleware";
 import { requireRole } from "../../middlewares/require_role_middleware";
 import { validateBody } from "../../middlewares/validate_body_middleware";
 import { asyncHandler } from "../../middlewares/wrap_async_middleware";
+import { requireTournamentOwnership } from "../../middlewares/require_tournament_ownership_middleware";
 
 import {
   createTournamentSchema,
@@ -65,6 +66,7 @@ router.patch(
   authRequired,
   requireRole("admin"),
   validateBody(updateTournamentSchema),
+  requireTournamentOwnership(),
   asyncHandler(controller.adminUpdateTournament)
 );
 
@@ -73,6 +75,7 @@ router.post(
   "/admin/tournaments/:id_tournament/cancel",
   authRequired,
   requireRole("admin"),
+  requireTournamentOwnership(),
   asyncHandler(controller.adminCancelTournament)
 );
 
@@ -81,6 +84,7 @@ router.get(
   "/admin/tournaments/:id_tournament/activity",
   authRequired,
   requireRole("admin"),
+  requireTournamentOwnership(),
   asyncHandler(controller.adminGetActivity)
 );
 
@@ -89,6 +93,7 @@ router.get(
   "/admin/tournaments/:id_tournament/enrollments",
   authRequired,
   requireRole("admin"),
+  requireTournamentOwnership(),
   asyncHandler(controller.adminGetTournamentEnrollments)
 );
 
@@ -97,6 +102,7 @@ router.get(
   "/admin/tournaments/:id_tournament/categories",
   authRequired,
   requireRole("admin"),
+  requireTournamentOwnership(),
   asyncHandler(controller.adminGetTournamentCategories)
 );
 
@@ -105,6 +111,7 @@ router.get(
   "/admin/tournaments/:id_tournament/category/:id_category/players",
   authRequired,
   requireRole("admin"),
+  requireTournamentOwnership(),
   asyncHandler(controller.adminGetCategoryPlayers)
 );
 
@@ -113,6 +120,7 @@ router.post(
   "/admin/tournaments/:id_tournament/enrollments/remove",
   authRequired,
   requireRole("admin"),
+  requireTournamentOwnership(),
   asyncHandler(controller.adminRemoveEnrollment)
 );
 
@@ -121,6 +129,7 @@ router.post(
   "/admin/tournaments/:id_tournament/enrollments/check-in",
   authRequired,
   requireRole("admin"),
+  requireTournamentOwnership(),
   asyncHandler(controller.adminSetCheckIn)
 );
 
@@ -131,6 +140,7 @@ router.post(
   authRequired,
   requireRole("admin"),
   validateBody(adminAddPlayerSchema),
+  requireTournamentOwnership(),
   asyncHandler(controller.adminAddPlayer)
 );
 
@@ -139,6 +149,7 @@ router.delete(
   "/admin/tournaments/:id_tournament/category/:id_category/player/:id_user",
   authRequired,
   requireRole("admin"),
+  requireTournamentOwnership(),
   asyncHandler(controller.adminRemovePlayerFromCategory)
 );
 
