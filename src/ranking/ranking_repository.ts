@@ -58,4 +58,24 @@ export class RankingRepository {
     const res = await this.pool.query(q, [limit]);
     return res.rows as RankingRow[];
   }
+
+  // Un jugador puntual, para la tarjeta "Ranking nacional" del dashboard —
+  // sin traer el resto de la tabla completa solo para encontrarse a sí
+  // mismo. null = todavía no jugó ningún partido en la plataforma (no
+  // entra en RANKED_PLAYERS_CTE, que filtra matches_played > 0).
+  async getPlayerRanking(idUser: string): Promise<RankingRow | null> {
+    const q = `
+      WITH ranked_players AS (${RANKED_PLAYERS_CTE})
+      SELECT
+        rp.id_user, u.first_name, u.last_name, u.email,
+        cl.name AS club_name,
+        rp.ranking_points, rp.ranking_position, rp.matches_played, rp.matches_won
+      FROM ranked_players rp
+      JOIN users u ON u.id_user = rp.id_user
+      LEFT JOIN clubs cl ON cl.id_club = u.id_club
+      WHERE rp.id_user = $1;
+    `;
+    const res = await this.pool.query(q, [idUser]);
+    return (res.rows[0] as RankingRow) ?? null;
+  }
 }

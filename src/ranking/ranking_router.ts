@@ -37,6 +37,19 @@ router.get(
   })
 );
 
+// GET /api/v1/ranking/me — la posición del propio jugador logueado, para
+// la tarjeta "Ranking nacional" del dashboard de inicio. null = todavía
+// no jugó ningún partido en la plataforma (no está rankeado todavía).
+router.get(
+  "/me",
+  authRequired,
+  requireRole(["admin", "player"]),
+  asyncHandler(async (req, res) => {
+    const row = await repo.getPlayerRanking(req.user!.id_user);
+    return res.json({ ok: true, data: row ? shapeRankingRow(row) : null });
+  })
+);
+
 // GET /api/v1/ranking/public — mismo ranking, sin login. Vitrina pública,
 // igual que /tournament/public/*: reusa el mismo repositorio/criterio de
 // orden que la versión autenticada, no duplica la lógica.
