@@ -31,6 +31,16 @@ export type NextMatch = {
   // este partido recién entra a la cola normal de mesas, así que cualquier
   // número previo sería inventado.
   blocking_table_number: number | null;
+  // Fecha/sede del TORNEO (no del partido puntual — acá no hay hora de
+  // partido salvo que el admin haya confirmado una programación, ver
+  // scheduled_start_at) — para poder mostrar "cuándo y dónde" sin
+  // inventar una hora que no existe.
+  event_date: string | null;
+  address: string | null;
+  // Hora puntual del partido — solo si el admin confirmó una
+  // programación real (panel Mesas → Programación); null casi siempre,
+  // el flujo normal es la cola de mesas en vivo, no un horario fijo.
+  scheduled_start_at: string | null;
 };
 
 export type PlayerStats = {
@@ -78,7 +88,10 @@ export class PlayerRepository {
            gm.table_number,
            gm.status,
            cg.group_name,
-           NULL::int AS round
+           NULL::int AS round,
+           t.event_date::text,
+           t.address,
+           gm.scheduled_start_at::text
          FROM group_matches gm
          JOIN category_groups cg  ON cg.id_group    = gm.id_group
          JOIN tournament_categories tc ON tc.id_category = cg.id_category
@@ -107,7 +120,10 @@ export class PlayerRepository {
            bm.table_number,
            bm.status,
            NULL::text AS group_name,
-           bm.round
+           bm.round,
+           t.event_date::text,
+           t.address,
+           NULL::text AS scheduled_start_at
          FROM bracket_matches bm
          JOIN tournament_categories tc ON tc.id_category = bm.id_category
          JOIN tournaments t ON t.id_tournament = bm.id_tournament
