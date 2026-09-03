@@ -3,6 +3,18 @@ import type { UserProfileDB, PlayerStatsDB, UserSearchRow } from "./dto/user_dto
 import type { UpdateProfileDTO, QuickCreatePlayerDTO } from "./schema/user_schema";
 import { type Result, ok, fail } from "../core/constants/result";
 
+function computeAge(birthDate: string | null): number | null {
+  if (!birthDate) return null;
+  const d = new Date(birthDate);
+  if (Number.isNaN(d.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - d.getFullYear();
+  const hadBirthdayThisYear =
+    today.getMonth() > d.getMonth() || (today.getMonth() === d.getMonth() && today.getDate() >= d.getDate());
+  if (!hadBirthdayThisYear) age -= 1;
+  return age;
+}
+
 export class UserService {
   constructor(private repo: UserRepository) {}
 
@@ -49,8 +61,11 @@ export class UserService {
   // públicas del sitio (sin login), a diferencia de getPublicProfile (que sí
   // exige estar logueado y además trae estadísticas de partidos). Expone
   // solo lo pensado para mostrarse en una tarjeta pública: nombre, club,
-  // mano dominante, país y fecha de nacimiento (la edad se calcula en el
-  // frontend a partir de esta última). Nada de email ni datos sensibles.
+  // mano dominante, país y EDAD calculada acá adentro — nunca la fecha de
+  // nacimiento completa. Encontrado en la auditoría de seguridad: antes
+  // devolvía birth_date tal cual a cualquier visitante anónimo, exponiendo
+  // la fecha exacta de nacimiento de cualquier jugador, incluidos menores
+  // en categorías juveniles. Nada de email tampoco.
   async getPublicCard(id_user: string) {
     const user = await this.repo.findById(id_user);
     if (!user) return fail("USER_NOT_FOUND" as const);
@@ -62,7 +77,7 @@ export class UserService {
       club_name: user.club_name,
       dominant_hand: user.dominant_hand,
       country: user.country,
-      birth_date: user.birth_date,
+      age: computeAge(user.birth_date),
     });
   }
 
