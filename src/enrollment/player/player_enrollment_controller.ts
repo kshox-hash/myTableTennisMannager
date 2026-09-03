@@ -60,6 +60,20 @@ export class EnrollmentsController {
         });
       }
 
+      if (error?.message === "BIRTH_DATE_REQUIRED") {
+        return res.status(409).json({
+          ok: false,
+          message: "Completá tu fecha de nacimiento en tu perfil para poder inscribirte en esta categoría",
+        });
+      }
+
+      if (error?.message === "AGE_NOT_ELIGIBLE") {
+        return res.status(409).json({
+          ok: false,
+          message: "No cumplís con el rango de edad de esta categoría",
+        });
+      }
+
       if (error?.message === "INVALID_TOURNAMENT_OR_CATEGORY") {
         return res.status(400).json({
           ok: false,

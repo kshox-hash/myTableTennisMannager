@@ -2,6 +2,7 @@ import type { Pool, PoolClient } from "pg";
 import DB from "../../db/db_configuration";
 import type { EnrollmentDTO } from "../../enrollment/schema/enrollment_schema";
 import { NotificationsRepository } from "../../notifications/notifications_repository";
+import { getCategoryBirthYearRange, isBirthYearInRange } from "../../age_category_logic";
 
 type EnrollmentRow = {
   id_enrollment: string;
@@ -49,6 +50,10 @@ export class EnrollmentsRepository {
           category_phase: string;
           category_gender: "male" | "female" | "mixed";
           user_gender: "male" | "female" | "other" | null;
+          category_type: string;
+          category_range: string;
+          event_date: string | null;
+          user_birth_date: string | null;
         }>(
           `SELECT
              tc.quotas,
@@ -69,7 +74,11 @@ export class EnrollmentsRepository {
              tc.status AS category_status,
              COALESCE(tc.phase, 'enrollment') AS category_phase,
              tc.gender AS category_gender,
-             u.gender AS user_gender
+             u.gender AS user_gender,
+             tc.category_type,
+             tc.category_range,
+             t.event_date::text,
+             u.birth_date::text AS user_birth_date
            FROM tournament_categories tc
            JOIN tournaments t ON t.id_tournament = tc.id_tournament
            JOIN users u ON u.id_user = $3
@@ -86,6 +95,7 @@ export class EnrollmentsRepository {
         const {
           quotas, enrolled_count, already_enrolled, tournament_status,
           category_status, category_phase, category_gender, user_gender,
+          category_type, category_range, event_date, user_birth_date,
         } = quotaRes.rows[0];
 
         // Antes que nada: si ya está inscrito, ese es el motivo real del
@@ -111,6 +121,21 @@ export class EnrollmentsRepository {
         if (category_gender !== "mixed") {
           if (!user_gender) throw new Error("GENDER_REQUIRED");
           if (user_gender !== category_gender) throw new Error("GENDER_MISMATCH");
+        }
+
+        // Elegibilidad por edad — mismos rangos que usa la Federación
+        // Chilena de Tenis de Mesa (FECHITEME), por año de nacimiento
+        // contra el año del torneo, no por edad exacta hoy (ver
+        // age_category_logic.ts). Categorías sin restricción de edad
+        // (Todo Competidor, Iniciación, etc.) o un rango de Máster que no
+        // se pudo interpretar (ej. "Personalizado" con texto libre)
+        // devuelven null acá y no bloquean nada.
+        const seasonYear = event_date ? new Date(event_date).getFullYear() : new Date().getFullYear();
+        const ageRange = getCategoryBirthYearRange(category_type, category_range, seasonYear);
+        if (ageRange) {
+          if (!user_birth_date) throw new Error("BIRTH_DATE_REQUIRED");
+          const birthYear = new Date(user_birth_date).getFullYear();
+          if (!isBirthYearInRange(birthYear, ageRange)) throw new Error("AGE_NOT_ELIGIBLE");
         }
 
         if (quotas !== null && enrolled_count >= Number(quotas)) {
