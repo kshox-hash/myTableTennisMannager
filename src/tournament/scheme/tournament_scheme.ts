@@ -49,6 +49,8 @@ export const createTournamentSchema = z.object({
   allow_mixed: z.boolean().default(true),
   allow_olympic: z.boolean().default(false),
   visibility: z.enum(["public", "private", "internal"]).optional(),
+  num_tables: z.number().int().min(1).max(50).optional(),
+  default_best_of_sets: z.union([z.literal(3), z.literal(5), z.literal(7)]).optional(),
   event_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isValidCalendarDate, { message: "Fecha inválida" }),
   event_time: z
     .string()
@@ -84,6 +86,8 @@ export const updateTournamentSchema = z.object({
   tournament_name: z.string().min(1).max(150).optional(),
   description: z.string().nullable().optional(),
   visibility: z.enum(["public", "private", "internal"]).optional(),
+  num_tables: z.number().int().min(1).max(50).optional(),
+  default_best_of_sets: z.union([z.literal(3), z.literal(5), z.literal(7)]).optional(),
   event_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isValidCalendarDate, { message: "Fecha inválida" }).optional(),
   event_time: z
     .string()

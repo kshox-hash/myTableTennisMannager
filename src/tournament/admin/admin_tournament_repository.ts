@@ -28,6 +28,8 @@ type TournamentRow = {
   address: string | null;
   region: string | null;
   visibility: TournamentVisibility;
+  num_tables: number | string;
+  default_best_of_sets: number | string;
   event_date: string | Date | null;
   event_time: string | null;
   created_at?: string | Date | null;
@@ -58,6 +60,8 @@ type TournamentWithCategoryRow = {
   address: string | null;
   region: string | null;
   visibility: TournamentVisibility;
+  num_tables: number | string;
+  default_best_of_sets: number | string;
   event_date: string | Date | null;
   event_time: string | null;
   created_at?: string | Date | null;
@@ -180,6 +184,8 @@ export class AdminTournamentRepository {
       address: tournamentRow.address ?? null,
       region: tournamentRow.region ?? null,
       visibility: tournamentRow.visibility ?? "public",
+      num_tables: Number(tournamentRow.num_tables ?? 4),
+      default_best_of_sets: Number(tournamentRow.default_best_of_sets ?? 3),
       event_date: this.formatDate(tournamentRow.event_date),
       event_time: this.formatTime(tournamentRow.event_time),
       categories: categoryRows.map((row) => this.mapCategoryRow(row)),
@@ -197,6 +203,8 @@ export class AdminTournamentRepository {
       address: row.address ?? null,
       region: row.region ?? null,
       visibility: row.visibility ?? "public",
+      num_tables: Number(row.num_tables ?? 4),
+      default_best_of_sets: Number(row.default_best_of_sets ?? 3),
       event_date: this.formatDate(row.event_date),
       event_time: this.formatTime(row.event_time),
       categories: [],
@@ -214,6 +222,8 @@ export class AdminTournamentRepository {
       address: row.address ?? null,
       region: row.region ?? null,
       visibility: row.visibility ?? "public",
+      num_tables: Number(row.num_tables ?? 4),
+      default_best_of_sets: Number(row.default_best_of_sets ?? 3),
       event_date: row.event_date ? this.formatDate(row.event_date) : null,
       event_time: row.event_time ? this.formatTime(row.event_time) : null,
       created_at: row.created_at ? row.created_at.toString() : "",
@@ -277,10 +287,12 @@ export class AdminTournamentRepository {
           event_time,
           address,
           region,
-          visibility
+          visibility,
+          num_tables,
+          default_best_of_sets
         )
       VALUES
-        ($1, $2, $3, $4, $5, $6::date, $7::time, $8, $9, $10)
+        ($1, $2, $3, $4, $5, $6::date, $7::time, $8, $9, $10, $11, $12)
       RETURNING *;
     `;
 
@@ -295,6 +307,8 @@ export class AdminTournamentRepository {
       payload.address ?? null,
       payload.region ?? null,
       payload.visibility ?? "public",
+      payload.num_tables ?? 4,
+      payload.default_best_of_sets ?? 3,
     ];
 
     const res: QueryResult<TournamentRow> = await client.query(query, values);
@@ -414,7 +428,7 @@ export class AdminTournamentRepository {
       }
 
       const fields: string[] = [];
-      const values: Array<string | null> = [];
+      const values: Array<string | number | null> = [];
       let i = 1;
 
       if (payload.tournament_name !== undefined) {
@@ -436,6 +450,14 @@ export class AdminTournamentRepository {
       if (payload.visibility !== undefined) {
         fields.push(`visibility = $${i++}`);
         values.push(payload.visibility);
+      }
+      if (payload.num_tables !== undefined) {
+        fields.push(`num_tables = $${i++}`);
+        values.push(payload.num_tables);
+      }
+      if (payload.default_best_of_sets !== undefined) {
+        fields.push(`default_best_of_sets = $${i++}`);
+        values.push(payload.default_best_of_sets);
       }
       if (payload.event_date !== undefined) {
         fields.push(`event_date = $${i++}::date`);
@@ -686,6 +708,7 @@ export class AdminTournamentRepository {
         `SELECT
            t.id_tournament, t.tournament_name, t.description, t.created_by,
            t.allow_mixed, t.allow_olympic, t.address, t.region, t.visibility,
+           t.num_tables, t.default_best_of_sets,
            t.event_date, t.event_time, t.created_at,
            c.id_category, c.category_type, c.category_range, c.gender,
            c.inscription_price, c.quotas, c.status, c.phase, c.priority,
@@ -750,6 +773,7 @@ export class AdminTournamentRepository {
       `SELECT
          t.id_tournament, t.tournament_name, t.description, t.created_by,
          t.allow_mixed, t.allow_olympic, t.address, t.region, t.visibility,
+         t.num_tables, t.default_best_of_sets,
          t.event_date, t.event_time, t.created_at,
          c.id_category, c.category_type, c.category_range, c.gender,
          c.inscription_price, c.quotas, c.status, c.phase, c.priority,
@@ -851,6 +875,8 @@ export class AdminTournamentRepository {
           t.address,
           t.region,
           t.visibility,
+          t.num_tables,
+          t.default_best_of_sets,
           t.event_date,
           t.event_time,
           t.created_at,

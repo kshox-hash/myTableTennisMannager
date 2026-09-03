@@ -44,6 +44,7 @@ const INCREMENTAL = [
   "036_group_members_index.sql",
   "037_group_matches_tournament_index.sql",
   "038_tournament_visibility_category_priority.sql",
+  "039_tournament_default_best_of_sets.sql",
 ];
 
 export async function runMigrations(): Promise<void> {

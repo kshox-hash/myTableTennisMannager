@@ -74,6 +74,19 @@ export type TournamentCreateDTO = {
 
   visibility?: TournamentVisibility;
 
+  // Cantidad real de mesas del recinto — antes solo se podía cargar desde
+  // el panel de Mesas o (peor) se volvía a preguntar en el modal de
+  // confirmar cabezas de serie de CADA categoría, pisando el mismo valor
+  // del torneo entero cada vez. Se puede seguir ajustando después desde
+  // el panel de Mesas (PUT tables/config) — esto solo agrega dónde
+  // cargarlo la primera vez, al crear.
+  num_tables?: number;
+  // Con qué "sets por partido" arranca preseleccionado el selector al
+  // confirmar cabezas de serie de una categoría — sigue siendo editable
+  // categoría por categoría (juveniles mejor de 3, máster mejor de 5,
+  // etc.), esto es solo el punto de partida.
+  default_best_of_sets?: number;
+
   event_date: string;
   event_time?: string | null;
 
@@ -88,6 +101,8 @@ export type TournamentUpdateDTO = {
   region?: string | null;
 
   visibility?: TournamentVisibility;
+  num_tables?: number;
+  default_best_of_sets?: number;
 
   event_date?: string;
   event_time?: string | null;
@@ -108,6 +123,8 @@ export interface ITournament {
   address: string | null;
   region: string | null;
   visibility: TournamentVisibility;
+  num_tables: number;
+  default_best_of_sets: number;
 
   event_date: string;
   event_time: string | null;
@@ -128,6 +145,8 @@ export type AdminTournamentRow = {
   address: string | null;
   region: string | null;
   visibility: TournamentVisibility;
+  num_tables: number;
+  default_best_of_sets: number;
 
   event_date: string | null;
   event_time: string | null;
