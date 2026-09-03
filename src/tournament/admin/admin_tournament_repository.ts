@@ -8,6 +8,7 @@ import type {
   TournamentUpdateDTO,
   ITournament,
   TournamentCategoryDTO,
+  TournamentVisibility,
   AdminTournamentRow,
   EnrollmentRow,
   AdminCategoryRow,
@@ -26,6 +27,7 @@ type TournamentRow = {
   allow_olympic: boolean;
   address: string | null;
   region: string | null;
+  visibility: TournamentVisibility;
   event_date: string | Date | null;
   event_time: string | null;
   created_at?: string | Date | null;
@@ -42,6 +44,7 @@ type CategoryRow = {
   quotas: number | string | null;
   status: string;
   qualifiers_per_group: number | string;
+  priority: number | string;
   created_at?: string | Date | null;
 };
 
@@ -54,6 +57,7 @@ type TournamentWithCategoryRow = {
   allow_olympic: boolean;
   address: string | null;
   region: string | null;
+  visibility: TournamentVisibility;
   event_date: string | Date | null;
   event_time: string | null;
   created_at?: string | Date | null;
@@ -66,6 +70,7 @@ type TournamentWithCategoryRow = {
   quotas: number | string | null;
   status: string | null;
   phase: string | null;
+  priority?: number | string | null;
   enrolled_count?: number | string | null;
   is_enrolled?: boolean | null;
 };
@@ -157,6 +162,7 @@ export class AdminTournamentRepository {
       quotas: row.quotas === null ? null : Number(row.quotas),
       status: row.status,
       qualifiers_per_group: Number(row.qualifiers_per_group ?? 2),
+      priority: Number(row.priority ?? 1),
     };
   }
 
@@ -173,6 +179,7 @@ export class AdminTournamentRepository {
       allow_olympic: tournamentRow.allow_olympic,
       address: tournamentRow.address ?? null,
       region: tournamentRow.region ?? null,
+      visibility: tournamentRow.visibility ?? "public",
       event_date: this.formatDate(tournamentRow.event_date),
       event_time: this.formatTime(tournamentRow.event_time),
       categories: categoryRows.map((row) => this.mapCategoryRow(row)),
@@ -189,6 +196,7 @@ export class AdminTournamentRepository {
       allow_olympic: row.allow_olympic,
       address: row.address ?? null,
       region: row.region ?? null,
+      visibility: row.visibility ?? "public",
       event_date: this.formatDate(row.event_date),
       event_time: this.formatTime(row.event_time),
       categories: [],
@@ -205,6 +213,7 @@ export class AdminTournamentRepository {
       allow_olympic: row.allow_olympic,
       address: row.address ?? null,
       region: row.region ?? null,
+      visibility: row.visibility ?? "public",
       event_date: row.event_date ? this.formatDate(row.event_date) : null,
       event_time: row.event_time ? this.formatTime(row.event_time) : null,
       created_at: row.created_at ? row.created_at.toString() : "",
@@ -231,6 +240,7 @@ export class AdminTournamentRepository {
       quotas: row.quotas === null ? null : Number(row.quotas),
       enrolled_count: Number(row.enrolled_count),
       qualifiers_per_group: Number(row.qualifiers_per_group ?? 2),
+      priority: Number(row.priority ?? 1),
     };
   }
 
@@ -266,10 +276,11 @@ export class AdminTournamentRepository {
           event_date,
           event_time,
           address,
-          region
+          region,
+          visibility
         )
       VALUES
-        ($1, $2, $3, $4, $5, $6::date, $7::time, $8, $9)
+        ($1, $2, $3, $4, $5, $6::date, $7::time, $8, $9, $10)
       RETURNING *;
     `;
 
@@ -283,6 +294,7 @@ export class AdminTournamentRepository {
       payload.event_time ?? null,
       payload.address ?? null,
       payload.region ?? null,
+      payload.visibility ?? "public",
     ];
 
     const res: QueryResult<TournamentRow> = await client.query(query, values);
@@ -300,10 +312,10 @@ export class AdminTournamentRepository {
     const placeholders: string[] = [];
 
     categories.forEach((cat, index) => {
-      const base = index * 8;
+      const base = index * 9;
 
       placeholders.push(
-        `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8})`
+        `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9})`
       );
 
       values.push(
@@ -314,7 +326,8 @@ export class AdminTournamentRepository {
         cat.inscription_price,
         cat.quotas ?? null,
         cat.status ?? "active",
-        cat.qualifiers_per_group ?? 2
+        cat.qualifiers_per_group ?? 2,
+        cat.priority ?? 1
       );
     });
 
@@ -328,7 +341,8 @@ export class AdminTournamentRepository {
           inscription_price,
           quotas,
           status,
-          qualifiers_per_group
+          qualifiers_per_group,
+          priority
         )
       VALUES ${placeholders.join(",")}
       RETURNING *;
@@ -419,6 +433,10 @@ export class AdminTournamentRepository {
         fields.push(`region = $${i++}`);
         values.push(payload.region);
       }
+      if (payload.visibility !== undefined) {
+        fields.push(`visibility = $${i++}`);
+        values.push(payload.visibility);
+      }
       if (payload.event_date !== undefined) {
         fields.push(`event_date = $${i++}::date`);
         values.push(payload.event_date);
@@ -502,8 +520,9 @@ export class AdminTournamentRepository {
         await client.query(
           `UPDATE ${this.tournamentCategoriesTable}
              SET category_type = $1, category_range = $2, gender = $3,
-                 inscription_price = $4, quotas = $5, qualifiers_per_group = $6
-           WHERE id_category = $7`,
+                 inscription_price = $4, quotas = $5, qualifiers_per_group = $6,
+                 priority = $7
+           WHERE id_category = $8`,
           [
             cat.category_type.trim(),
             cat.category_range.trim(),
@@ -511,14 +530,15 @@ export class AdminTournamentRepository {
             cat.inscription_price,
             cat.quotas ?? null,
             cat.qualifiers_per_group ?? 2,
+            cat.priority ?? 1,
             cat.id_category,
           ]
         );
       } else {
         await client.query(
           `INSERT INTO ${this.tournamentCategoriesTable}
-             (id_tournament, category_type, category_range, gender, inscription_price, quotas, status, qualifiers_per_group)
-           VALUES ($1, $2, $3, $4, $5, $6, 'active', $7)`,
+             (id_tournament, category_type, category_range, gender, inscription_price, quotas, status, qualifiers_per_group, priority)
+           VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, $8)`,
           [
             tournamentId,
             cat.category_type.trim(),
@@ -527,6 +547,7 @@ export class AdminTournamentRepository {
             cat.inscription_price,
             cat.quotas ?? null,
             cat.qualifiers_per_group ?? 2,
+            cat.priority ?? 1,
           ]
         );
       }
@@ -555,7 +576,7 @@ export class AdminTournamentRepository {
     const offset = (page - 1) * limit;
 
     const where: string[] = ["t.status = 'active'"];
-    const values: (string | number)[] = [];
+    const values: (string | number | null)[] = [];
     let i = 1;
 
     const q      = (filters?.q      ?? "").trim();
@@ -577,6 +598,34 @@ export class AdminTournamentRepository {
       values.push(`%${q}%`);
       i++;
     }
+
+    // Visibilidad: público siempre se ve; privado/interno solo para quien
+    // organiza (dueño o co-organizador) o, si es "interno", para alguien
+    // del mismo club que el organizador. userId en null (no debería pasar,
+    // esta lista siempre va detrás de authRequired, pero por las dudas)
+    // hace que created_by/o.id_user/viewer.id_user nunca calcen — SQL trata
+    // "columna = NULL" como no-verdadero solo, así que degrada solo a
+    // "solo lo público" sin necesidad de un caso aparte.
+    const visibilityUserParam = i++;
+    where.push(`(
+      t.visibility = 'public'
+      OR t.created_by = $${visibilityUserParam}
+      OR EXISTS (
+        SELECT 1 FROM tournament_organizers o
+        WHERE o.id_tournament = t.id_tournament AND o.id_user = $${visibilityUserParam}
+      )
+      OR (
+        t.visibility = 'internal'
+        AND EXISTS (
+          SELECT 1 FROM users creator
+          JOIN users viewer ON viewer.id_club = creator.id_club
+          WHERE creator.id_user = t.created_by
+            AND viewer.id_user = $${visibilityUserParam}
+            AND creator.id_club IS NOT NULL
+        )
+      )
+    )`);
+    values.push(userId ?? null);
 
     const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
@@ -636,10 +685,10 @@ export class AdminTournamentRepository {
       const dataRes = await this.pool.query<TournamentWithCategoryRow>(
         `SELECT
            t.id_tournament, t.tournament_name, t.description, t.created_by,
-           t.allow_mixed, t.allow_olympic, t.address, t.region,
+           t.allow_mixed, t.allow_olympic, t.address, t.region, t.visibility,
            t.event_date, t.event_time, t.created_at,
            c.id_category, c.category_type, c.category_range, c.gender,
-           c.inscription_price, c.quotas, c.status, c.phase,
+           c.inscription_price, c.quotas, c.status, c.phase, c.priority,
            (SELECT COUNT(*)::int FROM ${this.enrollmentsTable} e
             WHERE e.id_category = c.id_category AND e.status = 'active') AS enrolled_count,
            EXISTS (
@@ -671,6 +720,7 @@ export class AdminTournamentRepository {
             quotas: row.quotas === null ? null : Number(row.quotas),
             status: row.status ?? "active",
             phase: row.phase ?? "enrollment",
+            priority: Number(row.priority ?? 1),
             enrolled_count: Number(row.enrolled_count ?? 0),
             is_enrolled: Boolean(row.is_enrolled),
           });
@@ -699,10 +749,10 @@ export class AdminTournamentRepository {
     const dataRes = await this.pool.query<TournamentWithCategoryRow>(
       `SELECT
          t.id_tournament, t.tournament_name, t.description, t.created_by,
-         t.allow_mixed, t.allow_olympic, t.address, t.region,
+         t.allow_mixed, t.allow_olympic, t.address, t.region, t.visibility,
          t.event_date, t.event_time, t.created_at,
          c.id_category, c.category_type, c.category_range, c.gender,
-         c.inscription_price, c.quotas, c.status, c.phase,
+         c.inscription_price, c.quotas, c.status, c.phase, c.priority,
          (SELECT COUNT(*)::int FROM ${this.enrollmentsTable} e
           WHERE e.id_category = c.id_category AND e.status = 'active') AS enrolled_count,
          EXISTS (
@@ -730,6 +780,7 @@ export class AdminTournamentRepository {
           quotas: row.quotas === null ? null : Number(row.quotas),
           status: row.status ?? "active",
           phase: row.phase ?? "enrollment",
+          priority: Number(row.priority ?? 1),
           enrolled_count: Number(row.enrolled_count ?? 0),
           is_enrolled: Boolean(row.is_enrolled),
         });
@@ -799,6 +850,7 @@ export class AdminTournamentRepository {
           t.allow_olympic,
           t.address,
           t.region,
+          t.visibility,
           t.event_date,
           t.event_time,
           t.created_at,
@@ -905,6 +957,7 @@ export class AdminTournamentRepository {
         c.quotas,
         c.status,
         c.qualifiers_per_group,
+        c.priority,
         COUNT(e.id_enrollment) FILTER (WHERE e.status = 'active')::int AS enrolled_count
       FROM ${this.tournamentCategoriesTable} c
       LEFT JOIN ${this.enrollmentsTable} e

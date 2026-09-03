@@ -56,7 +56,11 @@ export class PublicTournamentRepository {
     filters: { q?: string; region?: string; status?: string },
     pagination: { page: number; limit: number }
   ): Promise<{ rows: PublicTournamentRow[]; total: number }> {
-    const conditions: string[] = [];
+    // Fijo, no depende de ningún filtro que mande el cliente — un torneo
+    // 'private' o 'internal' nunca puede aparecer en el listado público sin
+    // login. El acceso directo por id (getById más abajo) no tiene este
+    // filtro a propósito: así "privado" sigue siendo accesible con el link.
+    const conditions: string[] = ["t.visibility = 'public'"];
     const values: unknown[] = [];
     let i = 1;
 

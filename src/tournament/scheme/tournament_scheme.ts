@@ -48,6 +48,7 @@ export const createTournamentSchema = z.object({
   description: z.string().nullable().optional(),
   allow_mixed: z.boolean().default(true),
   allow_olympic: z.boolean().default(false),
+  visibility: z.enum(["public", "private", "internal"]).optional(),
   event_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isValidCalendarDate, { message: "Fecha inválida" }),
   event_time: z
     .string()
@@ -70,6 +71,7 @@ export const createTournamentSchema = z.object({
         quotas: z.number().int().positive().nullable(),
         status: z.string().optional(),
         qualifiers_per_group: z.number().int().min(1).max(4).optional(),
+        priority: z.number().int().min(1).optional(),
       })
     )
     .optional()
@@ -81,6 +83,7 @@ export type TournamentCreateDTO = z.infer<typeof createTournamentSchema>;
 export const updateTournamentSchema = z.object({
   tournament_name: z.string().min(1).max(150).optional(),
   description: z.string().nullable().optional(),
+  visibility: z.enum(["public", "private", "internal"]).optional(),
   event_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isValidCalendarDate, { message: "Fecha inválida" }).optional(),
   event_time: z
     .string()
@@ -102,6 +105,7 @@ export const updateTournamentSchema = z.object({
         inscription_price: z.number().min(0),
         quotas: z.number().int().positive().nullable(),
         qualifiers_per_group: z.number().int().min(1).max(4).optional(),
+        priority: z.number().int().min(1).optional(),
       })
     )
     .optional()

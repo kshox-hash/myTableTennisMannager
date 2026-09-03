@@ -39,6 +39,8 @@ export type AdminTournamentError =
 
 // DTO ADMIN TOURNAMENTS
 
+export type TournamentVisibility = "public" | "private" | "internal";
+
 export type TournamentCategoryDTO = {
   id_category?: string;
   category_type: string;
@@ -49,6 +51,10 @@ export type TournamentCategoryDTO = {
   status?: string;
   phase?: string;
   qualifiers_per_group?: number;
+  // Orden sugerido para jugarse (menor = antes); mismo número en dos
+  // categorías = pensadas para simultáneo. Solo alimenta el punto de
+  // partida del panel de Programación, no bloquea nada por sí solo.
+  priority?: number;
   // Solo se completan en el listado para jugador (findAll con userId)
   enrolled_count?: number;
   is_enrolled?: boolean;
@@ -66,6 +72,8 @@ export type TournamentCreateDTO = {
   address?: string | null;
   region?: string | null;
 
+  visibility?: TournamentVisibility;
+
   event_date: string;
   event_time?: string | null;
 
@@ -78,6 +86,8 @@ export type TournamentUpdateDTO = {
 
   address?: string | null;
   region?: string | null;
+
+  visibility?: TournamentVisibility;
 
   event_date?: string;
   event_time?: string | null;
@@ -97,6 +107,7 @@ export interface ITournament {
 
   address: string | null;
   region: string | null;
+  visibility: TournamentVisibility;
 
   event_date: string;
   event_time: string | null;
@@ -116,6 +127,7 @@ export type AdminTournamentRow = {
 
   address: string | null;
   region: string | null;
+  visibility: TournamentVisibility;
 
   event_date: string | null;
   event_time: string | null;
@@ -164,6 +176,7 @@ export type AdminCategoryRow = {
   status: string;
   enrolled_count: number;
   qualifiers_per_group: number;
+  priority: number;
 };
 
 // Players by category for admin
