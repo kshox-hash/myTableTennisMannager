@@ -35,7 +35,12 @@ export function authRequired(req: Request, res: Response, next: NextFunction) {
   }
 
   try {
-    const payload = jwt.verify(token, secret) as AuthPayload;
+    // Fijar el algoritmo esperado en vez de dejar que jsonwebtoken lo infiera
+    // del propio token — hoy no es explotable (todos los tokens se firman
+    // acá mismo con HS256, nunca con "none" ni con una clave pública/RS256),
+    // pero es una defensa barata contra un ataque de confusión de algoritmo
+    // si en el futuro se agrega otro método de firma.
+    const payload = jwt.verify(token, secret, { algorithms: ["HS256"] }) as AuthPayload;
     req.user = payload;
     return next();
   } catch {
