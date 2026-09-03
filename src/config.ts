@@ -17,7 +17,9 @@ export default (app : express.Express) => {
     // frontend. ALLOWED_ORIGINS permite agregar otros sin tocar código
     // (ej. un dominio propio de la Federación más adelante).
     const defaultOrigins = [
-        "https://elevenmatch.onrender.com", // producción (Render static site)
+        "https://www.my-ttm.com",           // producción (dominio propio)
+        "https://my-ttm.com",               // producción (dominio propio, sin www)
+        "https://elevenmatch.onrender.com", // producción (subdominio de Render, por si se sigue usando)
         "http://localhost:5173",            // Vite dev server
         "http://localhost:4173",            // vite preview
     ];
