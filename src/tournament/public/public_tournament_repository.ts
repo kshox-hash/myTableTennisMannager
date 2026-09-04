@@ -53,7 +53,14 @@ export class PublicTournamentRepository {
   }
 
   async list(
-    filters: { q?: string; region?: string; status?: string },
+    filters: {
+      q?: string;
+      region?: string;
+      status?: string;
+      categoryType?: string;
+      categoryRange?: string;
+      gender?: string;
+    },
     pagination: { page: number; limit: number }
   ): Promise<{ rows: PublicTournamentRow[]; total: number }> {
     // Fijo, no depende de ningún filtro que mande el cliente — un torneo
@@ -86,6 +93,29 @@ export class PublicTournamentRepository {
           END) = $${i++}`
       );
       values.push(filters.status);
+    }
+    // Filtro de categoría — categoryType/categoryRange/gender viven en
+    // tournament_categories, no en tournaments, así que van como EXISTS en
+    // vez de una condición directa (un torneo puede tener varias
+    // categorías; alcanza con que UNA matchee los tres). Un solo EXISTS con
+    // las tres condiciones adentro en vez de tres EXISTS separados: así
+    // exige que sea la MISMA categoría la que cumpla tipo+rango+género, no
+    // que cada condición la cumpla una categoría distinta del torneo.
+    if (filters.categoryType || filters.categoryRange || filters.gender) {
+      const sub: string[] = ["tc.id_tournament = t.id_tournament"];
+      if (filters.categoryType) {
+        sub.push(`tc.category_type = $${i++}`);
+        values.push(filters.categoryType);
+      }
+      if (filters.categoryRange) {
+        sub.push(`tc.category_range = $${i++}`);
+        values.push(filters.categoryRange);
+      }
+      if (filters.gender) {
+        sub.push(`tc.gender = $${i++}`);
+        values.push(filters.gender);
+      }
+      conditions.push(`EXISTS (SELECT 1 FROM tournament_categories tc WHERE ${sub.join(" AND ")})`);
     }
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
@@ -149,6 +179,26 @@ export class PublicTournamentRepository {
       tournaments: Number(row?.tournaments ?? 0),
       categories: Number(row?.categories ?? 0),
       players: Number(row?.players ?? 0),
+    };
+  }
+
+  // Valores REALES para poblar los selects de "tipo de categoría" y "rango"
+  // del filtro de /torneos — category_type/category_range son texto libre
+  // (VARCHAR sin lista fija en la base), así que no se puede hardcodear una
+  // lista como con las regiones: se listan los valores que efectivamente
+  // existen hoy, y solo de torneos públicos (mismo filtro de visibilidad
+  // que list()), para no exponer nombres de categorías de torneos privados.
+  async getCategoryFilters(): Promise<{ categoryTypes: string[]; categoryRanges: string[] }> {
+    const res = await this.pool.query<{ category_type: string; category_range: string }>(
+      `SELECT DISTINCT tc.category_type, tc.category_range
+       FROM tournament_categories tc
+       JOIN tournaments t ON t.id_tournament = tc.id_tournament
+       WHERE t.visibility = 'public'
+       ORDER BY tc.category_type ASC, tc.category_range ASC`
+    );
+    return {
+      categoryTypes: [...new Set(res.rows.map((r) => r.category_type))].sort(),
+      categoryRanges: [...new Set(res.rows.map((r) => r.category_range))].sort(),
     };
   }
 

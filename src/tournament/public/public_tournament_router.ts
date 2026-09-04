@@ -47,8 +47,14 @@ router.get(
     const statusParam = typeof req.query.status === "string" ? req.query.status.trim() : undefined;
     const status =
       statusParam && ["upcoming", "ongoing", "finished", "cancelled"].includes(statusParam) ? statusParam : undefined;
+    const categoryType =
+      typeof req.query.category_type === "string" ? req.query.category_type.trim() || undefined : undefined;
+    const categoryRange =
+      typeof req.query.category_range === "string" ? req.query.category_range.trim() || undefined : undefined;
+    const genderParam = typeof req.query.gender === "string" ? req.query.gender.trim() : undefined;
+    const gender = genderParam && ["male", "female", "mixed"].includes(genderParam) ? genderParam : undefined;
 
-    const { rows, total } = await repo.list({ q, region, status }, { page, limit });
+    const { rows, total } = await repo.list({ q, region, status, categoryType, categoryRange, gender }, { page, limit });
 
     return res.json({
       ok: true,
@@ -69,6 +75,20 @@ router.get(
           enrolled_count: t.enrolled_count,
         })),
       },
+    });
+  })
+);
+
+// GET /api/v1/tournament/public/category-filters — valores reales (no una
+// lista fija) para poblar los selects de "tipo de categoría" y "rango" del
+// filtro de /torneos.
+router.get(
+  "/public/category-filters",
+  asyncHandler(async (_req, res) => {
+    const filters = await repo.getCategoryFilters();
+    return res.json({
+      ok: true,
+      data: { category_types: filters.categoryTypes, category_ranges: filters.categoryRanges },
     });
   })
 );
