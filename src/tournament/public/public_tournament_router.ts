@@ -80,15 +80,19 @@ router.get(
 );
 
 // GET /api/v1/tournament/public/category-filters — valores reales (no una
-// lista fija) para poblar los selects de "tipo de categoría" y "rango" del
-// filtro de /torneos.
+// lista fija) para poblar los selects de "tipo de categoría", "rango" y
+// "región" del filtro de /torneos.
 router.get(
   "/public/category-filters",
   asyncHandler(async (_req, res) => {
     const filters = await repo.getCategoryFilters();
     return res.json({
       ok: true,
-      data: { category_types: filters.categoryTypes, category_ranges: filters.categoryRanges },
+      data: {
+        category_types: filters.categoryTypes,
+        category_ranges: filters.categoryRanges,
+        regions: filters.regions,
+      },
     });
   })
 );

@@ -79,20 +79,27 @@ export class PublicTournamentRepository {
       conditions.push(`t.region = $${i++}`);
       values.push(filters.region);
     }
+    // Mismo cálculo que `displayStatus` en el router (la tabla solo guarda
+    // active/cancelled, el resto se deriva de event_date vs hoy) — repetido
+    // acá en SQL para poder filtrar/ordenar sobre el estado ya calculado.
+    // Reusado también en el ORDER BY de más abajo — una sola fuente de
+    // verdad para "qué estado tiene este torneo hoy".
+    const statusCase = `(CASE
+        WHEN t.status = 'cancelled' THEN 'cancelled'
+        WHEN t.event_date IS NULL THEN 'upcoming'
+        WHEN t.event_date > CURRENT_DATE THEN 'upcoming'
+        WHEN t.event_date = CURRENT_DATE THEN 'ongoing'
+        ELSE 'finished'
+      END)`;
     if (filters.status) {
-      // Mismo cálculo que `displayStatus` en el router (la tabla solo guarda
-      // active/cancelled, el resto se deriva de event_date vs hoy) — repetido
-      // acá en SQL para poder filtrar/paginar sobre el estado ya calculado.
-      conditions.push(
-        `(CASE
-            WHEN t.status = 'cancelled' THEN 'cancelled'
-            WHEN t.event_date IS NULL THEN 'upcoming'
-            WHEN t.event_date > CURRENT_DATE THEN 'upcoming'
-            WHEN t.event_date = CURRENT_DATE THEN 'ongoing'
-            ELSE 'finished'
-          END) = $${i++}`
-      );
+      conditions.push(`${statusCase} = $${i++}`);
       values.push(filters.status);
+    } else {
+      // Sin filtro explícito de estado, la vitrina por defecto no mezcla
+      // torneos cancelados con el resto — siguen 100% accesibles eligiendo
+      // "Cancelled" en el filtro de estado, esto solo cambia qué se ve de
+      // entrada al explorar sin filtros.
+      conditions.push(`${statusCase} != 'cancelled'`);
     }
     // Filtro de categoría — categoryType/categoryRange/gender viven en
     // tournament_categories, no en tournaments, así que van como EXISTS en
@@ -143,7 +150,15 @@ export class PublicTournamentRepository {
          (SELECT COUNT(*) FROM enrollments e WHERE e.id_tournament = t.id_tournament AND e.status = 'active')::int AS enrolled_count
        FROM tournaments t
        ${where}
-       ORDER BY t.event_date ASC NULLS LAST, t.created_at DESC
+       -- Lo accionable primero: upcoming/ongoing por fecha más próxima,
+       -- después finished por fecha más reciente (no la más vieja de todo
+       -- el sistema) — antes un solo ASC ponía primero el torneo con la
+       -- fecha más antigua de toda la plataforma en la página 1 sin filtros.
+       ORDER BY
+         (${statusCase} = 'finished') ASC,
+         CASE WHEN ${statusCase} != 'finished' THEN t.event_date END ASC NULLS LAST,
+         CASE WHEN ${statusCase} = 'finished' THEN t.event_date END DESC NULLS LAST,
+         t.created_at DESC
        LIMIT $${i++} OFFSET $${i++}`,
       [...values, pagination.limit, offset]
     );
@@ -182,23 +197,35 @@ export class PublicTournamentRepository {
     };
   }
 
-  // Valores REALES para poblar los selects de "tipo de categoría" y "rango"
-  // del filtro de /torneos — category_type/category_range son texto libre
-  // (VARCHAR sin lista fija en la base), así que no se puede hardcodear una
-  // lista como con las regiones: se listan los valores que efectivamente
-  // existen hoy, y solo de torneos públicos (mismo filtro de visibilidad
-  // que list()), para no exponer nombres de categorías de torneos privados.
-  async getCategoryFilters(): Promise<{ categoryTypes: string[]; categoryRanges: string[] }> {
-    const res = await this.pool.query<{ category_type: string; category_range: string }>(
-      `SELECT DISTINCT tc.category_type, tc.category_range
-       FROM tournament_categories tc
-       JOIN tournaments t ON t.id_tournament = tc.id_tournament
-       WHERE t.visibility = 'public'
-       ORDER BY tc.category_type ASC, tc.category_range ASC`
-    );
+  // Valores REALES para poblar los selects de "tipo de categoría", "rango" y
+  // "región" del filtro de /torneos. category_type/category_range son texto
+  // libre (VARCHAR sin lista fija en la base) así que no hay otra opción
+  // que listar lo que existe. Región SÍ tiene una lista fija (CHILE_REGIONS,
+  // en el frontend, para el formulario de creación) pero se perfiló contra
+  // producción y 5 de las 16 regiones no tienen ningún torneo público hoy —
+  // mostrarlas en el filtro solo lleva a resultados vacíos garantizados, así
+  // que acá también se listan solo las que de verdad tienen algo. Todo
+  // filtrado a torneos públicos (mismo filtro de visibilidad que list()),
+  // para no exponer nombres/regiones de torneos privados.
+  async getCategoryFilters(): Promise<{ categoryTypes: string[]; categoryRanges: string[]; regions: string[] }> {
+    const [categoriesRes, regionsRes] = await Promise.all([
+      this.pool.query<{ category_type: string; category_range: string }>(
+        `SELECT DISTINCT tc.category_type, tc.category_range
+         FROM tournament_categories tc
+         JOIN tournaments t ON t.id_tournament = tc.id_tournament
+         WHERE t.visibility = 'public'
+         ORDER BY tc.category_type ASC, tc.category_range ASC`
+      ),
+      this.pool.query<{ region: string }>(
+        `SELECT DISTINCT region FROM tournaments
+         WHERE visibility = 'public' AND region IS NOT NULL
+         ORDER BY region ASC`
+      ),
+    ]);
     return {
-      categoryTypes: [...new Set(res.rows.map((r) => r.category_type))].sort(),
-      categoryRanges: [...new Set(res.rows.map((r) => r.category_range))].sort(),
+      categoryTypes: [...new Set(categoriesRes.rows.map((r) => r.category_type))].sort(),
+      categoryRanges: [...new Set(categoriesRes.rows.map((r) => r.category_range))].sort(),
+      regions: regionsRes.rows.map((r) => r.region),
     };
   }
 
