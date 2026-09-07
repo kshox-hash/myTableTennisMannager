@@ -136,6 +136,7 @@ router.get(
           gender: c.gender,
           status: c.status,
           enrolled_count: c.enrolled_count,
+          quotas: c.quotas,
           has_bracket: c.has_bracket,
           is_finished: c.is_finished,
           phase: c.phase,

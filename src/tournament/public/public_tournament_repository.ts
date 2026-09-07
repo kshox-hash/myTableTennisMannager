@@ -28,6 +28,9 @@ export interface PublicCategoryRow {
   // así que "enrollment" (todavía no se generaron grupos) y "groups" (ya
   // hay grupos jugándose) se veían igual, ambos como "Group stage".
   phase: string;
+  // Cupo máximo real de la categoría (NULL = sin límite) — ya vivía en la
+  // tabla, solo faltaba seleccionarlo para el detalle público.
+  quotas: number | null;
 }
 
 export interface PublicTournamentDetailRow {
@@ -510,7 +513,7 @@ export class PublicTournamentRepository {
   async getCategories(id_tournament: string): Promise<PublicCategoryRow[]> {
     const res = await this.pool.query<PublicCategoryRow>(
       `SELECT
-         c.id_category, c.category_type, c.category_range, c.gender, c.status, c.phase,
+         c.id_category, c.category_type, c.category_range, c.gender, c.status, c.phase, c.quotas,
          COUNT(e.id_enrollment) FILTER (WHERE e.status = 'active')::int AS enrolled_count,
          EXISTS(SELECT 1 FROM bracket_matches bm WHERE bm.id_category = c.id_category) AS has_bracket,
          EXISTS(
