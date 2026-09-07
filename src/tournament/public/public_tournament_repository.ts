@@ -327,6 +327,7 @@ export class PublicTournamentRepository {
       matches: Array<{
         id_match: string; player1_id: string; player1_name: string; player2_id: string; player2_name: string;
         sets_player1: number; sets_player2: number; status: string; best_of_sets: number;
+        set_scores: unknown;
       }>;
     }>;
     bracketMatches: Array<{
@@ -375,7 +376,7 @@ export class PublicTournamentRepository {
       const matchesRes = await this.pool.query(
         `SELECT gm.id_match, gm.player1_id, u1.first_name AS p1_first, u1.last_name AS p1_last,
                 gm.player2_id, u2.first_name AS p2_first, u2.last_name AS p2_last,
-                gm.sets_player1, gm.sets_player2, gm.status, gm.best_of_sets
+                gm.sets_player1, gm.sets_player2, gm.status, gm.best_of_sets, gm.set_scores
          FROM group_matches gm
          JOIN users u1 ON u1.id_user = gm.player1_id
          JOIN users u2 ON u2.id_user = gm.player2_id
@@ -407,6 +408,7 @@ export class PublicTournamentRepository {
           sets_player2: r.sets_player2,
           status: r.status,
           best_of_sets: r.best_of_sets,
+          set_scores: r.set_scores ?? null,
         })),
       });
     }
