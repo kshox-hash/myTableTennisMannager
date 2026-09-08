@@ -335,6 +335,33 @@ export class AdminTournamentController {
     return res.json({ ok: true, data: result.data });
   };
 
+  // POST /admin/maintenance/delete-tournaments — borrado masivo puntual,
+  // sin ownership. Uso único para limpieza de datos de prueba en
+  // producción; se saca del código apenas se usa. Validación estricta acá
+  // mismo (no un schema aparte) porque este endpoint no va a durar.
+  adminMaintenanceDeleteTournaments = async (req: Request, res: Response) => {
+    const { confirm, namePattern, ids } = req.body ?? {};
+
+    if (confirm !== "DELETE") {
+      return res.status(400).json({ ok: false, message: 'Falta confirm: "DELETE"' });
+    }
+    if (!namePattern && !Array.isArray(ids)) {
+      return res.status(400).json({ ok: false, message: "Falta namePattern o ids[]" });
+    }
+    if (namePattern && (typeof namePattern !== "string" || namePattern.trim().length < 8 || namePattern.startsWith("%"))) {
+      return res.status(400).json({
+        ok: false,
+        message: "namePattern debe ser un texto específico de al menos 8 caracteres y no puede empezar con %",
+      });
+    }
+    if (Array.isArray(ids) && ids.some((id) => typeof id !== "string" || id.length < 10)) {
+      return res.status(400).json({ ok: false, message: "ids inválidos" });
+    }
+
+    const deleted = await this.service.maintenanceDeleteTournaments({ namePattern, ids });
+    return res.json({ ok: true, data: { count: deleted.length, deleted } });
+  };
+
   // GET /admin/tournaments/:id_tournament/categories
   adminGetTournamentCategories = async (req: Request, res: Response) => {
     const tournamentId = req.params.id_tournament?.trim();
