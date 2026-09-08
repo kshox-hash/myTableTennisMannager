@@ -1248,50 +1248,6 @@ export class AdminTournamentRepository {
     }
   }
 
-  // -----------------------
-  // MAINTENANCE: borrado masivo por patrón de nombre o lista de ids — sin
-  // chequeo de ownership (a diferencia de deleteTournament). Uso puntual
-  // para limpiar datos de prueba/demo en producción, se saca del código
-  // apenas se usa. Devuelve nombre+id de cada torneo borrado, para poder
-  // auditar qué se borró exactamente.
-  // -----------------------
-  async maintenanceDeleteTournaments(params: {
-    namePattern?: string;
-    ids?: string[];
-  }): Promise<Array<{ id_tournament: string; tournament_name: string }>> {
-    const client = await this.pool.connect();
-    try {
-      await client.query("BEGIN");
-
-      let res;
-      if (params.namePattern) {
-        res = await client.query<{ id_tournament: string; tournament_name: string }>(
-          `DELETE FROM ${this.tournamentsTable} WHERE tournament_name LIKE $1
-           RETURNING id_tournament, tournament_name`,
-          [params.namePattern]
-        );
-      } else {
-        res = await client.query<{ id_tournament: string; tournament_name: string }>(
-          `DELETE FROM ${this.tournamentsTable} WHERE id_tournament = ANY($1::uuid[])
-           RETURNING id_tournament, tournament_name`,
-          [params.ids ?? []]
-        );
-      }
-
-      await client.query("COMMIT");
-      return res.rows;
-    } catch (error) {
-      try {
-        await client.query("ROLLBACK");
-      } catch {
-        /* ignore */
-      }
-      throw error;
-    } finally {
-      client.release();
-    }
-  }
-
   async cancelEnrollment(params: {
     tournamentId: string;
     userId: string;

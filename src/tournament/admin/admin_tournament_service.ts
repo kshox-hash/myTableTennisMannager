@@ -192,14 +192,6 @@ export class AdminTournamentService {
     return ok({ deleted: true });
   }
 
-  // MAINTENANCE: borrado masivo puntual, sin ownership — ver repo.
-  async maintenanceDeleteTournaments(params: {
-    namePattern?: string;
-    ids?: string[];
-  }): Promise<Array<{ id_tournament: string; tournament_name: string }>> {
-    return this.repo.maintenanceDeleteTournaments(params);
-  }
-
   // CATEGORIES WITH COUNT
   async listTournamentCategories(
     tournamentId?: string

@@ -89,15 +89,6 @@ router.delete(
   asyncHandler(controller.adminDeleteTournament)
 );
 
-// MAINTENANCE: borrado masivo puntual, sin ownership — solo mientras dura
-// la limpieza de datos de prueba en producción; sacar después de usar.
-router.post(
-  "/admin/maintenance/delete-tournaments",
-  authRequired,
-  requireRole("admin"),
-  asyncHandler(controller.adminMaintenanceDeleteTournaments)
-);
-
 // BITÁCORA DE ACTIVIDAD
 router.get(
   "/admin/tournaments/:id_tournament/activity",
