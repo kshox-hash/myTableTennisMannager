@@ -177,6 +177,21 @@ export class AdminTournamentService {
     return ok({ cancelled: true });
   }
 
+  // DELETE TOURNAMENT (borrado real en cascada — distinto de cancel)
+  async deleteTournament(
+    tournamentId: string,
+    requestedBy: string
+  ): Promise<Result<{ deleted: true }, AdminTournamentError>> {
+    const result = await this.repo.deleteTournament(tournamentId, requestedBy);
+
+    if (!result.deleted) {
+      if (result.error === "TOURNAMENT_NOT_FOUND") return fail(ADMIN_TOURNAMENT_ERRORS.TOURNAMENT_NOT_FOUND);
+      return fail(ADMIN_TOURNAMENT_ERRORS.NOT_TOURNAMENT_OWNER);
+    }
+
+    return ok({ deleted: true });
+  }
+
   // CATEGORIES WITH COUNT
   async listTournamentCategories(
     tournamentId?: string

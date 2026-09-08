@@ -79,6 +79,16 @@ router.post(
   asyncHandler(controller.adminCancelTournament)
 );
 
+// DELETE TOURNAMENT (borrado real en cascada, solo el organizador) — usado
+// puntualmente para limpieza de datos de prueba; no tiene botón en la UI.
+router.delete(
+  "/admin/tournaments/:id_tournament",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(),
+  asyncHandler(controller.adminDeleteTournament)
+);
+
 // BITÁCORA DE ACTIVIDAD
 router.get(
   "/admin/tournaments/:id_tournament/activity",

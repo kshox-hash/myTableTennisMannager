@@ -1202,6 +1202,52 @@ export class AdminTournamentRepository {
     }
   }
 
+  // -----------------------
+  // DELETE TOURNAMENT (borrado real, en cascada — no confundir con cancel,
+  // que solo cambia el status. Todas las tablas hijas de tournaments
+  // (categorías, grupos, partidos, cuadros, inscripciones, organizadores,
+  // notificaciones, actividad) tienen ON DELETE CASCADE en el schema, así
+  // que un solo DELETE acá se lleva todo lo que cuelga del torneo.)
+  // -----------------------
+  async deleteTournament(
+    idTournament: string,
+    requestedBy: string
+  ): Promise<{ deleted: boolean; error?: "TOURNAMENT_NOT_FOUND" | "NOT_TOURNAMENT_OWNER" }> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      const tRes = await client.query<{ created_by: string }>(
+        `SELECT created_by FROM ${this.tournamentsTable} WHERE id_tournament = $1 FOR UPDATE`,
+        [idTournament]
+      );
+      const t = tRes.rows[0];
+
+      if (!t) {
+        await client.query("ROLLBACK");
+        return { deleted: false, error: "TOURNAMENT_NOT_FOUND" };
+      }
+      if (!(await this.isOwnerOrOrganizer(client, idTournament, requestedBy, t.created_by))) {
+        await client.query("ROLLBACK");
+        return { deleted: false, error: "NOT_TOURNAMENT_OWNER" };
+      }
+
+      await client.query(`DELETE FROM ${this.tournamentsTable} WHERE id_tournament = $1`, [idTournament]);
+
+      await client.query("COMMIT");
+      return { deleted: true };
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        /* ignore */
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async cancelEnrollment(params: {
     tournamentId: string;
     userId: string;

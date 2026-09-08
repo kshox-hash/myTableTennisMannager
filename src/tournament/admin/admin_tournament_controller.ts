@@ -312,6 +312,29 @@ export class AdminTournamentController {
     return res.json({ ok: true, data: result.data });
   };
 
+  // DELETE /admin/tournaments/:id_tournament — borrado real en cascada,
+  // distinto de /cancel (que solo cambia el status).
+  adminDeleteTournament = async (req: Request, res: Response) => {
+    const tournamentId = req.params.id_tournament?.trim();
+    if (!tournamentId) {
+      return res.status(400).json({ ok: false, message: "Falta param: id_tournament" });
+    }
+
+    const result = await this.service.deleteTournament(tournamentId, req.user!.id_user);
+
+    if (!result.ok) {
+      if (result.error === ADMIN_TOURNAMENT_ERRORS.TOURNAMENT_NOT_FOUND) {
+        return res.status(404).json({ ok: false, message: "Campeonato no encontrado" });
+      }
+      if (result.error === ADMIN_TOURNAMENT_ERRORS.NOT_TOURNAMENT_OWNER) {
+        return res.status(403).json({ ok: false, message: "No sos el organizador de este campeonato" });
+      }
+      return res.status(400).json({ ok: false, message: result.error });
+    }
+
+    return res.json({ ok: true, data: result.data });
+  };
+
   // GET /admin/tournaments/:id_tournament/categories
   adminGetTournamentCategories = async (req: Request, res: Response) => {
     const tournamentId = req.params.id_tournament?.trim();
