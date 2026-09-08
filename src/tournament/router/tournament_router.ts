@@ -125,6 +125,15 @@ router.get(
   asyncHandler(controller.adminGetCategoryPlayers)
 );
 
+// UPDATE CATEGORY PRIORITY (cola de orden entre categorías, flechas arriba/abajo)
+router.patch(
+  "/admin/tournaments/:id_tournament/category/:id_category/priority",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(),
+  asyncHandler(controller.adminUpdateCategoryPriority)
+);
+
 // REMOVE ENROLLMENT (admin cancels)
 router.post(
   "/admin/tournaments/:id_tournament/enrollments/remove",

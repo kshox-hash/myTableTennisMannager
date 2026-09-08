@@ -991,7 +991,7 @@ export class AdminTournamentRepository {
        AND e.id_tournament = c.id_tournament
       WHERE c.id_tournament = $1
       GROUP BY c.id_category
-      ORDER BY c.category_type ASC, c.category_range ASC, c.gender ASC;
+      ORDER BY c.priority ASC, c.category_type ASC, c.category_range ASC, c.gender ASC;
     `;
 
     const res = await this.pool.query(query, [tournamentId]);
@@ -1124,6 +1124,63 @@ export class AdminTournamentRepository {
       if (error?.code === "23505") throw new Error("PLAYER_ALREADY_ENROLLED");
       if (error?.code === "23503") throw new Error("INVALID_IDS");
       throw error;
+    }
+  }
+
+  // -----------------------
+  // UPDATE CATEGORY PRIORITY (cola de "qué categoría va primero" — el admin
+  // la reordena desde el panel de categorías, con flechas arriba/abajo, no
+  // en el formulario de creación)
+  // -----------------------
+  async updateCategoryPriority(
+    tournamentId: string,
+    categoryId: string,
+    requestedBy: string,
+    priority: number
+  ): Promise<{
+    updated: boolean;
+    error?: "TOURNAMENT_NOT_FOUND" | "NOT_TOURNAMENT_OWNER" | "CATEGORY_NOT_FOUND";
+  }> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      const tRes = await client.query<{ created_by: string }>(
+        `SELECT created_by FROM ${this.tournamentsTable} WHERE id_tournament = $1 FOR UPDATE`,
+        [tournamentId]
+      );
+      const t = tRes.rows[0];
+      if (!t) {
+        await client.query("ROLLBACK");
+        return { updated: false, error: "TOURNAMENT_NOT_FOUND" };
+      }
+      if (!(await this.isOwnerOrOrganizer(client, tournamentId, requestedBy, t.created_by))) {
+        await client.query("ROLLBACK");
+        return { updated: false, error: "NOT_TOURNAMENT_OWNER" };
+      }
+
+      const res = await client.query(
+        `UPDATE ${this.tournamentCategoriesTable}
+         SET priority = $1
+         WHERE id_category = $2 AND id_tournament = $3`,
+        [priority, categoryId, tournamentId]
+      );
+      if (res.rowCount === 0) {
+        await client.query("ROLLBACK");
+        return { updated: false, error: "CATEGORY_NOT_FOUND" };
+      }
+
+      await client.query("COMMIT");
+      return { updated: true };
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        /* ignore */
+      }
+      throw error;
+    } finally {
+      client.release();
     }
   }
 

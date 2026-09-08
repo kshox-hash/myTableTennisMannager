@@ -335,6 +335,37 @@ export class AdminTournamentController {
     return res.json({ ok: true, data: result.data });
   };
 
+  // PATCH /admin/tournaments/:id_tournament/category/:id_category/priority
+  adminUpdateCategoryPriority = async (req: Request, res: Response) => {
+    const tournamentId = req.params.id_tournament?.trim();
+    const categoryId = req.params.id_category?.trim();
+    const priority = Number(req.body?.priority);
+
+    if (!tournamentId || !categoryId) {
+      return res.status(400).json({ ok: false, message: "Falta id_tournament o id_category" });
+    }
+    if (!Number.isInteger(priority) || priority < 1) {
+      return res.status(400).json({ ok: false, message: "priority debe ser un entero mayor o igual a 1" });
+    }
+
+    const result = await this.service.updateCategoryPriority(tournamentId, categoryId, req.user!.id_user, priority);
+
+    if (!result.ok) {
+      if (result.error === ADMIN_TOURNAMENT_ERRORS.TOURNAMENT_NOT_FOUND) {
+        return res.status(404).json({ ok: false, message: "Campeonato no encontrado" });
+      }
+      if (result.error === ADMIN_TOURNAMENT_ERRORS.CATEGORY_NOT_FOUND) {
+        return res.status(404).json({ ok: false, message: "Categoría no encontrada" });
+      }
+      if (result.error === ADMIN_TOURNAMENT_ERRORS.NOT_TOURNAMENT_OWNER) {
+        return res.status(403).json({ ok: false, message: "No sos el organizador de este campeonato" });
+      }
+      return res.status(400).json({ ok: false, message: result.error });
+    }
+
+    return res.json({ ok: true, data: result.data });
+  };
+
   // GET /admin/tournaments/:id_tournament/categories
   adminGetTournamentCategories = async (req: Request, res: Response) => {
     const tournamentId = req.params.id_tournament?.trim();
