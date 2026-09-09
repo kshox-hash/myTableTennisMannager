@@ -3,19 +3,23 @@ import { asyncHandler } from "../../middlewares/wrap_async_middleware";
 import { authRequired } from "../../middlewares/auth_required_middleware";
 import { requireRole } from "../../middlewares/require_role_middleware";
 import { requireTournamentOwnership } from "../../middlewares/require_tournament_ownership_middleware";
-import { SeedingRepository } from "./seeding_repository";
+import { SeedingRepository, type RankingSource } from "./seeding_repository";
 
 const router = Router();
 const repo   = new SeedingRepository();
 
-// GET /api/v1/bracket/tournaments/:id_tournament/categories/:id_category/seeds
+// GET /api/v1/bracket/tournaments/:id_tournament/categories/:id_category/seeds?ranking_source=general|interno
+// "general" (default) = ranking nacional de toda la plataforma. "interno" =
+// ranking privado del admin dueño de este torneo (solo sus propios
+// torneos) — ver SeedingRepository.RankingSource.
 router.get(
   "/tournaments/:id_tournament/categories/:id_category/seeds",
   authRequired,
   requireRole("admin"),
   requireTournamentOwnership(undefined, { allowViewer: true }),
   asyncHandler(async (req, res) => {
-    const rows = await repo.getSeeds(req.params.id_tournament, req.params.id_category);
+    const rankingSource: RankingSource = req.query.ranking_source === "interno" ? "interno" : "general";
+    const rows = await repo.getSeeds(req.params.id_tournament, req.params.id_category, rankingSource);
     return res.json({ ok: true, data: rows });
   })
 );
