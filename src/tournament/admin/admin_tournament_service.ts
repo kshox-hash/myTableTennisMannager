@@ -192,6 +192,24 @@ export class AdminTournamentService {
     return ok({ deleted: true });
   }
 
+  // UPDATE CATEGORY STATUS (cerrar/reabrir inscripciones)
+  async updateCategoryStatus(
+    tournamentId: string,
+    categoryId: string,
+    requestedBy: string,
+    status: "active" | "closed"
+  ): Promise<Result<{ updated: true }, AdminTournamentError>> {
+    const result = await this.repo.updateCategoryStatus(tournamentId, categoryId, requestedBy, status);
+
+    if (!result.updated) {
+      if (result.error === "TOURNAMENT_NOT_FOUND") return fail(ADMIN_TOURNAMENT_ERRORS.TOURNAMENT_NOT_FOUND);
+      if (result.error === "CATEGORY_NOT_FOUND") return fail(ADMIN_TOURNAMENT_ERRORS.CATEGORY_NOT_FOUND);
+      return fail(ADMIN_TOURNAMENT_ERRORS.NOT_TOURNAMENT_OWNER);
+    }
+
+    return ok({ updated: true });
+  }
+
   // UPDATE CATEGORY PRIORITY (cola de orden entre categorías)
   async updateCategoryPriority(
     tournamentId: string,

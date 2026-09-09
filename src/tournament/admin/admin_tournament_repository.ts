@@ -1140,6 +1140,70 @@ export class AdminTournamentRepository {
   }
 
   // -----------------------
+  // UPDATE CATEGORY STATUS (cerrar/reabrir inscripciones) — status='closed'
+  // ya bloqueaba el auto-inscribirse de un jugador (ver
+  // player_enrollment_repository.ts), pero nada lo ponía en 'closed' desde
+  // el panel admin. Ahora también es lo que desbloquea la pestaña Sembrado:
+  // mientras la categoría siga 'active', Sembrado queda bloqueada aunque ya
+  // haya 2+ inscritos, para que el admin decida explícitamente "ya no entra
+  // nadie más" antes de sembrar.
+  // -----------------------
+  async updateCategoryStatus(
+    tournamentId: string,
+    categoryId: string,
+    requestedBy: string,
+    status: "active" | "closed"
+  ): Promise<{
+    updated: boolean;
+    error?: "TOURNAMENT_NOT_FOUND" | "NOT_TOURNAMENT_OWNER" | "CATEGORY_NOT_FOUND";
+  }> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      const tRes = await client.query<{ created_by: string }>(
+        `SELECT created_by FROM ${this.tournamentsTable} WHERE id_tournament = $1 FOR UPDATE`,
+        [tournamentId]
+      );
+      const t = tRes.rows[0];
+      if (!t) {
+        await client.query("ROLLBACK");
+        return { updated: false, error: "TOURNAMENT_NOT_FOUND" };
+      }
+      if (!(await this.isOwnerOrOrganizer(client, tournamentId, requestedBy, t.created_by))) {
+        await client.query("ROLLBACK");
+        return { updated: false, error: "NOT_TOURNAMENT_OWNER" };
+      }
+
+      // No pisa un status 'cancelled' (categoría dada de baja) — este
+      // endpoint solo alterna entre 'active' y 'closed', nunca reactiva una
+      // categoría cancelada.
+      const res = await client.query(
+        `UPDATE ${this.tournamentCategoriesTable}
+         SET status = $1
+         WHERE id_category = $2 AND id_tournament = $3 AND status <> 'cancelled'`,
+        [status, categoryId, tournamentId]
+      );
+      if (res.rowCount === 0) {
+        await client.query("ROLLBACK");
+        return { updated: false, error: "CATEGORY_NOT_FOUND" };
+      }
+
+      await client.query("COMMIT");
+      return { updated: true };
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        /* ignore */
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  // -----------------------
   // UPDATE CATEGORY PRIORITY (cola de "qué categoría va primero" — el admin
   // la reordena desde el panel de categorías, con flechas arriba/abajo, no
   // en el formulario de creación)

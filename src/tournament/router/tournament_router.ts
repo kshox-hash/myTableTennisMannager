@@ -134,6 +134,16 @@ router.patch(
   asyncHandler(controller.adminUpdateCategoryPriority)
 );
 
+// CERRAR/REABRIR INSCRIPCIONES DE UNA CATEGORÍA (también lo que desbloquea
+// la pestaña Sembrado, ver CategoryWorkspace.tsx en el frontend)
+router.patch(
+  "/admin/tournaments/:id_tournament/category/:id_category/status",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(),
+  asyncHandler(controller.adminUpdateCategoryStatus)
+);
+
 // REMOVE ENROLLMENT (admin cancels)
 router.post(
   "/admin/tournaments/:id_tournament/enrollments/remove",
