@@ -13,6 +13,8 @@ export type TableMatch = {
   round:         number | null;
   round_label:   string | null;
   match_number:  number;
+  player1_id:    string | null;
+  player2_id:    string | null;
   player1_name:  string | null;
   player2_name:  string | null;
   table_number:  number;
@@ -100,6 +102,7 @@ export class TablesRepository {
            NULL::text AS round_label,
            gm.match_number,
            gm.table_number,
+           gm.player1_id, gm.player2_id,
            COALESCE(NULLIF(TRIM(u1.last_name || ' ' || u1.first_name), ''), u1.email) AS player1_name,
            COALESCE(NULLIF(TRIM(u2.last_name || ' ' || u2.first_name), ''), u2.email) AS player2_name
          FROM group_matches gm
@@ -120,6 +123,7 @@ export class TablesRepository {
            NULL::text AS round_label,
            bm.match_number,
            bm.table_number,
+           bm.player1_id, bm.player2_id,
            COALESCE(NULLIF(TRIM(u1.last_name || ' ' || u1.first_name), ''), u1.email) AS player1_name,
            COALESCE(NULLIF(TRIM(u2.last_name || ' ' || u2.first_name), ''), u2.email) AS player2_name
          FROM bracket_matches bm
