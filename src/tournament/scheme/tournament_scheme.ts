@@ -49,6 +49,11 @@ export const createTournamentSchema = z.object({
   allow_mixed: z.boolean().default(true),
   allow_olympic: z.boolean().default(false),
   visibility: z.enum(["public", "private", "internal"]).optional(),
+  // Independiente de la visibilidad (bug #4 del reporte QA: un torneo
+  // "private" seguía sumando puntos al ranking público solo por jugarse).
+  // Puntuable por defecto — apagarlo es la excepción (torneo de prueba,
+  // amistoso, etc.), no la regla.
+  is_ranked: z.boolean().optional(),
   num_tables: z.number().int().min(1).max(50).optional(),
   default_best_of_sets: z.union([z.literal(3), z.literal(5), z.literal(7)]).optional(),
   event_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isValidCalendarDate, { message: "Fecha inválida" }),
@@ -86,6 +91,7 @@ export const updateTournamentSchema = z.object({
   tournament_name: z.string().min(1).max(150).optional(),
   description: z.string().nullable().optional(),
   visibility: z.enum(["public", "private", "internal"]).optional(),
+  is_ranked: z.boolean().optional(),
   num_tables: z.number().int().min(1).max(50).optional(),
   default_best_of_sets: z.union([z.literal(3), z.literal(5), z.literal(7)]).optional(),
   event_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isValidCalendarDate, { message: "Fecha inválida" }).optional(),

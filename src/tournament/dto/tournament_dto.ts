@@ -73,6 +73,10 @@ export type TournamentCreateDTO = {
   region?: string | null;
 
   visibility?: TournamentVisibility;
+  // Independiente de visibility: un torneo "private" puede seguir siendo
+  // puntuable, y uno público puede no serlo (torneo de prueba, amistoso).
+  // Puntuable por defecto (true) si no se manda.
+  is_ranked?: boolean;
 
   // Cantidad real de mesas del recinto — antes solo se podía cargar desde
   // el panel de Mesas o (peor) se volvía a preguntar en el modal de
@@ -101,6 +105,7 @@ export type TournamentUpdateDTO = {
   region?: string | null;
 
   visibility?: TournamentVisibility;
+  is_ranked?: boolean;
   num_tables?: number;
   default_best_of_sets?: number;
 
@@ -123,6 +128,7 @@ export interface ITournament {
   address: string | null;
   region: string | null;
   visibility: TournamentVisibility;
+  is_ranked: boolean;
   num_tables: number;
   default_best_of_sets: number;
 
@@ -145,6 +151,7 @@ export type AdminTournamentRow = {
   address: string | null;
   region: string | null;
   visibility: TournamentVisibility;
+  is_ranked: boolean;
   num_tables: number;
   default_best_of_sets: number;
 

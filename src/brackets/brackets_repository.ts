@@ -311,6 +311,19 @@ export class BracketsRepository {
     return res.rows[0]?.phase ?? "enrollment";
   }
 
+  // Torneos "no puntuables" (is_ranked = FALSE) siguen jugándose y sumando
+  // matches_played/won/lost normal -- solo no reparten ranking_points, para
+  // no ensuciar el ranking público con partidos de prueba/amistosos aunque
+  // el torneo sea visible. Independiente de `visibility`: un torneo privado
+  // puede seguir siendo puntuable.
+  private async isTournamentRanked(client: PoolClient, tournamentId: string): Promise<boolean> {
+    const res = await client.query<{ is_ranked: boolean }>(
+      `SELECT is_ranked FROM tournaments WHERE id_tournament = $1`,
+      [tournamentId]
+    );
+    return res.rows[0]?.is_ranked ?? true;
+  }
+
   async recordMatchResult(params: {
     matchId: string;
     groupId: string;
@@ -342,6 +355,9 @@ export class BracketsRepository {
     } = params;
 
     await this.withTransaction(async (client) => {
+      const isRanked = await this.isTournamentRanked(client, tournamentId);
+      const pointsAwarded = isRanked ? RANKING_POINTS_PER_WIN : 0;
+
       // Resultado del partido
       await client.query(
         `UPDATE group_matches
@@ -375,16 +391,18 @@ export class BracketsRepository {
         [loserSetsFor, loserSetsAgainst, loserPointsFor, loserPointsAgainst, groupId, loserId]
       );
 
-      // Estadísticas globales del ganador
+      // Estadísticas globales del ganador — matches_played/won/sets siguen
+      // contando siempre; ranking_points solo si el torneo es puntuable
+      // (pointsAwarded queda en 0 si no lo es).
       await client.query(
         `INSERT INTO player_stats (id_user, matches_played, matches_won, matches_lost, sets_won, sets_lost, ranking_points)
-         VALUES ($1, 1, 1, 0, $2, $3, ${RANKING_POINTS_PER_WIN})
+         VALUES ($1, 1, 1, 0, $2, $3, ${pointsAwarded})
          ON CONFLICT (id_user) DO UPDATE SET
            matches_played = player_stats.matches_played + 1,
            matches_won    = player_stats.matches_won + 1,
            sets_won       = player_stats.sets_won + EXCLUDED.sets_won,
            sets_lost      = player_stats.sets_lost + EXCLUDED.sets_lost,
-           ranking_points = player_stats.ranking_points + ${RANKING_POINTS_PER_WIN},
+           ranking_points = player_stats.ranking_points + ${pointsAwarded},
            updated_at     = NOW()`,
         [winnerId, winnerSetsFor, winnerSetsAgainst]
       );
@@ -483,6 +501,11 @@ export class BracketsRepository {
     } = params;
 
     await this.withTransaction(async (client) => {
+      // Mismo flag que en recordMatchResult: si el torneo no era puntuable
+      // no se le restan puntos a nadie (nunca se le sumaron).
+      const isRanked = await this.isTournamentRanked(client, tournamentId);
+      const pointsToRevert = isRanked ? RANKING_POINTS_PER_WIN : 0;
+
       await client.query(
         `UPDATE group_matches
          SET winner_id = NULL, sets_player1 = 0, sets_player2 = 0,
@@ -514,7 +537,7 @@ export class BracketsRepository {
         `UPDATE player_stats
          SET matches_played = matches_played - 1, matches_won = matches_won - 1,
              sets_won = sets_won - $1, sets_lost = sets_lost - $2,
-             ranking_points = ranking_points - ${RANKING_POINTS_PER_WIN}, updated_at = NOW()
+             ranking_points = ranking_points - ${pointsToRevert}, updated_at = NOW()
          WHERE id_user = $3`,
         [winnerSetsFor, winnerSetsAgainst, winnerId]
       );
@@ -869,6 +892,9 @@ export class BracketsRepository {
             nextRound, nextMatchNumber, nextMatchSlot, tournamentId, categoryId } = params;
 
     await this.withTransaction(async (client) => {
+      const isRanked = await this.isTournamentRanked(client, tournamentId);
+      const pointsAwarded = isRanked ? RANKING_POINTS_PER_WIN : 0;
+
       // Resultado del partido de llave
       await client.query(
         `UPDATE bracket_matches
@@ -897,13 +923,13 @@ export class BracketsRepository {
       // Estadísticas globales del ganador
       await client.query(
         `INSERT INTO player_stats (id_user, matches_played, matches_won, matches_lost, sets_won, sets_lost, ranking_points)
-         VALUES ($1, 1, 1, 0, $2, $3, ${RANKING_POINTS_PER_WIN})
+         VALUES ($1, 1, 1, 0, $2, $3, ${pointsAwarded})
          ON CONFLICT (id_user) DO UPDATE SET
            matches_played = player_stats.matches_played + 1,
            matches_won    = player_stats.matches_won + 1,
            sets_won       = player_stats.sets_won + EXCLUDED.sets_won,
            sets_lost      = player_stats.sets_lost + EXCLUDED.sets_lost,
-           ranking_points = player_stats.ranking_points + ${RANKING_POINTS_PER_WIN},
+           ranking_points = player_stats.ranking_points + ${pointsAwarded},
            updated_at     = NOW()`,
         [winnerId, winnerSetsFor, winnerSetsAgainst]
       );
