@@ -4,3 +4,5 @@ dist
 
 # Scripts sueltos de debug, no son parte de la app
 scratch_*
+tsconfig.tsbuildinfo
+.env.orig.bak
