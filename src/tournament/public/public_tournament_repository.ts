@@ -10,6 +10,10 @@ export interface PublicTournamentRow {
   event_date: string | Date | null;
   event_time: string | null;
   status: string;
+  // Estado ya resuelto (upcoming/ongoing/finished/cancelled) — ver
+  // statusCase más abajo. A diferencia de `status` (active/cancelled crudo
+  // de la tabla), este es el que se muestra tal cual en la vitrina.
+  computed_status: string;
   category_count: number;
   enrolled_count: number;
 }
@@ -82,13 +86,32 @@ export class PublicTournamentRepository {
       conditions.push(`t.region = $${i++}`);
       values.push(filters.region);
     }
-    // Mismo cálculo que `displayStatus` en el router (la tabla solo guarda
-    // active/cancelled, el resto se deriva de event_date vs hoy) — repetido
-    // acá en SQL para poder filtrar/ordenar sobre el estado ya calculado.
-    // Reusado también en el ORDER BY de más abajo — una sola fuente de
-    // verdad para "qué estado tiene este torneo hoy".
+    // Mismo cálculo que `displayStatus` en el router (para getById, que
+    // arma esto en JS porque ya tiene las categorías a mano) — acá en SQL
+    // para poder filtrar/ordenar/mostrar sobre el estado ya calculado.
+    // Reusado también en el ORDER BY y en el SELECT de más abajo — una sola
+    // fuente de verdad para "qué estado tiene este torneo hoy".
+    //
+    // El estado por fecha (upcoming/ongoing/finished según event_date vs
+    // hoy) es solo el FALLBACK: si alguna categoría ya salió de
+    // "enrollment" (armó grupos, llave, o terminó), el torneo está
+    // realmente en curso aunque falten días para la fecha del evento —
+    // antes un torneo con 3 categorías donde solo UNA había arrancado
+    // seguía mostrando "Próximamente" con cuenta regresiva. Si TODAS las
+    // categorías llegaron a "finished", el torneo se da por terminado
+    // aunque la fecha del evento sea hoy o esté en el futuro (arrancó
+    // antes de lo previsto, o se jugó todo en un rato).
     const statusCase = `(CASE
         WHEN t.status = 'cancelled' THEN 'cancelled'
+        WHEN EXISTS (SELECT 1 FROM tournament_categories tc WHERE tc.id_tournament = t.id_tournament)
+         AND NOT EXISTS (
+           SELECT 1 FROM tournament_categories tc
+           WHERE tc.id_tournament = t.id_tournament AND tc.phase <> 'finished'
+         ) THEN 'finished'
+        WHEN EXISTS (
+          SELECT 1 FROM tournament_categories tc
+          WHERE tc.id_tournament = t.id_tournament AND tc.phase <> 'enrollment'
+        ) THEN 'ongoing'
         WHEN t.event_date IS NULL THEN 'upcoming'
         WHEN t.event_date > CURRENT_DATE THEN 'upcoming'
         WHEN t.event_date = CURRENT_DATE THEN 'ongoing'
@@ -149,6 +172,7 @@ export class PublicTournamentRepository {
       `SELECT
          t.id_tournament, t.tournament_name, t.description, t.address, t.region,
          t.event_date, t.event_time, t.status,
+         ${statusCase} AS computed_status,
          (SELECT COUNT(*) FROM tournament_categories tc WHERE tc.id_tournament = t.id_tournament)::int AS category_count,
          (SELECT COUNT(*) FROM enrollments e WHERE e.id_tournament = t.id_tournament AND e.status = 'active')::int AS enrolled_count
        FROM tournaments t

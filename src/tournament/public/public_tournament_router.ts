@@ -21,11 +21,21 @@ function formatTimestamp(value: string | Date | null): string | null {
   return new Date(value).toISOString();
 }
 
-// "No ha empezado" / "En curso" / "Finalizado" / "Cancelado" — la tabla
-// solo guarda active/cancelled, así que el resto se deriva de la fecha
-// del evento. Es una vitrina pública, no hace falta más precisión que esa.
-function displayStatus(status: string, eventDate: string | Date | null): string {
+// "No ha empezado" / "En curso" / "Finalizado" / "Cancelado" — mismo
+// cálculo que `statusCase` en el repo (usado ahí para el listado, que trae
+// el estado ya resuelto por SQL); acá en JS porque el detalle de un torneo
+// (getById más abajo) ya trae las categorías con su fase a mano, no hace
+// falta otra query. categoryPhases = fase de CADA categoría del torneo
+// ("enrollment"/"groups"/"bracket"/"finished"): si alguna ya salió de
+// "enrollment" el torneo está en curso aunque falten días para la fecha
+// del evento (antes se mostraba "Próximamente" con cuenta regresiva
+// mientras UNA sola categoría de varias ya había arrancado) — y si TODAS
+// llegaron a "finished" el torneo se da por terminado aunque la fecha sea
+// hoy o esté en el futuro.
+function displayStatus(status: string, eventDate: string | Date | null, categoryPhases: string[]): string {
   if (status === "cancelled") return "cancelled";
+  if (categoryPhases.length > 0 && categoryPhases.every((p) => p === "finished")) return "finished";
+  if (categoryPhases.some((p) => p !== "enrollment")) return "ongoing";
   const date = formatDate(eventDate);
   if (!date) return "upcoming";
   const today = new Date().toISOString().slice(0, 10);
@@ -70,7 +80,7 @@ router.get(
           region: t.region,
           event_date: formatDate(t.event_date),
           event_time: t.event_time,
-          status: displayStatus(t.status, t.event_date),
+          status: t.computed_status,
           category_count: t.category_count,
           enrolled_count: t.enrolled_count,
         })),
@@ -127,7 +137,7 @@ router.get(
         region: tournament.region,
         event_date: formatDate(tournament.event_date),
         event_time: tournament.event_time,
-        status: displayStatus(tournament.status, tournament.event_date),
+        status: displayStatus(tournament.status, tournament.event_date, categories.map((c) => c.phase)),
         organizer_club_name: tournament.organizer_club_name ?? tournament.organizer_user_name,
         categories: categories.map((c) => ({
           id_category: c.id_category,
