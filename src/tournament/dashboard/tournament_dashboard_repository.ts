@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
 import DB from "../../db/db_configuration";
+import { RANKING_POINTS_PER_WIN } from "../../ranking/ranking_repository";
 
 export type CategoryDashboard = {
   id_category:            string;
@@ -27,6 +28,19 @@ export type TournamentDashboard = {
     matches_total:   number;
     matches_played:  number;
   };
+};
+
+export type PlayerPointsRow = {
+  id_user:        string;
+  name:           string;
+  matches_played: number;
+  matches_won:    number;
+  points:         number;
+};
+
+export type PointsSummary = {
+  is_ranked: boolean;
+  players:   PlayerPointsRow[];
 };
 
 export class TournamentDashboardRepository {
@@ -111,5 +125,67 @@ export class TournamentDashboardRepository {
     );
 
     return { ...t, categories, totals };
+  }
+
+  // Resumen de puntos ganados EN ESTE torneo puntual, jugador por jugador --
+  // no confundir con player_stats.ranking_points, que es el acumulado de
+  // TODOS los torneos. matches_played/matches_won salen de group_matches +
+  // bracket_matches de este torneo (solo partidos con resultado cargado);
+  // points es matches_won * RANKING_POINTS_PER_WIN, pero en 0 para todos si
+  // el torneo es "no puntuable" (is_ranked = false) -- mismo criterio que ya
+  // usa BracketsRepository al sumar de verdad, así esta pantalla nunca
+  // muestra puntos que en realidad no se sumaron al ranking público.
+  async getPointsSummary(id_tournament: string): Promise<PointsSummary | null> {
+    const tRes = await this.pool.query<{ is_ranked: boolean }>(
+      `SELECT is_ranked FROM tournaments WHERE id_tournament = $1`,
+      [id_tournament]
+    );
+    if (tRes.rowCount === 0) return null;
+    const isRanked = tRes.rows[0].is_ranked;
+
+    const res = await this.pool.query<{
+      id_user: string;
+      name: string;
+      matches_played: string;
+      matches_won: string;
+    }>(
+      `WITH tm AS (
+         SELECT gm.player1_id AS p1, gm.player2_id AS p2, gm.winner_id
+         FROM group_matches gm
+         JOIN category_groups cg ON cg.id_group = gm.id_group
+         WHERE cg.id_tournament = $1 AND gm.winner_id IS NOT NULL
+         UNION ALL
+         SELECT bm.player1_id, bm.player2_id, bm.winner_id
+         FROM bracket_matches bm
+         WHERE bm.id_tournament = $1 AND bm.winner_id IS NOT NULL
+       ),
+       players AS (
+         SELECT p1 AS id_user FROM tm WHERE p1 IS NOT NULL
+         UNION
+         SELECT p2 FROM tm WHERE p2 IS NOT NULL
+       )
+       SELECT
+         p.id_user,
+         COALESCE(NULLIF(TRIM(u.last_name || ' ' || u.first_name), ''), u.email) AS name,
+         (SELECT COUNT(*) FROM tm WHERE tm.p1 = p.id_user OR tm.p2 = p.id_user) AS matches_played,
+         (SELECT COUNT(*) FROM tm WHERE tm.winner_id = p.id_user) AS matches_won
+       FROM players p
+       JOIN users u ON u.id_user = p.id_user
+       ORDER BY matches_won DESC, matches_played DESC, name ASC`,
+      [id_tournament]
+    );
+
+    const players: PlayerPointsRow[] = res.rows.map((r) => {
+      const matchesWon = Number(r.matches_won);
+      return {
+        id_user: r.id_user,
+        name: r.name,
+        matches_played: Number(r.matches_played),
+        matches_won: matchesWon,
+        points: isRanked ? matchesWon * RANKING_POINTS_PER_WIN : 0,
+      };
+    });
+
+    return { is_ranked: isRanked, players };
   }
 }
