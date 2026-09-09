@@ -94,7 +94,7 @@ router.get(
   "/admin/tournaments/:id_tournament/activity",
   authRequired,
   requireRole("admin"),
-  requireTournamentOwnership(),
+  requireTournamentOwnership(undefined, { allowViewer: true }),
   asyncHandler(controller.adminGetActivity)
 );
 
@@ -103,7 +103,7 @@ router.get(
   "/admin/tournaments/:id_tournament/enrollments",
   authRequired,
   requireRole("admin"),
-  requireTournamentOwnership(),
+  requireTournamentOwnership(undefined, { allowViewer: true }),
   asyncHandler(controller.adminGetTournamentEnrollments)
 );
 
@@ -112,7 +112,7 @@ router.get(
   "/admin/tournaments/:id_tournament/categories",
   authRequired,
   requireRole("admin"),
-  requireTournamentOwnership(),
+  requireTournamentOwnership(undefined, { allowViewer: true }),
   asyncHandler(controller.adminGetTournamentCategories)
 );
 
@@ -121,7 +121,7 @@ router.get(
   "/admin/tournaments/:id_tournament/category/:id_category/players",
   authRequired,
   requireRole("admin"),
-  requireTournamentOwnership(),
+  requireTournamentOwnership(undefined, { allowViewer: true }),
   asyncHandler(controller.adminGetCategoryPlayers)
 );
 

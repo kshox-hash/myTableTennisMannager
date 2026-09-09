@@ -13,7 +13,7 @@ router.get(
   "/tournaments/:id_tournament/categories/:id_category/seeds",
   authRequired,
   requireRole("admin"),
-  requireTournamentOwnership(),
+  requireTournamentOwnership(undefined, { allowViewer: true }),
   asyncHandler(async (req, res) => {
     const rows = await repo.getSeeds(req.params.id_tournament, req.params.id_category);
     return res.json({ ok: true, data: rows });
@@ -22,11 +22,14 @@ router.get(
 
 // PUT /api/v1/bracket/tournaments/:id_tournament/categories/:id_category/seeds
 // body: [{ id_enrollment, seed }]
+// El invitado "viewer" (ej. juez general) SÍ puede reordenar cabezas de
+// serie/sembrado -- es la única escritura que tiene permitida, ver
+// requireTournamentOwnership.
 router.put(
   "/tournaments/:id_tournament/categories/:id_category/seeds",
   authRequired,
   requireRole("admin"),
-  requireTournamentOwnership(),
+  requireTournamentOwnership(undefined, { allowViewer: true }),
   asyncHandler(async (req, res) => {
     const seeds = req.body as { id_enrollment: string; seed: number }[];
     if (!Array.isArray(seeds) || seeds.some(s => !s.id_enrollment || s.seed == null)) {

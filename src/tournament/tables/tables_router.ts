@@ -30,7 +30,7 @@ router.get(
   "/:id_tournament/tables",
   authRequired,
   requireRole("admin"),
-  requireTournamentOwnership(),
+  requireTournamentOwnership(undefined, { allowViewer: true }),
   asyncHandler(async (req, res) => {
     const { id_tournament } = req.params;
     const [numTables, active, readyAndBlocked] = await Promise.all([

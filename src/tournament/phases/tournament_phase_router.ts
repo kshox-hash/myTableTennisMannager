@@ -37,7 +37,7 @@ router.get(
   "/:id_tournament/phases",
   authRequired,
   requireRole("admin"),
-  requireTournamentOwnership(),
+  requireTournamentOwnership(undefined, { allowViewer: true }),
   asyncHandler(controller.getPhases)
 );
 
@@ -64,7 +64,7 @@ router.get(
   "/:id_tournament/categories/:id_category/preview-groups",
   authRequired,
   requireRole("admin"),
-  requireTournamentOwnership(),
+  requireTournamentOwnership(undefined, { allowViewer: true }),
   asyncHandler(controller.previewGroups)
 );
 
@@ -82,7 +82,7 @@ router.get(
   "/:id_tournament/categories/:id_category/preview-bracket",
   authRequired,
   requireRole("admin"),
-  requireTournamentOwnership(),
+  requireTournamentOwnership(undefined, { allowViewer: true }),
   asyncHandler(controller.previewBracket)
 );
 

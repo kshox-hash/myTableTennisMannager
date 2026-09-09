@@ -1,11 +1,14 @@
 import type { Pool } from "pg";
 import DB from "../../db/db_configuration";
 
+export type OrganizerRole = "organizer" | "viewer";
+
 export type OrganizerRow = {
   id_user: string;
   email: string;
   first_name: string | null;
   last_name: string | null;
+  role: OrganizerRole;
   created_at: string;
 };
 
@@ -28,7 +31,7 @@ export class TournamentOrganizersRepository {
 
   async list(idTournament: string): Promise<OrganizerRow[]> {
     const res = await this.pool.query<OrganizerRow>(
-      `SELECT u.id_user, u.email, u.first_name, u.last_name, o.created_at::text
+      `SELECT u.id_user, u.email, u.first_name, u.last_name, o.role, o.created_at::text
        FROM tournament_organizers o
        JOIN users u ON u.id_user = o.id_user
        WHERE o.id_tournament = $1
@@ -41,7 +44,8 @@ export class TournamentOrganizersRepository {
   async invite(
     idTournament: string,
     invitedBy: string,
-    email: string
+    email: string,
+    role: OrganizerRole = "organizer"
   ): Promise<{ ok: true; data: OrganizerRow } | { ok: false; error: "NOT_TOURNAMENT_OWNER" | "USER_NOT_FOUND" | "USER_NOT_ADMIN" }> {
     if (!(await this.isOwner(idTournament, invitedBy))) {
       return { ok: false, error: "NOT_TOURNAMENT_OWNER" };
@@ -57,15 +61,18 @@ export class TournamentOrganizersRepository {
     if (!user) return { ok: false, error: "USER_NOT_FOUND" };
     if (user.role !== "admin") return { ok: false, error: "USER_NOT_ADMIN" };
 
+    // Si ya estaba invitado con otro rol, se actualiza al nuevo -- re-invitar
+    // es la forma de cambiarle el rol a alguien sin sacarlo y volver a
+    // agregarlo.
     await this.pool.query(
-      `INSERT INTO tournament_organizers (id_tournament, id_user, invited_by)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (id_tournament, id_user) DO NOTHING`,
-      [idTournament, user.id_user, invitedBy]
+      `INSERT INTO tournament_organizers (id_tournament, id_user, invited_by, role)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (id_tournament, id_user) DO UPDATE SET role = EXCLUDED.role`,
+      [idTournament, user.id_user, invitedBy, role]
     );
 
     const res = await this.pool.query<OrganizerRow>(
-      `SELECT u.id_user, u.email, u.first_name, u.last_name, o.created_at::text
+      `SELECT u.id_user, u.email, u.first_name, u.last_name, o.role, o.created_at::text
        FROM tournament_organizers o
        JOIN users u ON u.id_user = o.id_user
        WHERE o.id_tournament = $1 AND o.id_user = $2`,

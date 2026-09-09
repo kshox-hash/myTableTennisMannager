@@ -17,7 +17,7 @@ router.get(
   "/:id_tournament/schedule",
   authRequired,
   requireRole("admin"),
-  requireTournamentOwnership(),
+  requireTournamentOwnership(undefined, { allowViewer: true }),
   asyncHandler(async (req, res) => {
     const { id_tournament } = req.params;
     const avgMinutes = Math.min(Math.max(Number(req.query.avg_minutes) || 15, 5), 60);

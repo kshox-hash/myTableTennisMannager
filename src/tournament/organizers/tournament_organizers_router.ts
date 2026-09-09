@@ -31,7 +31,9 @@ router.get(
   })
 );
 
-// POST /api/v1/tournament/admin/tournaments/:id_tournament/organizers  body: { email }
+// POST /api/v1/tournament/admin/tournaments/:id_tournament/organizers
+// body: { email, role?: "organizer" | "viewer" } -- role default "organizer"
+// (compatible con quien todavía no manda el campo).
 router.post(
   "/admin/tournaments/:id_tournament/organizers",
   authRequired,
@@ -41,7 +43,9 @@ router.post(
     if (!email) {
       return res.status(400).json({ ok: false, message: "Falta email" });
     }
-    const result = await repo.invite(req.params.id_tournament, req.user!.id_user, email);
+    const roleRaw = req.body?.role;
+    const role = roleRaw === "viewer" ? "viewer" : "organizer";
+    const result = await repo.invite(req.params.id_tournament, req.user!.id_user, email, role);
     if (!result.ok) return errorResponse(res, result.error);
     return res.status(201).json({ ok: true, data: result.data });
   })
