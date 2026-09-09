@@ -78,4 +78,67 @@ export class RankingRepository {
     const res = await this.pool.query(q, [idUser]);
     return (res.rows[0] as RankingRow) ?? null;
   }
+
+  // Ranking privado de UN administrador: no vive en player_stats (eso es el
+  // acumulado global de TODA la plataforma, sin distinguir quién organizó
+  // qué) — se recalcula al leer, igual que getPointsSummary de un torneo
+  // puntual (tournament_dashboard_repository.ts), pero uniendo TODOS los
+  // torneos de los que este admin es dueño (created_by). matches_played/won
+  // cuentan siempre (mismo criterio que player_stats en brackets_repository);
+  // ranking_points solo suma los partidos de torneos puntuables
+  // (is_ranked = true) — así un admin que arma un torneo amistoso no le
+  // infla los puntos a nadie en SU propio ranking tampoco.
+  async getOrganizerRanking(idAdmin: string, limit = 200): Promise<RankingRow[]> {
+    const q = `
+      WITH admin_tournaments AS (
+        SELECT id_tournament, is_ranked FROM tournaments WHERE created_by = $1
+      ),
+      tm AS (
+        SELECT gm.player1_id AS p1, gm.player2_id AS p2, gm.winner_id, at.is_ranked
+        FROM group_matches gm
+        JOIN category_groups cg ON cg.id_group = gm.id_group
+        JOIN admin_tournaments at ON at.id_tournament = cg.id_tournament
+        WHERE gm.winner_id IS NOT NULL
+        UNION ALL
+        SELECT bm.player1_id, bm.player2_id, bm.winner_id, at.is_ranked
+        FROM bracket_matches bm
+        JOIN admin_tournaments at ON at.id_tournament = bm.id_tournament
+        WHERE bm.winner_id IS NOT NULL
+      ),
+      players AS (
+        SELECT p1 AS id_user FROM tm WHERE p1 IS NOT NULL
+        UNION
+        SELECT p2 FROM tm WHERE p2 IS NOT NULL
+      ),
+      agg AS (
+        SELECT
+          p.id_user,
+          (SELECT COUNT(*) FROM tm WHERE tm.p1 = p.id_user OR tm.p2 = p.id_user) AS matches_played,
+          (SELECT COUNT(*) FROM tm WHERE tm.winner_id = p.id_user) AS matches_won,
+          (SELECT COUNT(*) FROM tm WHERE tm.winner_id = p.id_user AND tm.is_ranked) AS ranked_wins
+        FROM players p
+      )
+      SELECT
+        a.id_user, u.first_name, u.last_name, u.email,
+        cl.name AS club_name,
+        (a.ranked_wins * ${RANKING_POINTS_PER_WIN}) AS ranking_points,
+        a.matches_played, a.matches_won,
+        ROW_NUMBER() OVER (
+          ORDER BY (a.ranked_wins * ${RANKING_POINTS_PER_WIN}) DESC, a.matches_played ASC, u.last_name ASC NULLS LAST
+        ) AS ranking_position
+      FROM agg a
+      JOIN users u ON u.id_user = a.id_user
+      LEFT JOIN clubs cl ON cl.id_club = u.id_club
+      ORDER BY ranking_position ASC
+      LIMIT $2;
+    `;
+    const res = await this.pool.query(q, [idAdmin, limit]);
+    return res.rows.map((r: any) => ({
+      ...r,
+      ranking_points: Number(r.ranking_points),
+      ranking_position: Number(r.ranking_position),
+      matches_played: Number(r.matches_played),
+      matches_won: Number(r.matches_won),
+    })) as RankingRow[];
+  }
 }

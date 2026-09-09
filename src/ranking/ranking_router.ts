@@ -50,6 +50,20 @@ router.get(
   })
 );
 
+// GET /api/v1/ranking/mine-as-organizer — ranking privado de ESTE admin:
+// solo los torneos que él creó, no el ranking global de la plataforma.
+// Nadie más puede pedir el de otro admin (no recibe id por parámetro,
+// siempre usa el del token) — es privado, no una vitrina pública.
+router.get(
+  "/mine-as-organizer",
+  authRequired,
+  requireRole("admin"),
+  asyncHandler(async (req, res) => {
+    const data = await repo.getOrganizerRanking(req.user!.id_user);
+    return res.json({ ok: true, data: data.map(shapeRankingRow) });
+  })
+);
+
 // GET /api/v1/ranking/public — mismo ranking, sin login. Vitrina pública,
 // igual que /tournament/public/*: reusa el mismo repositorio/criterio de
 // orden que la versión autenticada, no duplica la lógica.
