@@ -1,11 +1,15 @@
 // src/app.ts
+// dotenv PRIMERO de todo: los módulos que se importan abajo (r2_client, db
+// config, etc.) leen process.env en su carga — si dotenv corre después, ven
+// el entorno vacío. En Render no pasa (las env vars ya están en el proceso),
+// pero en local con .env el orden importa.
+import "dotenv/config";
 import express from "express";
 import http from "http";
 
 import config from "./config";
 import router from "./router";
 import { runMigrations } from "./db/run_migrations";
-import "dotenv/config";
 
 class Server {
     private app : express.Express;
