@@ -24,6 +24,7 @@ const createSchema = z.object({
   category_type: z.string().trim().min(1).max(20),
   category_range: z.string().trim().max(100).optional(),
   gender: z.enum(["male", "female", "mixed"]),
+  format: z.enum(["singles", "doubles"]).optional(),
   best_of_sets: z.union([z.literal(3), z.literal(5), z.literal(7)]).optional(),
 });
 
@@ -32,8 +33,13 @@ const ERR: Record<string, [number, string]> = {
   FIXTURE_ALREADY_GENERATED: [409, "El fixture ya se generó — no se pueden cambiar los jugadores"],
   ALREADY_IN_DIVISION: [409, "El jugador ya está en esta división"],
   PLAYER_NOT_FOUND: [404, "Jugador no encontrado"],
-  NOT_ENOUGH_PLAYERS: [400, "Se necesitan al menos 3 jugadores para generar el fixture"],
+  NOT_ENOUGH_PLAYERS: [400, "Se necesitan al menos 3 participantes para generar el fixture"],
   LEAGUE_NOT_FOUND: [404, "Liga no encontrada"],
+  LEAGUE_IS_DOUBLES: [400, "Esta liga es de dobles — agregá parejas, no jugadores sueltos"],
+  LEAGUE_IS_SINGLES: [400, "Esta liga es individual, no de dobles"],
+  SAME_PLAYER: [400, "Una pareja necesita dos jugadores distintos"],
+  ALREADY_IN_TEAM: [409, "Uno de los jugadores ya está en otra pareja de esta liga"],
+  MIXED_RULE: [400, "En dobles mixtos la pareja tiene que ser un varón y una dama"],
 };
 
 // POST /api/v1/leagues
@@ -55,6 +61,7 @@ router.post(
       category_type: p.data.category_type,
       category_range: p.data.category_range ?? "General",
       gender: p.data.gender,
+      format: p.data.format ?? "singles",
       best_of_sets: p.data.best_of_sets ?? 3,
     });
     return res.status(201).json({ ok: true, data: { id_league: id } });
@@ -126,6 +133,25 @@ router.post(
     const idUser = (req.body?.id_user as string | undefined)?.trim();
     if (!idUser) return res.status(400).json({ ok: false, message: "Falta id_user" });
     const r = await repo.addPlayer(req.params.id_league, req.params.id_division, idUser);
+    if (!r.ok) {
+      const [code, msg] = ERR[r.error] ?? [400, r.error];
+      return res.status(code).json({ ok: false, message: msg });
+    }
+    return res.status(201).json({ ok: true });
+  })
+);
+
+// POST .../divisions/:id_division/pairs   body: { player1_id, player2_id }
+router.post(
+  "/:id_league/divisions/:id_division/pairs",
+  authRequired,
+  requireRole("admin"),
+  ownLeagueStrict,
+  asyncHandler(async (req, res) => {
+    const p1 = (req.body?.player1_id as string | undefined)?.trim();
+    const p2 = (req.body?.player2_id as string | undefined)?.trim();
+    if (!p1 || !p2) return res.status(400).json({ ok: false, message: "Faltan player1_id y player2_id" });
+    const r = await repo.addPair(req.params.id_league, req.params.id_division, p1, p2);
     if (!r.ok) {
       const [code, msg] = ERR[r.error] ?? [400, r.error];
       return res.status(code).json({ ok: false, message: msg });

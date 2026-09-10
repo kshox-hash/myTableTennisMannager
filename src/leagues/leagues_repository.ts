@@ -1,5 +1,8 @@
 import type { Pool, PoolClient } from "pg";
+import { randomUUID } from "crypto";
 import DB from "../db/db_configuration";
+import { hashPassword } from "../bcrypt/bcrypt";
+import { ROLE_IDS } from "../core/constants/roles";
 import { roundRobinSchedule } from "./round_robin";
 
 export type LeagueScoring = "2-1-0" | "3-0";
@@ -14,6 +17,7 @@ export type LeagueListRow = {
   category_type: string;
   category_range: string;
   gender: string;
+  format: string;
   division_count: number;
   player_count: number;
 };
@@ -70,11 +74,15 @@ export type LeagueDetail = {
   category_type: string;
   category_range: string;
   gender: string;
+  format: string; // 'singles' | 'doubles'
   best_of_sets: number;
   divisions: LeagueDivision[];
 };
 
-const NAME_SQL = `COALESCE(NULLIF(TRIM(u.last_name || ' ' || u.first_name), ''), u.email)`;
+// CONCAT (no `||`) porque `NULL || 'x'` = NULL en SQL — un walk-in o un
+// usuario equipo (is_team) solo tiene first_name, así el nombre no se caía
+// al email sintético.
+const NAME_SQL = `COALESCE(NULLIF(TRIM(CONCAT(u.last_name, ' ', u.first_name)), ''), NULLIF(TRIM(u.first_name), ''), u.email)`;
 
 function computePoints(scoring: LeagueScoring, won: number, lost: number): number {
   return scoring === "3-0" ? won * 3 : won * 2 + lost * 1;
@@ -113,6 +121,7 @@ export class LeaguesRepository {
     category_type: string;
     category_range: string;
     gender: "male" | "female" | "mixed";
+    format: "singles" | "doubles";
     best_of_sets: 3 | 5 | 7;
   }): Promise<string> {
     return this.withTx(async (c) => {
@@ -130,9 +139,10 @@ export class LeaguesRepository {
       const cat = await c.query<{ id_category: string }>(
         `INSERT INTO tournament_categories
            (id_tournament, category_type, category_range, gender, inscription_price, quotas, status, phase, format)
-         VALUES ($1, $2, $3, $4, 0, NULL, 'active', 'groups', 'singles')
+         VALUES ($1, $2, $3, $4, 0, NULL, 'active', 'groups', $5)
          RETURNING id_category`,
-        [idLeague, input.category_type.trim(), input.category_range.trim() || "General", input.gender]
+        [idLeague, input.category_type.trim(), input.category_range.trim() || "General", input.gender,
+         input.format === "doubles" ? "doubles" : "singles"]
       );
       const idCategory = cat.rows[0].id_category;
 
@@ -186,6 +196,7 @@ export class LeaguesRepository {
          tc.category_type,
          tc.category_range,
          tc.gender,
+         tc.format,
          (SELECT COUNT(*) FROM category_groups g WHERE g.id_tournament = t.id_tournament)::int AS division_count,
          (SELECT COUNT(*) FROM group_members gm
           JOIN category_groups g ON g.id_group = gm.id_group
@@ -204,12 +215,12 @@ export class LeaguesRepository {
     const head = await this.pool.query<{
       id_league: string; id_category: string; name: string; region: string | null;
       season: string | null; scoring: LeagueScoring; visibility: string; is_ranked: boolean;
-      category_type: string; category_range: string; gender: string; best_of_sets: number;
+      category_type: string; category_range: string; gender: string; format: string; best_of_sets: number;
     }>(
       `SELECT
          t.id_tournament AS id_league, tc.id_category, t.tournament_name AS name, t.region,
          lc.season, lc.scoring, t.visibility, t.is_ranked,
-         tc.category_type, tc.category_range, tc.gender,
+         tc.category_type, tc.category_range, tc.gender, tc.format,
          COALESCE(t.default_best_of_sets, 3) AS best_of_sets
        FROM tournaments t
        JOIN league_config lc ON lc.id_tournament = t.id_tournament
@@ -297,6 +308,7 @@ export class LeaguesRepository {
       id_league: h.id_league, id_category: h.id_category, name: h.name, region: h.region,
       season: h.season, scoring: h.scoring, visibility: h.visibility, is_ranked: h.is_ranked,
       category_type: h.category_type, category_range: h.category_range, gender: h.gender,
+      format: h.format ?? "singles",
       best_of_sets: Number(h.best_of_sets), divisions,
     };
   }
@@ -304,13 +316,15 @@ export class LeaguesRepository {
   // ─────────────────────────────────────────────────────────
   async addPlayer(idLeague: string, idDivision: string, idUser: string): Promise<{ ok: true } | { ok: false; error: string }> {
     return this.withTx(async (c) => {
-      const d = await c.query<{ status: string; id_category: string }>(
-        `SELECT g.status, g.id_category FROM category_groups g
+      const d = await c.query<{ status: string; id_category: string; format: string }>(
+        `SELECT g.status, g.id_category, tc.format
+         FROM category_groups g JOIN tournament_categories tc ON tc.id_category = g.id_category
          WHERE g.id_group = $1 AND g.id_tournament = $2`,
         [idDivision, idLeague]
       );
       if (d.rowCount === 0) return { ok: false as const, error: "DIVISION_NOT_FOUND" };
       if (d.rows[0].status !== "draft") return { ok: false as const, error: "FIXTURE_ALREADY_GENERATED" };
+      if (d.rows[0].format === "doubles") return { ok: false as const, error: "LEAGUE_IS_DOUBLES" };
 
       const dup = await c.query(`SELECT 1 FROM group_members WHERE id_group = $1 AND id_user = $2`, [idDivision, idUser]);
       if ((dup.rowCount ?? 0) > 0) return { ok: false as const, error: "ALREADY_IN_DIVISION" };
@@ -337,6 +351,77 @@ export class LeaguesRepository {
     });
   }
 
+  // Liga de DOBLES: cada "jugador" de una división es una pareja (un
+  // usuario equipo, is_team). Mismo criterio que las categorías de dobles
+  // (ver doubles_repository) — mixto exige 1 varón + 1 dama si ambos
+  // géneros están cargados.
+  async addPair(
+    idLeague: string, idDivision: string, player1Id: string, player2Id: string
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (player1Id === player2Id) return { ok: false, error: "SAME_PLAYER" };
+    return this.withTx(async (c) => {
+      const d = await c.query<{ status: string; id_category: string; format: string; gender: string }>(
+        `SELECT g.status, g.id_category, tc.format, tc.gender
+         FROM category_groups g JOIN tournament_categories tc ON tc.id_category = g.id_category
+         WHERE g.id_group = $1 AND g.id_tournament = $2`,
+        [idDivision, idLeague]
+      );
+      if (d.rowCount === 0) return { ok: false as const, error: "DIVISION_NOT_FOUND" };
+      if (d.rows[0].status !== "draft") return { ok: false as const, error: "FIXTURE_ALREADY_GENERATED" };
+      if (d.rows[0].format !== "doubles") return { ok: false as const, error: "LEAGUE_IS_SINGLES" };
+      const idCategory = d.rows[0].id_category;
+
+      const pl = await c.query<{ id_user: string; first_name: string | null; last_name: string | null; gender: string | null }>(
+        `SELECT id_user, first_name, last_name, gender FROM users WHERE id_user = ANY($1::uuid[])`,
+        [[player1Id, player2Id]]
+      );
+      if (pl.rows.length !== 2) return { ok: false as const, error: "PLAYER_NOT_FOUND" };
+      const p1 = pl.rows.find((r) => r.id_user === player1Id)!;
+      const p2 = pl.rows.find((r) => r.id_user === player2Id)!;
+      if (d.rows[0].gender === "mixed" && p1.gender && p2.gender && p1.gender === p2.gender) {
+        return { ok: false as const, error: "MIXED_RULE" };
+      }
+
+      const dup = await c.query(
+        `SELECT 1 FROM doubles_teams
+         WHERE id_category = $1 AND (id_player_1 = ANY($2::uuid[]) OR id_player_2 = ANY($2::uuid[])) LIMIT 1`,
+        [idCategory, [player1Id, player2Id]]
+      );
+      if ((dup.rowCount ?? 0) > 0) return { ok: false as const, error: "ALREADY_IN_TEAM" };
+
+      const label = (a: typeof p1) =>
+        [a.first_name, a.last_name].filter(Boolean).join(" ").trim() || "Jugador";
+      const teamLabel = `${label(p1)} / ${label(p2)}`;
+      const email = `team+${randomUUID()}@myttm.local`;
+      const pwd = await hashPassword(randomUUID());
+      const teamRes = await c.query<{ id_user: string }>(
+        `INSERT INTO users (email, password_hash, id_role, first_name, is_team)
+         VALUES ($1, $2, $3, $4, true) RETURNING id_user`,
+        [email, pwd, ROLE_IDS.player, teamLabel]
+      );
+      const teamUserId = teamRes.rows[0].id_user;
+
+      await c.query(
+        `INSERT INTO doubles_teams (id_user, id_player_1, id_player_2, id_category) VALUES ($1, $2, $3, $4)`,
+        [teamUserId, player1Id, player2Id, idCategory]
+      );
+      await c.query(
+        `INSERT INTO group_members (id_group, id_user, assignment_type) VALUES ($1, $2, 'manual')`,
+        [idDivision, teamUserId]
+      );
+      await c.query(
+        `INSERT INTO group_standings (id_group, id_user) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [idDivision, teamUserId]
+      );
+      await c.query(
+        `INSERT INTO enrollments (id_user, id_tournament, id_category, qualification_type, checked_in)
+         VALUES ($1, $2, $3, 'group', true)`,
+        [teamUserId, idLeague, idCategory]
+      );
+      return { ok: true as const };
+    });
+  }
+
   async removePlayer(idLeague: string, idDivision: string, idUser: string): Promise<{ ok: true } | { ok: false; error: string }> {
     return this.withTx(async (c) => {
       const d = await c.query<{ status: string; id_category: string }>(
@@ -345,6 +430,14 @@ export class LeaguesRepository {
       );
       if (d.rowCount === 0) return { ok: false as const, error: "DIVISION_NOT_FOUND" };
       if (d.rows[0].status !== "draft") return { ok: false as const, error: "FIXTURE_ALREADY_GENERATED" };
+
+      const isTeam = await c.query<{ is_team: boolean }>(`SELECT is_team FROM users WHERE id_user = $1`, [idUser]);
+      if (isTeam.rows[0]?.is_team) {
+        // Borra el usuario equipo → arrastra doubles_teams, group_members,
+        // group_standings y enrollments por ON DELETE CASCADE.
+        await c.query(`DELETE FROM users WHERE id_user = $1 AND is_team = true`, [idUser]);
+        return { ok: true as const };
+      }
 
       await c.query(`DELETE FROM group_members WHERE id_group = $1 AND id_user = $2`, [idDivision, idUser]);
       await c.query(`DELETE FROM group_standings WHERE id_group = $1 AND id_user = $2`, [idDivision, idUser]);
