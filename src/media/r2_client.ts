@@ -1,0 +1,69 @@
+import {
+  S3Client,
+  HeadObjectCommand,
+  DeleteObjectCommand,
+  PutObjectCommand,
+} from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+
+// Cloudflare R2 es S3-compatible: se habla con el mismo SDK de S3 apuntando
+// al endpoint de la cuenta. Guardamos SOLO la URL pública en la DB; el
+// archivo vive en R2 (egress gratis, no gasta ancho de banda de Render).
+//
+// Si faltan las env vars (ej. dev local sin R2) el cliente queda null y las
+// rutas de avatar responden 503 — el resto de la app arranca igual.
+
+const ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
+const ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
+const SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
+export const R2_BUCKET = process.env.R2_BUCKET ?? "";
+export const R2_PUBLIC_BASE_URL = (process.env.R2_PUBLIC_BASE_URL ?? "").replace(/\/+$/, "");
+
+export const r2Configured =
+  !!ACCOUNT_ID && !!ACCESS_KEY_ID && !!SECRET_ACCESS_KEY && !!R2_BUCKET && !!R2_PUBLIC_BASE_URL;
+
+const client: S3Client | null = r2Configured
+  ? new S3Client({
+      region: "auto",
+      endpoint: `https://${ACCOUNT_ID}.r2.cloudflarestorage.com`,
+      credentials: {
+        accessKeyId: ACCESS_KEY_ID!,
+        secretAccessKey: SECRET_ACCESS_KEY!,
+      },
+    })
+  : null;
+
+export function publicUrlFor(key: string): string {
+  return `${R2_PUBLIC_BASE_URL}/${key}`;
+}
+
+/** URL firmada para que el navegador haga PUT directo a R2 (expira en `expiresIn` s). */
+export async function presignPutUrl(
+  key: string,
+  contentType: string,
+  expiresIn = 300,
+): Promise<string> {
+  if (!client) throw new Error("R2_NOT_CONFIGURED");
+  const cmd = new PutObjectCommand({
+    Bucket: R2_BUCKET,
+    Key: key,
+    ContentType: contentType,
+  });
+  return getSignedUrl(client, cmd, { expiresIn });
+}
+
+/** true si el objeto ya existe en el bucket (se usa para confirmar la subida). */
+export async function objectExists(key: string): Promise<boolean> {
+  if (!client) throw new Error("R2_NOT_CONFIGURED");
+  try {
+    await client.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: key }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function deleteObject(key: string): Promise<void> {
+  if (!client) throw new Error("R2_NOT_CONFIGURED");
+  await client.send(new DeleteObjectCommand({ Bucket: R2_BUCKET, Key: key }));
+}

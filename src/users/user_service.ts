@@ -2,6 +2,19 @@ import { UserRepository } from "./user_repository";
 import type { UserProfileDB, PlayerStatsDB, UserSearchRow } from "./dto/user_dto";
 import type { UpdateProfileDTO, QuickCreatePlayerDTO } from "./schema/user_schema";
 import { type Result, ok, fail } from "../core/constants/result";
+import {
+  r2Configured,
+  presignPutUrl,
+  objectExists,
+  deleteObject,
+  publicUrlFor,
+} from "../media/r2_client";
+
+const AVATAR_CONTENT_TYPES = ["image/webp", "image/jpeg", "image/png"];
+// Un key fijo por usuario: subir de nuevo pisa la foto anterior, sin
+// acumular basura en el bucket. La extensión .webp calza con lo que manda
+// el navegador (canvas.toBlob a webp).
+const avatarKey = (id_user: string) => `avatars/${id_user}.webp`;
 
 function computeAge(birthDate: string | null): number | null {
   if (!birthDate) return null;
@@ -99,6 +112,56 @@ export class UserService {
       clubName: input.club_name,
     });
     return ok(data);
+  }
+
+  // --- Avatar (foto de perfil del organizador) ---
+  // Flujo presigned: el navegador pide una URL firmada, sube el archivo
+  // DIRECTO a R2 (no pasa por Render), y después confirma.
+
+  async getAvatarUploadUrl(
+    id_user: string,
+    contentType: string,
+  ): Promise<Result<{ uploadUrl: string; key: string; publicUrl: string }, "R2_NOT_CONFIGURED" | "BAD_CONTENT_TYPE">> {
+    if (!r2Configured) return fail("R2_NOT_CONFIGURED");
+    if (!AVATAR_CONTENT_TYPES.includes(contentType)) return fail("BAD_CONTENT_TYPE");
+
+    const key = avatarKey(id_user);
+    const uploadUrl = await presignPutUrl(key, contentType);
+    return ok({ uploadUrl, key, publicUrl: publicUrlFor(key) });
+  }
+
+  async confirmAvatar(
+    id_user: string,
+    key: string,
+  ): Promise<Result<UserProfileDB, "R2_NOT_CONFIGURED" | "BAD_KEY" | "UPLOAD_NOT_FOUND" | "USER_NOT_FOUND">> {
+    if (!r2Configured) return fail("R2_NOT_CONFIGURED");
+    // El key SIEMPRE tiene que ser el de este usuario — no se acepta uno arbitrario.
+    if (key !== avatarKey(id_user)) return fail("BAD_KEY");
+    if (!(await objectExists(key))) return fail("UPLOAD_NOT_FOUND");
+
+    // ?v=<ts> para que el navegador no muestre la foto vieja cacheada al
+    // reemplazarla (el key es fijo, la URL sin query sería idéntica).
+    const url = `${publicUrlFor(key)}?v=${Date.now()}`;
+    const user = await this.repo.setAvatarUrl(id_user, url);
+    if (!user) return fail("USER_NOT_FOUND");
+    return ok(user);
+  }
+
+  async removeAvatar(
+    id_user: string,
+  ): Promise<Result<UserProfileDB, "R2_NOT_CONFIGURED" | "USER_NOT_FOUND">> {
+    if (!r2Configured) return fail("R2_NOT_CONFIGURED");
+    const current = await this.repo.getAvatarUrl(id_user);
+    if (current) {
+      try {
+        await deleteObject(avatarKey(id_user));
+      } catch {
+        // el archivo pudo haberse borrado ya; igual limpiamos la columna
+      }
+    }
+    const user = await this.repo.setAvatarUrl(id_user, null);
+    if (!user) return fail("USER_NOT_FOUND");
+    return ok(user);
   }
 
   async getStats(id_user: string): Promise<Result<PlayerStatsDB, never>> {

@@ -60,6 +60,7 @@ export interface PublicTournamentDetailRow {
   // Para linkear desde el detalle del torneo a la página pública del
   // organizador ("Comunidad", ver listOrganizers/getOrganizerProfile).
   organizer_id: string;
+  organizer_avatar_url: string | null;
 }
 
 // "Comunidad" — directorio público de organizadores (admins con al menos
@@ -70,6 +71,7 @@ export interface PublicOrganizerRow {
   id_user: string;
   organizer_name: string | null;
   club_name: string | null;
+  avatar_url: string | null;
   public_tournament_count: number;
 }
 
@@ -77,6 +79,7 @@ export interface PublicOrganizerProfileRow {
   id_user: string;
   organizer_name: string | null;
   club_name: string | null;
+  avatar_url: string | null;
   public_ranking_enabled: boolean;
 }
 
@@ -232,7 +235,8 @@ export class PublicTournamentRepository {
       `SELECT t.id_tournament, t.tournament_name, t.description, t.address, t.region,
               t.event_date, t.event_time, t.status, c.name AS organizer_club_name,
               NULLIF(TRIM(CONCAT(u.first_name, ' ', u.last_name)), '') AS organizer_user_name,
-              t.created_by AS organizer_id
+              t.created_by AS organizer_id,
+              u.avatar_url AS organizer_avatar_url
        FROM tournaments t
        LEFT JOIN users u ON u.id_user = t.created_by
        LEFT JOIN clubs c ON c.id_club = u.id_club
@@ -253,12 +257,13 @@ export class PublicTournamentRepository {
          u.id_user,
          ${ORGANIZER_NAME_SQL} AS organizer_name,
          cl.name AS club_name,
+         u.avatar_url,
          COUNT(*)::int AS public_tournament_count
        FROM tournaments t
        JOIN users u ON u.id_user = t.created_by
        LEFT JOIN clubs cl ON cl.id_club = u.id_club
        WHERE t.visibility = 'public' AND t.status <> 'cancelled' AND t.kind = 'tournament'
-       GROUP BY u.id_user, organizer_name, cl.name
+       GROUP BY u.id_user, organizer_name, cl.name, u.avatar_url
        ORDER BY public_tournament_count DESC, organizer_name ASC NULLS LAST`
     );
     return res.rows.map((r) => ({ ...r, public_tournament_count: Number(r.public_tournament_count) }));
@@ -273,6 +278,7 @@ export class PublicTournamentRepository {
          u.id_user,
          ${ORGANIZER_NAME_SQL} AS organizer_name,
          cl.name AS club_name,
+         u.avatar_url,
          u.public_ranking_enabled
        FROM users u
        LEFT JOIN clubs cl ON cl.id_club = u.id_club

@@ -67,6 +67,21 @@ export class UserRepository {
     return this.findById(id_user);
   }
 
+  // Foto de perfil (avatar) — su propia ruta, no pasa por updateProfile.
+  // `url` null borra la foto.
+  async setAvatarUrl(id_user: string, url: string | null): Promise<UserProfileDB | null> {
+    await this.pool.query(`UPDATE users SET avatar_url = $1 WHERE id_user = $2`, [url, id_user]);
+    return this.findById(id_user);
+  }
+
+  async getAvatarUrl(id_user: string): Promise<string | null> {
+    const res = await this.pool.query<{ avatar_url: string | null }>(
+      `SELECT avatar_url FROM users WHERE id_user = $1`,
+      [id_user]
+    );
+    return res.rows[0]?.avatar_url ?? null;
+  }
+
   async findById(id_user: string): Promise<UserProfileDB | null> {
     const query = `
       SELECT
@@ -84,6 +99,7 @@ export class UserRepository {
         u.category,
         u.dominant_hand,
         u.created_at::text,
+        u.avatar_url,
         u.public_ranking_enabled
       FROM users u
       JOIN roles r ON r.id_role = u.id_role

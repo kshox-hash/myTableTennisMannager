@@ -51,6 +51,7 @@ const INCREMENTAL = [
   "043_public_organizer_profile.sql",
   "044_doubles_categories.sql",
   "045_leagues.sql",
+  "046_user_avatar.sql",
 ];
 
 export async function runMigrations(): Promise<void> {

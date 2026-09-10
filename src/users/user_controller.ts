@@ -67,4 +67,45 @@ export class UserController {
     }
     return res.json({ ok: true, data: result.data });
   };
+
+  // POST /api/v1/users/me/avatar/upload-url — URL firmada para subir la foto directo a R2
+  avatarUploadUrl = async (req: Request, res: Response) => {
+    const contentType = typeof req.body?.contentType === "string" ? req.body.contentType : "";
+    const result = await this.service.getAvatarUploadUrl(req.user!.id_user, contentType);
+    if (!result.ok) {
+      if (result.error === "R2_NOT_CONFIGURED") {
+        return res.status(503).json({ ok: false, message: "El almacenamiento de imágenes no está configurado." });
+      }
+      return res.status(400).json({ ok: false, message: "Formato de imagen no permitido (usá JPG, PNG o WEBP)." });
+    }
+    return res.json({ ok: true, data: result.data });
+  };
+
+  // POST /api/v1/users/me/avatar — confirma que la subida a R2 terminó y guarda la URL
+  avatarConfirm = async (req: Request, res: Response) => {
+    const key = typeof req.body?.key === "string" ? req.body.key : "";
+    const result = await this.service.confirmAvatar(req.user!.id_user, key);
+    if (!result.ok) {
+      if (result.error === "R2_NOT_CONFIGURED") {
+        return res.status(503).json({ ok: false, message: "El almacenamiento de imágenes no está configurado." });
+      }
+      if (result.error === "UPLOAD_NOT_FOUND") {
+        return res.status(404).json({ ok: false, message: "No se encontró la imagen subida. Probá de nuevo." });
+      }
+      return res.status(400).json({ ok: false, message: "Solicitud inválida." });
+    }
+    return res.json({ ok: true, data: result.data });
+  };
+
+  // DELETE /api/v1/users/me/avatar
+  avatarRemove = async (req: Request, res: Response) => {
+    const result = await this.service.removeAvatar(req.user!.id_user);
+    if (!result.ok) {
+      if (result.error === "R2_NOT_CONFIGURED") {
+        return res.status(503).json({ ok: false, message: "El almacenamiento de imágenes no está configurado." });
+      }
+      return res.status(404).json({ ok: false, message: "Usuario no encontrado" });
+    }
+    return res.json({ ok: true, data: result.data });
+  };
 }

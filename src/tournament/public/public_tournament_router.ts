@@ -142,6 +142,7 @@ router.get(
         status: displayStatus(tournament.status, tournament.event_date, categories.map((c) => c.phase)),
         organizer_club_name: tournament.organizer_club_name ?? tournament.organizer_user_name,
         organizer_id: tournament.organizer_id,
+        organizer_avatar_url: tournament.organizer_avatar_url,
         categories: categories.map((c) => ({
           id_category: c.id_category,
           category_type: c.category_type,
@@ -172,6 +173,7 @@ router.get(
         id_user: o.id_user,
         organizer_name: o.organizer_name,
         club_name: o.club_name,
+        avatar_url: o.avatar_url,
         public_tournament_count: o.public_tournament_count,
       })),
     });
@@ -225,6 +227,7 @@ router.get(
         id_user: organizer.id_user,
         organizer_name: organizer.organizer_name,
         club_name: organizer.club_name,
+        avatar_url: organizer.avatar_url,
         tournaments: tournaments.map((t) => ({
           id_tournament: t.id_tournament,
           tournament_name: t.tournament_name,

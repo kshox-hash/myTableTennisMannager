@@ -51,4 +51,12 @@ userRouter.patch(
   asyncHandler(controller.updateMe)
 );
 
+// --- Avatar (foto de perfil) — subida directa a Cloudflare R2 ---
+// POST /api/v1/users/me/avatar/upload-url  → URL firmada para el PUT a R2
+userRouter.post("/me/avatar/upload-url", authRequired, asyncHandler(controller.avatarUploadUrl));
+// POST /api/v1/users/me/avatar  → confirma la subida y guarda la URL pública
+userRouter.post("/me/avatar", authRequired, asyncHandler(controller.avatarConfirm));
+// DELETE /api/v1/users/me/avatar
+userRouter.delete("/me/avatar", authRequired, asyncHandler(controller.avatarRemove));
+
 export default userRouter;

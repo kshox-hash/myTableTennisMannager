@@ -13,6 +13,9 @@ export type UserProfileDB = {
   category: string | null;
   dominant_hand: string | null;
   created_at: string;
+  // Foto de perfil del organizador — URL pública en Cloudflare R2, null si
+  // no subió ninguna (se muestra un identicon en su lugar).
+  avatar_url: string | null;
   // Si el admin decidió mostrar su ranking privado ("Mi Ranking") también
   // en su página pública de organizador ("Comunidad") — false por defecto,
   // no cambia nada para quien no lo prende a propósito.
