@@ -5,6 +5,13 @@ import cors from "cors";
 export default (app : express.Express) => {
     app.disable("x-powered-by");
 
+    // Render (y cualquier PaaS) mete un proxy adelante que agrega el header
+    // X-Forwarded-For con la IP real del cliente. Sin "trust proxy",
+    // express-rate-limit ve la IP del proxy (una sola para TODOS) y además
+    // tira ERR_ERL_UNEXPECTED_X_FORWARDED_FOR. `1` = confiar en 1 salto
+    // (el load balancer de Render), no en toda la cadena.
+    app.set("trust proxy", 1);
+
     app.use(express.json());
     app.use(express.urlencoded({ extended : true}));
 
