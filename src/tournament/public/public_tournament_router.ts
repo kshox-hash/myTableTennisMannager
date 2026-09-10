@@ -1,9 +1,11 @@
 import { Router } from "express";
 import { asyncHandler } from "../../middlewares/wrap_async_middleware";
 import { PublicTournamentRepository } from "./public_tournament_repository";
+import { RankingRepository } from "../../ranking/ranking_repository";
 
 const router = Router();
 const repo = new PublicTournamentRepository();
+const rankingRepo = new RankingRepository();
 
 // pg devuelve las columnas DATE como objetos Date, no strings — hay que
 // normalizar antes de comparar o de mandarlas al cliente.
@@ -139,6 +141,7 @@ router.get(
         event_time: tournament.event_time,
         status: displayStatus(tournament.status, tournament.event_date, categories.map((c) => c.phase)),
         organizer_club_name: tournament.organizer_club_name ?? tournament.organizer_user_name,
+        organizer_id: tournament.organizer_id,
         categories: categories.map((c) => ({
           id_category: c.id_category,
           category_type: c.category_type,
@@ -151,6 +154,89 @@ router.get(
           is_finished: c.is_finished,
           phase: c.phase,
         })),
+      },
+    });
+  })
+);
+
+// GET /api/v1/tournament/public/organizers — directorio de "Comunidad":
+// todo admin con al menos un torneo público, sin acción extra de su
+// parte.
+router.get(
+  "/public/organizers",
+  asyncHandler(async (_req, res) => {
+    const rows = await repo.listOrganizers();
+    return res.json({
+      ok: true,
+      data: rows.map((o) => ({
+        id_user: o.id_user,
+        organizer_name: o.organizer_name,
+        club_name: o.club_name,
+        public_tournament_count: o.public_tournament_count,
+      })),
+    });
+  })
+);
+
+// GET /api/v1/tournament/public/organizers/:id_user — ficha pública de un
+// organizador puntual: sus torneos públicos + su ranking SOLO si él mismo
+// lo hizo público (public_ranking_enabled, ver PATCH /users/me).
+router.get(
+  "/public/organizers/:id_user",
+  asyncHandler(async (req, res) => {
+    const { id_user } = req.params;
+    const organizer = await repo.getOrganizerProfile(id_user);
+    if (!organizer) {
+      return res.status(404).json({ ok: false, message: "Organizador no encontrado" });
+    }
+
+    const tournaments = await repo.listOrganizerTournaments(id_user);
+
+    let ranking: Array<{
+      id_user: string;
+      first_name: string | null;
+      last_name: string | null;
+      club_name: string | null;
+      ranking_points: number;
+      ranking_position: number;
+      matches_played: number;
+      matches_won: number;
+    }> | null = null;
+    if (organizer.public_ranking_enabled) {
+      const rows = await rankingRepo.getOrganizerRanking(id_user);
+      // Mismo shapeRankingRow que ranking_router.ts (sin email) — no hay
+      // forma limpia de compartir esa función privada entre routers sin
+      // exportarla, y es solo esto: sacar el email de la fila cruda.
+      ranking = rows.map((r) => ({
+        id_user: r.id_user,
+        first_name: r.first_name,
+        last_name: r.last_name,
+        club_name: r.club_name,
+        ranking_points: r.ranking_points,
+        ranking_position: r.ranking_position,
+        matches_played: r.matches_played,
+        matches_won: r.matches_won,
+      }));
+    }
+
+    return res.json({
+      ok: true,
+      data: {
+        id_user: organizer.id_user,
+        organizer_name: organizer.organizer_name,
+        club_name: organizer.club_name,
+        tournaments: tournaments.map((t) => ({
+          id_tournament: t.id_tournament,
+          tournament_name: t.tournament_name,
+          address: t.address,
+          region: t.region,
+          event_date: formatDate(t.event_date),
+          event_time: t.event_time,
+          status: t.computed_status,
+          category_count: t.category_count,
+          enrolled_count: t.enrolled_count,
+        })),
+        ranking,
       },
     });
   })

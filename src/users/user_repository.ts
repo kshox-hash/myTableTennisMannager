@@ -37,16 +37,17 @@ export class UserRepository {
 
     await this.pool.query(
       `UPDATE users SET
-         first_name    = COALESCE($1, first_name),
-         last_name     = COALESCE($2, last_name),
-         gender        = COALESCE($3, gender),
-         id_club       = CASE WHEN $4 THEN $5 ELSE id_club END,
-         birth_date    = COALESCE($6, birth_date),
-         country       = COALESCE($7, country),
-         id_document   = COALESCE($8, id_document),
-         category      = COALESCE($9, category),
-         dominant_hand = COALESCE($10, dominant_hand)
-       WHERE id_user = $11`,
+         first_name             = COALESCE($1, first_name),
+         last_name              = COALESCE($2, last_name),
+         gender                 = COALESCE($3, gender),
+         id_club                = CASE WHEN $4 THEN $5 ELSE id_club END,
+         birth_date              = COALESCE($6, birth_date),
+         country                = COALESCE($7, country),
+         id_document            = COALESCE($8, id_document),
+         category               = COALESCE($9, category),
+         dominant_hand          = COALESCE($10, dominant_hand),
+         public_ranking_enabled = COALESCE($11, public_ranking_enabled)
+       WHERE id_user = $12`,
       [
         input.first_name ?? null,
         input.last_name ?? null,
@@ -58,6 +59,7 @@ export class UserRepository {
         input.id_document ?? null,
         input.category ?? null,
         input.dominant_hand ?? null,
+        input.public_ranking_enabled ?? null,
         id_user,
       ]
     );
@@ -81,7 +83,8 @@ export class UserRepository {
         u.id_document,
         u.category,
         u.dominant_hand,
-        u.created_at::text
+        u.created_at::text,
+        u.public_ranking_enabled
       FROM users u
       JOIN roles r ON r.id_role = u.id_role
       LEFT JOIN clubs cl ON cl.id_club = u.id_club

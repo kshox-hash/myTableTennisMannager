@@ -13,6 +13,10 @@ export type UserProfileDB = {
   category: string | null;
   dominant_hand: string | null;
   created_at: string;
+  // Si el admin decidió mostrar su ranking privado ("Mi Ranking") también
+  // en su página pública de organizador ("Comunidad") — false por defecto,
+  // no cambia nada para quien no lo prende a propósito.
+  public_ranking_enabled: boolean;
 };
 
 export type UserSearchRow = {

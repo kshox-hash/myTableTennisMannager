@@ -1,5 +1,11 @@
 import type { Pool } from "pg";
 import DB from "../../db/db_configuration";
+import { ROLE_IDS } from "../../core/constants/roles";
+
+// Nombre público de un organizador — sin exponer el email (a diferencia de
+// PublicTournamentDetailRow.organizer_user_name, que ya seguía este mismo
+// criterio: null si no tiene nombre cargado, nunca el email como fallback).
+const ORGANIZER_NAME_SQL = `NULLIF(TRIM(CONCAT(u.first_name, ' ', u.last_name)), '')`;
 
 export interface PublicTournamentRow {
   id_tournament: string;
@@ -51,12 +57,67 @@ export interface PublicTournamentDetailRow {
   // esto, "organizer_club_name" quedaba null y la vitrina pública no
   // mostraba quién organiza.
   organizer_user_name: string | null;
+  // Para linkear desde el detalle del torneo a la página pública del
+  // organizador ("Comunidad", ver listOrganizers/getOrganizerProfile).
+  organizer_id: string;
+}
+
+// "Comunidad" — directorio público de organizadores (admins con al menos
+// un torneo público) y el perfil público de cada uno. Sin concepto de
+// "miembros"/jugadores: solo organizadores + sus torneos + (opcional) su
+// ranking, ver public_ranking_enabled en users.
+export interface PublicOrganizerRow {
+  id_user: string;
+  organizer_name: string | null;
+  club_name: string | null;
+  public_tournament_count: number;
+}
+
+export interface PublicOrganizerProfileRow {
+  id_user: string;
+  organizer_name: string | null;
+  club_name: string | null;
+  public_ranking_enabled: boolean;
 }
 
 export class PublicTournamentRepository {
   private pool: Pool;
   constructor(pool?: Pool) {
     this.pool = pool ?? DB.getPool();
+  }
+
+  // Mismo cálculo que `displayStatus` en el router (para getById, que arma
+  // esto en JS porque ya tiene las categorías a mano) — acá en SQL para
+  // poder filtrar/ordenar/mostrar sobre el estado ya calculado. Un solo
+  // método porque también lo usa listOrganizerTournaments() (perfil
+  // público de organizador, "Comunidad").
+  //
+  // El estado por fecha (upcoming/ongoing/finished según event_date vs
+  // hoy) es solo el FALLBACK: si alguna categoría ya salió de "enrollment"
+  // (armó grupos, llave, o terminó), el torneo está realmente en curso
+  // aunque falten días para la fecha del evento — antes un torneo con 3
+  // categorías donde solo UNA había arrancado seguía mostrando
+  // "Próximamente" con cuenta regresiva. Si TODAS las categorías llegaron
+  // a "finished", el torneo se da por terminado aunque la fecha del evento
+  // sea hoy o esté en el futuro (arrancó antes de lo previsto, o se jugó
+  // todo en un rato).
+  private statusCaseSql(): string {
+    return `(CASE
+        WHEN t.status = 'cancelled' THEN 'cancelled'
+        WHEN EXISTS (SELECT 1 FROM tournament_categories tc WHERE tc.id_tournament = t.id_tournament)
+         AND NOT EXISTS (
+           SELECT 1 FROM tournament_categories tc
+           WHERE tc.id_tournament = t.id_tournament AND tc.phase <> 'finished'
+         ) THEN 'finished'
+        WHEN EXISTS (
+          SELECT 1 FROM tournament_categories tc
+          WHERE tc.id_tournament = t.id_tournament AND tc.phase <> 'enrollment'
+        ) THEN 'ongoing'
+        WHEN t.event_date IS NULL THEN 'upcoming'
+        WHEN t.event_date > CURRENT_DATE THEN 'upcoming'
+        WHEN t.event_date = CURRENT_DATE THEN 'ongoing'
+        ELSE 'finished'
+      END)`;
   }
 
   async list(
@@ -86,37 +147,7 @@ export class PublicTournamentRepository {
       conditions.push(`t.region = $${i++}`);
       values.push(filters.region);
     }
-    // Mismo cálculo que `displayStatus` en el router (para getById, que
-    // arma esto en JS porque ya tiene las categorías a mano) — acá en SQL
-    // para poder filtrar/ordenar/mostrar sobre el estado ya calculado.
-    // Reusado también en el ORDER BY y en el SELECT de más abajo — una sola
-    // fuente de verdad para "qué estado tiene este torneo hoy".
-    //
-    // El estado por fecha (upcoming/ongoing/finished según event_date vs
-    // hoy) es solo el FALLBACK: si alguna categoría ya salió de
-    // "enrollment" (armó grupos, llave, o terminó), el torneo está
-    // realmente en curso aunque falten días para la fecha del evento —
-    // antes un torneo con 3 categorías donde solo UNA había arrancado
-    // seguía mostrando "Próximamente" con cuenta regresiva. Si TODAS las
-    // categorías llegaron a "finished", el torneo se da por terminado
-    // aunque la fecha del evento sea hoy o esté en el futuro (arrancó
-    // antes de lo previsto, o se jugó todo en un rato).
-    const statusCase = `(CASE
-        WHEN t.status = 'cancelled' THEN 'cancelled'
-        WHEN EXISTS (SELECT 1 FROM tournament_categories tc WHERE tc.id_tournament = t.id_tournament)
-         AND NOT EXISTS (
-           SELECT 1 FROM tournament_categories tc
-           WHERE tc.id_tournament = t.id_tournament AND tc.phase <> 'finished'
-         ) THEN 'finished'
-        WHEN EXISTS (
-          SELECT 1 FROM tournament_categories tc
-          WHERE tc.id_tournament = t.id_tournament AND tc.phase <> 'enrollment'
-        ) THEN 'ongoing'
-        WHEN t.event_date IS NULL THEN 'upcoming'
-        WHEN t.event_date > CURRENT_DATE THEN 'upcoming'
-        WHEN t.event_date = CURRENT_DATE THEN 'ongoing'
-        ELSE 'finished'
-      END)`;
+    const statusCase = this.statusCaseSql();
     if (filters.status) {
       conditions.push(`${statusCase} = $${i++}`);
       values.push(filters.status);
@@ -197,7 +228,8 @@ export class PublicTournamentRepository {
     const res = await this.pool.query<PublicTournamentDetailRow>(
       `SELECT t.id_tournament, t.tournament_name, t.description, t.address, t.region,
               t.event_date, t.event_time, t.status, c.name AS organizer_club_name,
-              NULLIF(TRIM(CONCAT(u.first_name, ' ', u.last_name)), '') AS organizer_user_name
+              NULLIF(TRIM(CONCAT(u.first_name, ' ', u.last_name)), '') AS organizer_user_name,
+              t.created_by AS organizer_id
        FROM tournaments t
        LEFT JOIN users u ON u.id_user = t.created_by
        LEFT JOIN clubs c ON c.id_club = u.id_club
@@ -205,6 +237,70 @@ export class PublicTournamentRepository {
       [id_tournament]
     );
     return res.rows[0] ?? null;
+  }
+
+  // "Comunidad": directorio público de organizadores — cualquier admin con
+  // al menos un torneo público (no cancelado) entra acá, sin acción extra
+  // de su parte (ver la pregunta del usuario: "automática + listado
+  // público"). Ordenado por cantidad de torneos, no por fecha de alta —
+  // el que más organiza aparece primero.
+  async listOrganizers(): Promise<PublicOrganizerRow[]> {
+    const res = await this.pool.query<PublicOrganizerRow>(
+      `SELECT
+         u.id_user,
+         ${ORGANIZER_NAME_SQL} AS organizer_name,
+         cl.name AS club_name,
+         COUNT(*)::int AS public_tournament_count
+       FROM tournaments t
+       JOIN users u ON u.id_user = t.created_by
+       LEFT JOIN clubs cl ON cl.id_club = u.id_club
+       WHERE t.visibility = 'public' AND t.status <> 'cancelled'
+       GROUP BY u.id_user, organizer_name, cl.name
+       ORDER BY public_tournament_count DESC, organizer_name ASC NULLS LAST`
+    );
+    return res.rows.map((r) => ({ ...r, public_tournament_count: Number(r.public_tournament_count) }));
+  }
+
+  // Ficha pública de un organizador puntual — solo admins (nunca un
+  // jugador, aunque alguien pruebe su id por la URL), sea cual sea su
+  // cantidad de torneos públicos (0 incluido: recién creó su cuenta).
+  async getOrganizerProfile(id_user: string): Promise<PublicOrganizerProfileRow | null> {
+    const res = await this.pool.query<PublicOrganizerProfileRow>(
+      `SELECT
+         u.id_user,
+         ${ORGANIZER_NAME_SQL} AS organizer_name,
+         cl.name AS club_name,
+         u.public_ranking_enabled
+       FROM users u
+       LEFT JOIN clubs cl ON cl.id_club = u.id_club
+       WHERE u.id_user = $1 AND u.id_role = $2`,
+      [id_user, ROLE_IDS.admin]
+    );
+    return res.rows[0] ?? null;
+  }
+
+  // Torneos públicos de UN organizador puntual — mismo statusCaseSql() que
+  // list(), para que "En curso"/"Próximamente"/"Finalizado" se calculen
+  // igual acá que en el listado general.
+  async listOrganizerTournaments(id_user: string): Promise<PublicTournamentRow[]> {
+    const statusCase = this.statusCaseSql();
+    const res = await this.pool.query<PublicTournamentRow>(
+      `SELECT
+         t.id_tournament, t.tournament_name, t.description, t.address, t.region,
+         t.event_date, t.event_time, t.status,
+         ${statusCase} AS computed_status,
+         (SELECT COUNT(*) FROM tournament_categories tc WHERE tc.id_tournament = t.id_tournament)::int AS category_count,
+         (SELECT COUNT(*) FROM enrollments e WHERE e.id_tournament = t.id_tournament AND e.status = 'active')::int AS enrolled_count
+       FROM tournaments t
+       WHERE t.created_by = $1 AND t.visibility = 'public' AND t.status <> 'cancelled'
+       ORDER BY
+         (${statusCase} = 'finished') ASC,
+         CASE WHEN ${statusCase} != 'finished' THEN t.event_date END ASC NULLS LAST,
+         CASE WHEN ${statusCase} = 'finished' THEN t.event_date END DESC NULLS LAST,
+         t.created_at DESC`,
+      [id_user]
+    );
+    return res.rows;
   }
 
   // Números reales para la vitrina del landing — nada de cifras infladas,
