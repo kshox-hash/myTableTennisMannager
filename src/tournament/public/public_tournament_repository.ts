@@ -22,6 +22,10 @@ export interface PublicTournamentRow {
   computed_status: string;
   category_count: number;
   enrolled_count: number;
+  // Foto del organizador (R2) — se muestra en el cuadradito de cada torneo
+  // en la vitrina pública, en vez de las iniciales.
+  organizer_avatar_url: string | null;
+  organizer_id: string;
 }
 
 export interface PublicCategoryRow {
@@ -209,10 +213,13 @@ export class PublicTournamentRepository {
       `SELECT
          t.id_tournament, t.tournament_name, t.description, t.address, t.region,
          t.event_date, t.event_time, t.status,
+         t.created_by AS organizer_id,
+         ou.avatar_url AS organizer_avatar_url,
          ${statusCase} AS computed_status,
          (SELECT COUNT(*) FROM tournament_categories tc WHERE tc.id_tournament = t.id_tournament)::int AS category_count,
          (SELECT COUNT(*) FROM enrollments e WHERE e.id_tournament = t.id_tournament AND e.status = 'active')::int AS enrolled_count
        FROM tournaments t
+       LEFT JOIN users ou ON ou.id_user = t.created_by
        ${where}
        -- Lo accionable primero: upcoming/ongoing por fecha más próxima,
        -- después finished por fecha más reciente (no la más vieja de todo
@@ -297,10 +304,13 @@ export class PublicTournamentRepository {
       `SELECT
          t.id_tournament, t.tournament_name, t.description, t.address, t.region,
          t.event_date, t.event_time, t.status,
+         t.created_by AS organizer_id,
+         ou.avatar_url AS organizer_avatar_url,
          ${statusCase} AS computed_status,
          (SELECT COUNT(*) FROM tournament_categories tc WHERE tc.id_tournament = t.id_tournament)::int AS category_count,
          (SELECT COUNT(*) FROM enrollments e WHERE e.id_tournament = t.id_tournament AND e.status = 'active')::int AS enrolled_count
        FROM tournaments t
+       LEFT JOIN users ou ON ou.id_user = t.created_by
        WHERE t.created_by = $1 AND t.visibility = 'public' AND t.status <> 'cancelled' AND t.kind = 'tournament'
        ORDER BY
          (${statusCase} = 'finished') ASC,

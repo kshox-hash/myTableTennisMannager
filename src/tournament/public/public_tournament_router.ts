@@ -85,6 +85,8 @@ router.get(
           status: t.computed_status,
           category_count: t.category_count,
           enrolled_count: t.enrolled_count,
+          organizer_id: t.organizer_id,
+          organizer_avatar_url: t.organizer_avatar_url,
         })),
       },
     });
