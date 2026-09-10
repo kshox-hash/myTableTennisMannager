@@ -135,7 +135,10 @@ export class PublicTournamentRepository {
     // 'private' o 'internal' nunca puede aparecer en el listado público sin
     // login. El acceso directo por id (getById más abajo) no tiene este
     // filtro a propósito: así "privado" sigue siendo accesible con el link.
-    const conditions: string[] = ["t.visibility = 'public'"];
+    // kind = 'tournament': las ligas también son filas de `tournaments`
+    // (ver 045_leagues.sql) pero tienen su propia vitrina (/ligas), no van
+    // en el listado de torneos.
+    const conditions: string[] = ["t.visibility = 'public'", "t.kind = 'tournament'"];
     const values: unknown[] = [];
     let i = 1;
 
@@ -233,7 +236,7 @@ export class PublicTournamentRepository {
        FROM tournaments t
        LEFT JOIN users u ON u.id_user = t.created_by
        LEFT JOIN clubs c ON c.id_club = u.id_club
-       WHERE t.id_tournament = $1`,
+       WHERE t.id_tournament = $1 AND t.kind = 'tournament'`,
       [id_tournament]
     );
     return res.rows[0] ?? null;
@@ -254,7 +257,7 @@ export class PublicTournamentRepository {
        FROM tournaments t
        JOIN users u ON u.id_user = t.created_by
        LEFT JOIN clubs cl ON cl.id_club = u.id_club
-       WHERE t.visibility = 'public' AND t.status <> 'cancelled'
+       WHERE t.visibility = 'public' AND t.status <> 'cancelled' AND t.kind = 'tournament'
        GROUP BY u.id_user, organizer_name, cl.name
        ORDER BY public_tournament_count DESC, organizer_name ASC NULLS LAST`
     );
@@ -292,7 +295,7 @@ export class PublicTournamentRepository {
          (SELECT COUNT(*) FROM tournament_categories tc WHERE tc.id_tournament = t.id_tournament)::int AS category_count,
          (SELECT COUNT(*) FROM enrollments e WHERE e.id_tournament = t.id_tournament AND e.status = 'active')::int AS enrolled_count
        FROM tournaments t
-       WHERE t.created_by = $1 AND t.visibility = 'public' AND t.status <> 'cancelled'
+       WHERE t.created_by = $1 AND t.visibility = 'public' AND t.status <> 'cancelled' AND t.kind = 'tournament'
        ORDER BY
          (${statusCase} = 'finished') ASC,
          CASE WHEN ${statusCase} != 'finished' THEN t.event_date END ASC NULLS LAST,

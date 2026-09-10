@@ -18,6 +18,7 @@ import notificationsRouter from "./notifications/notifications_router";
 import rankingRouter        from "./ranking/ranking_router";
 import organizersRouter     from "./tournament/organizers/tournament_organizers_router";
 import doublesRouter         from "./tournament/doubles/doubles_router";
+import leaguesRouter         from "./leagues/leagues_router";
 
 import { errorMiddleware } from "./middlewares/error_middleware";
 import { startPhaseScheduler } from "./tournament/phases/phase_scheduler";
@@ -45,6 +46,7 @@ export default function registerRoutes(app: Express) {
   app.use(`/${path}/${version}/ranking`,     rankingRouter);
   app.use(`/${path}/${version}/tournament`,  organizersRouter);
   app.use(`/${path}/${version}/tournament`,  doublesRouter);
+  app.use(`/${path}/${version}/leagues`,     leaguesRouter);
 
   // Scheduler: revisa cada 30s si hay torneos programados para iniciar
   startPhaseScheduler();

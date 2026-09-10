@@ -612,7 +612,9 @@ export class AdminTournamentRepository {
     const limit = Math.min(100, Math.max(1, pagination?.limit ?? 20));
     const offset = (page - 1) * limit;
 
-    const where: string[] = ["t.status = 'active'"];
+    // kind = 'tournament': las ligas son filas de `tournaments` pero tienen
+    // su propia pantalla (/admin/ligas), no van en este listado.
+    const where: string[] = ["t.status = 'active'", "t.kind = 'tournament'"];
     const values: (string | number | null)[] = [];
     let i = 1;
 
@@ -846,7 +848,8 @@ export class AdminTournamentRepository {
          SELECT 1 FROM tournament_organizers o
          WHERE o.id_tournament = t.id_tournament AND o.id_user = $1
        ))`;
-    const conditions: string[] = [ownerClause];
+    // Las ligas (kind='league') tienen su propia pantalla, no van acá.
+    const conditions: string[] = [ownerClause, "t.kind = 'tournament'"];
     const values: unknown[] = [createdBy];
     let i = 2;
 
@@ -873,7 +876,7 @@ export class AdminTournamentRepository {
       // Para el label "Mostrar cancelados (N)" — cuenta aparte, sin el
       // filtro de status <> 'cancelled' que ya metimos arriba en `where`.
       const cancelledRes = await client.query<{ count: string }>(
-        `SELECT COUNT(*)::text AS count FROM ${this.tournamentsTable} t WHERE ${ownerClause} AND t.status = 'cancelled'`,
+        `SELECT COUNT(*)::text AS count FROM ${this.tournamentsTable} t WHERE ${ownerClause} AND t.kind = 'tournament' AND t.status = 'cancelled'`,
         [createdBy]
       );
       const cancelledCount = Number(cancelledRes.rows[0]?.count ?? 0);

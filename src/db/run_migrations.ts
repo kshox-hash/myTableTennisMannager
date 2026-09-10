@@ -50,6 +50,7 @@ const INCREMENTAL = [
   "042_organizer_role.sql",
   "043_public_organizer_profile.sql",
   "044_doubles_categories.sql",
+  "045_leagues.sql",
 ];
 
 export async function runMigrations(): Promise<void> {
