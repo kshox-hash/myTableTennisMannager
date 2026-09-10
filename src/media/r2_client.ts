@@ -3,6 +3,7 @@ import {
   HeadObjectCommand,
   DeleteObjectCommand,
   PutObjectCommand,
+  CopyObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
@@ -37,7 +38,14 @@ export function publicUrlFor(key: string): string {
   return `${R2_PUBLIC_BASE_URL}/${key}`;
 }
 
-/** URL firmada para que el navegador haga PUT directo a R2 (expira en `expiresIn` s). */
+// Cache larguísimo + immutable: la URL pública lleva ?v=<timestamp>, así
+// que al reemplazar la foto cambia la URL y el navegador la vuelve a pedir;
+// mientras la URL sea la misma, no revalida nunca (0 requests a R2).
+const AVATAR_CACHE_CONTROL = "public, max-age=31536000, immutable";
+
+/** URL firmada para que el navegador haga PUT directo a R2 (expira en `expiresIn` s).
+ *  El PUT solo manda Content-Type (el único header en el CORS del bucket).
+ *  El Cache-Control se pone después, server-side, con setCacheControl(). */
 export async function presignPutUrl(
   key: string,
   contentType: string,
@@ -50,6 +58,23 @@ export async function presignPutUrl(
     ContentType: contentType,
   });
   return getSignedUrl(client, cmd, { expiresIn });
+}
+
+/** Reescribe la metadata del objeto (copy sobre sí mismo) para dejarle el
+ *  Cache-Control largo — se llama al confirmar, ya del lado del server, así
+ *  el navegador no necesita mandar ese header (evita tocar el CORS del bucket). */
+export async function setCacheControl(key: string, contentType: string): Promise<void> {
+  if (!client) throw new Error("R2_NOT_CONFIGURED");
+  await client.send(
+    new CopyObjectCommand({
+      Bucket: R2_BUCKET,
+      Key: key,
+      CopySource: `${R2_BUCKET}/${key}`,
+      MetadataDirective: "REPLACE",
+      ContentType: contentType,
+      CacheControl: AVATAR_CACHE_CONTROL,
+    }),
+  );
 }
 
 /** Metadata del objeto (o null si no existe) — se usa para confirmar la subida

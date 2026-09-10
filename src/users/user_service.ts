@@ -7,6 +7,7 @@ import {
   presignPutUrl,
   headObject,
   deleteObject,
+  setCacheControl,
   publicUrlFor,
 } from "../media/r2_client";
 
@@ -125,7 +126,10 @@ export class UserService {
   async getAvatarUploadUrl(
     id_user: string,
     contentType: string,
-  ): Promise<Result<{ uploadUrl: string; key: string; publicUrl: string }, "R2_NOT_CONFIGURED" | "BAD_CONTENT_TYPE">> {
+  ): Promise<Result<
+    { uploadUrl: string; key: string; publicUrl: string },
+    "R2_NOT_CONFIGURED" | "BAD_CONTENT_TYPE"
+  >> {
     if (!r2Configured) return fail("R2_NOT_CONFIGURED");
     if (!AVATAR_CONTENT_TYPES.includes(contentType)) return fail("BAD_CONTENT_TYPE");
 
@@ -151,6 +155,10 @@ export class UserService {
       await deleteObject(key).catch(() => {});
       return fail("BAD_FILE");
     }
+
+    // Cache-Control largo para que el navegador/CDN no vuelva a pedir la
+    // imagen (la URL pública lleva ?v=, cambia sola al reemplazarla).
+    await setCacheControl(key, meta.contentType).catch(() => {});
 
     // ?v=<ts> para que el navegador no muestre la foto vieja cacheada al
     // reemplazarla (el key es fijo, la URL sin query sería idéntica).
