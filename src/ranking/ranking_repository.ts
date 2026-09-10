@@ -129,6 +129,10 @@ export class RankingRepository {
       FROM agg a
       JOIN users u ON u.id_user = a.id_user
       LEFT JOIN clubs cl ON cl.id_club = u.id_club
+      -- v1 dobles: los "usuarios equipo" quedan afuera de este ranking
+      -- por-organizador (el ranking nacional sí los reparte bien, via
+      -- player_stats). Pendiente: expandir la pareja a sus 2 jugadores acá.
+      WHERE u.is_team = false
       ORDER BY ranking_position ASC
       LIMIT $2;
     `;

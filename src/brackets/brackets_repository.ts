@@ -324,6 +324,56 @@ export class BracketsRepository {
     return res.rows[0]?.is_ranked ?? true;
   }
 
+  // Dobles: un "usuario equipo" es el participante en el grupo/llave, pero
+  // las estadísticas globales y los puntos de ranking se le acreditan a los
+  // DOS jugadores reales de la pareja (el usuario equipo nunca entra a
+  // player_stats). En singles devuelve al mismo jugador.
+  private async statTargets(client: PoolClient, participantId: string): Promise<string[]> {
+    const res = await client.query<{ id_player_1: string; id_player_2: string }>(
+      `SELECT id_player_1, id_player_2 FROM doubles_teams WHERE id_user = $1`,
+      [participantId]
+    );
+    const row = res.rows[0];
+    return row ? [row.id_player_1, row.id_player_2] : [participantId];
+  }
+
+  private async creditWinnerStats(
+    client: PoolClient, participantId: string, setsFor: number, setsAgainst: number, pointsAwarded: number
+  ): Promise<void> {
+    for (const id of await this.statTargets(client, participantId)) {
+      await client.query(
+        `INSERT INTO player_stats (id_user, matches_played, matches_won, matches_lost, sets_won, sets_lost, ranking_points)
+         VALUES ($1, 1, 1, 0, $2, $3, $4)
+         ON CONFLICT (id_user) DO UPDATE SET
+           matches_played = player_stats.matches_played + 1,
+           matches_won    = player_stats.matches_won + 1,
+           sets_won       = player_stats.sets_won + EXCLUDED.sets_won,
+           sets_lost      = player_stats.sets_lost + EXCLUDED.sets_lost,
+           ranking_points = player_stats.ranking_points + $4,
+           updated_at     = NOW()`,
+        [id, setsFor, setsAgainst, pointsAwarded]
+      );
+    }
+  }
+
+  private async creditLoserStats(
+    client: PoolClient, participantId: string, setsFor: number, setsAgainst: number
+  ): Promise<void> {
+    for (const id of await this.statTargets(client, participantId)) {
+      await client.query(
+        `INSERT INTO player_stats (id_user, matches_played, matches_won, matches_lost, sets_won, sets_lost)
+         VALUES ($1, 1, 0, 1, $2, $3)
+         ON CONFLICT (id_user) DO UPDATE SET
+           matches_played = player_stats.matches_played + 1,
+           matches_lost   = player_stats.matches_lost + 1,
+           sets_won       = player_stats.sets_won + EXCLUDED.sets_won,
+           sets_lost      = player_stats.sets_lost + EXCLUDED.sets_lost,
+           updated_at     = NOW()`,
+        [id, setsFor, setsAgainst]
+      );
+    }
+  }
+
   async recordMatchResult(params: {
     matchId: string;
     groupId: string;
@@ -391,36 +441,12 @@ export class BracketsRepository {
         [loserSetsFor, loserSetsAgainst, loserPointsFor, loserPointsAgainst, groupId, loserId]
       );
 
-      // Estadísticas globales del ganador — matches_played/won/sets siguen
-      // contando siempre; ranking_points solo si el torneo es puntuable
-      // (pointsAwarded queda en 0 si no lo es).
-      await client.query(
-        `INSERT INTO player_stats (id_user, matches_played, matches_won, matches_lost, sets_won, sets_lost, ranking_points)
-         VALUES ($1, 1, 1, 0, $2, $3, ${pointsAwarded})
-         ON CONFLICT (id_user) DO UPDATE SET
-           matches_played = player_stats.matches_played + 1,
-           matches_won    = player_stats.matches_won + 1,
-           sets_won       = player_stats.sets_won + EXCLUDED.sets_won,
-           sets_lost      = player_stats.sets_lost + EXCLUDED.sets_lost,
-           ranking_points = player_stats.ranking_points + ${pointsAwarded},
-           updated_at     = NOW()`,
-        [winnerId, winnerSetsFor, winnerSetsAgainst]
-      );
-
-      // Estadísticas globales del perdedor — un walkover sigue siendo un
-      // partido perdido (cuenta para PJ/derrotas igual que en group_standings
-      // arriba), solo que no suma puntos de ranking.
-      await client.query(
-        `INSERT INTO player_stats (id_user, matches_played, matches_won, matches_lost, sets_won, sets_lost)
-         VALUES ($1, 1, 0, 1, $2, $3)
-         ON CONFLICT (id_user) DO UPDATE SET
-           matches_played = player_stats.matches_played + 1,
-           matches_lost   = player_stats.matches_lost + 1,
-           sets_won       = player_stats.sets_won + EXCLUDED.sets_won,
-           sets_lost      = player_stats.sets_lost + EXCLUDED.sets_lost,
-           updated_at     = NOW()`,
-        [loserId, loserSetsFor, loserSetsAgainst]
-      );
+      // Estadísticas globales — matches_played/won/sets siempre; ranking_points
+      // solo si el torneo es puntuable (pointsAwarded = 0 si no). En dobles se
+      // acredita a los dos jugadores reales de la pareja (ver statTargets).
+      await this.creditWinnerStats(client, winnerId, winnerSetsFor, winnerSetsAgainst, pointsAwarded);
+      // Un walkover sigue siendo un partido perdido (cuenta PJ/derrotas).
+      await this.creditLoserStats(client, loserId, loserSetsFor, loserSetsAgainst);
 
       // Recalcular posición dentro del grupo: primero partidos ganados, luego
       // diferencia de sets, y recién si siguen empatados, diferencia de puntos
@@ -533,22 +559,29 @@ export class BracketsRepository {
         [loserSetsFor, loserSetsAgainst, loserPointsFor, loserPointsAgainst, groupId, loserId]
       );
 
-      await client.query(
-        `UPDATE player_stats
-         SET matches_played = matches_played - 1, matches_won = matches_won - 1,
-             sets_won = sets_won - $1, sets_lost = sets_lost - $2,
-             ranking_points = ranking_points - ${pointsToRevert}, updated_at = NOW()
-         WHERE id_user = $3`,
-        [winnerSetsFor, winnerSetsAgainst, winnerId]
-      );
+      // En dobles los puntos se habían acreditado a los dos jugadores de la
+      // pareja (ver statTargets) — al deshacer hay que descontárselos a los
+      // dos, no al usuario equipo.
+      for (const id of await this.statTargets(client, winnerId)) {
+        await client.query(
+          `UPDATE player_stats
+           SET matches_played = matches_played - 1, matches_won = matches_won - 1,
+               sets_won = sets_won - $1, sets_lost = sets_lost - $2,
+               ranking_points = ranking_points - $3, updated_at = NOW()
+           WHERE id_user = $4`,
+          [winnerSetsFor, winnerSetsAgainst, pointsToRevert, id]
+        );
+      }
 
-      await client.query(
-        `UPDATE player_stats
-         SET matches_played = matches_played - 1, matches_lost = matches_lost - 1,
-             sets_won = sets_won - $1, sets_lost = sets_lost - $2, updated_at = NOW()
-         WHERE id_user = $3`,
-        [loserSetsFor, loserSetsAgainst, loserId]
-      );
+      for (const id of await this.statTargets(client, loserId)) {
+        await client.query(
+          `UPDATE player_stats
+           SET matches_played = matches_played - 1, matches_lost = matches_lost - 1,
+               sets_won = sets_won - $1, sets_lost = sets_lost - $2, updated_at = NOW()
+           WHERE id_user = $3`,
+          [loserSetsFor, loserSetsAgainst, id]
+        );
+      }
 
       // Mismo criterio de reordenamiento que recordMatchResult.
       await client.query(
@@ -920,35 +953,11 @@ export class BracketsRepository {
         });
       }
 
-      // Estadísticas globales del ganador
-      await client.query(
-        `INSERT INTO player_stats (id_user, matches_played, matches_won, matches_lost, sets_won, sets_lost, ranking_points)
-         VALUES ($1, 1, 1, 0, $2, $3, ${pointsAwarded})
-         ON CONFLICT (id_user) DO UPDATE SET
-           matches_played = player_stats.matches_played + 1,
-           matches_won    = player_stats.matches_won + 1,
-           sets_won       = player_stats.sets_won + EXCLUDED.sets_won,
-           sets_lost      = player_stats.sets_lost + EXCLUDED.sets_lost,
-           ranking_points = player_stats.ranking_points + ${pointsAwarded},
-           updated_at     = NOW()`,
-        [winnerId, winnerSetsFor, winnerSetsAgainst]
-      );
-
-      // Estadísticas globales del perdedor (si hay perdedor real — un bye no
-      // tiene uno). Un walkover sigue contando como partido jugado/perdido,
-      // solo que no suma puntos de ranking.
+      // Estadísticas globales (en dobles → a los dos jugadores de la pareja).
+      await this.creditWinnerStats(client, winnerId, winnerSetsFor, winnerSetsAgainst, pointsAwarded);
+      // El perdedor puede no existir (un bye no tiene uno).
       if (loserId) {
-        await client.query(
-          `INSERT INTO player_stats (id_user, matches_played, matches_won, matches_lost, sets_won, sets_lost)
-           VALUES ($1, 1, 0, 1, $2, $3)
-           ON CONFLICT (id_user) DO UPDATE SET
-             matches_played = player_stats.matches_played + 1,
-             matches_lost   = player_stats.matches_lost + 1,
-             sets_won       = player_stats.sets_won + EXCLUDED.sets_won,
-             sets_lost      = player_stats.sets_lost + EXCLUDED.sets_lost,
-             updated_at     = NOW()`,
-          [loserId, winnerSetsAgainst, winnerSetsFor]
-        );
+        await this.creditLoserStats(client, loserId, winnerSetsAgainst, winnerSetsFor);
       }
 
       const isFinal = !nextRound;

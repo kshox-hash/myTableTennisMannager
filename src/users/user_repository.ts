@@ -109,6 +109,7 @@ export class UserRepository {
       JOIN roles r ON r.id_role = u.id_role
       LEFT JOIN clubs cl ON cl.id_club = u.id_club
       WHERE r.name = 'player'
+        AND u.is_team = false
         AND (
           u.email ILIKE $1
           OR COALESCE(u.first_name, '') ILIKE $1

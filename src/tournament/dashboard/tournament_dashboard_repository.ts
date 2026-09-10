@@ -171,6 +171,7 @@ export class TournamentDashboardRepository {
          (SELECT COUNT(*) FROM tm WHERE tm.winner_id = p.id_user) AS matches_won
        FROM players p
        JOIN users u ON u.id_user = p.id_user
+       WHERE u.is_team = false
        ORDER BY matches_won DESC, matches_played DESC, name ASC`,
       [id_tournament]
     );

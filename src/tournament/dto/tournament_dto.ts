@@ -50,6 +50,10 @@ export type TournamentCategoryDTO = {
   quotas: number | null;
   status?: string;
   phase?: string;
+  // "singles" (default) | "doubles" — en dobles cada participante es una
+  // pareja (ver 044_doubles_categories.sql). gender = "mixed" + doubles =
+  // dobles mixtos (regla 1 varón + 1 dama por pareja).
+  format?: "singles" | "doubles";
   qualifiers_per_group?: number;
   // Orden sugerido para jugarse (menor = antes); mismo número en dos
   // categorías = pensadas para simultáneo. Solo alimenta el punto de
@@ -200,6 +204,7 @@ export type AdminCategoryRow = {
   inscription_price: number;
   quotas: number | null;
   status: string;
+  format: "singles" | "doubles";
   enrolled_count: number;
   qualifiers_per_group: number;
   priority: number;

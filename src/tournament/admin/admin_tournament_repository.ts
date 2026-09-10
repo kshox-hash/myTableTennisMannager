@@ -333,10 +333,10 @@ export class AdminTournamentRepository {
     const placeholders: string[] = [];
 
     categories.forEach((cat, index) => {
-      const base = index * 9;
+      const base = index * 10;
 
       placeholders.push(
-        `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9})`
+        `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10})`
       );
 
       values.push(
@@ -348,7 +348,8 @@ export class AdminTournamentRepository {
         cat.quotas ?? null,
         cat.status ?? "active",
         cat.qualifiers_per_group ?? 2,
-        cat.priority ?? 1
+        cat.priority ?? 1,
+        cat.format === "doubles" ? "doubles" : "singles"
       );
     });
 
@@ -363,7 +364,8 @@ export class AdminTournamentRepository {
           quotas,
           status,
           qualifiers_per_group,
-          priority
+          priority,
+          format
         )
       VALUES ${placeholders.join(",")}
       RETURNING *;
@@ -554,8 +556,8 @@ export class AdminTournamentRepository {
           `UPDATE ${this.tournamentCategoriesTable}
              SET category_type = $1, category_range = $2, gender = $3,
                  inscription_price = $4, quotas = $5, qualifiers_per_group = $6,
-                 priority = $7
-           WHERE id_category = $8`,
+                 priority = $7, format = $8
+           WHERE id_category = $9`,
           [
             cat.category_type.trim(),
             cat.category_range.trim(),
@@ -564,14 +566,15 @@ export class AdminTournamentRepository {
             cat.quotas ?? null,
             cat.qualifiers_per_group ?? 2,
             cat.priority ?? 1,
+            cat.format === "doubles" ? "doubles" : "singles",
             cat.id_category,
           ]
         );
       } else {
         await client.query(
           `INSERT INTO ${this.tournamentCategoriesTable}
-             (id_tournament, category_type, category_range, gender, inscription_price, quotas, status, qualifiers_per_group, priority)
-           VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, $8)`,
+             (id_tournament, category_type, category_range, gender, inscription_price, quotas, status, qualifiers_per_group, priority, format)
+           VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, $8, $9)`,
           [
             tournamentId,
             cat.category_type.trim(),
@@ -581,6 +584,7 @@ export class AdminTournamentRepository {
             cat.quotas ?? null,
             cat.qualifiers_per_group ?? 2,
             cat.priority ?? 1,
+            cat.format === "doubles" ? "doubles" : "singles",
           ]
         );
       }
@@ -994,6 +998,7 @@ export class AdminTournamentRepository {
         c.inscription_price,
         c.quotas,
         c.status,
+        c.format,
         c.qualifiers_per_group,
         c.priority,
         COUNT(e.id_enrollment) FILTER (WHERE e.status = 'active')::int AS enrolled_count

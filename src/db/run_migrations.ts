@@ -49,6 +49,7 @@ const INCREMENTAL = [
   "041_tournament_is_ranked.sql",
   "042_organizer_role.sql",
   "043_public_organizer_profile.sql",
+  "044_doubles_categories.sql",
 ];
 
 export async function runMigrations(): Promise<void> {
