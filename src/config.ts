@@ -19,6 +19,8 @@ export default (app : express.Express) => {
     const defaultOrigins = [
         "https://www.my-ttm.com",           // producción (dominio propio)
         "https://my-ttm.com",               // producción (dominio propio, sin www)
+        "https://www.myttm.cl",             // producción (dominio .cl)
+        "https://myttm.cl",                 // producción (dominio .cl, sin www)
         "https://elevenmatch.onrender.com", // producción (subdominio de Render, por si se sigue usando)
         "http://localhost:5173",            // Vite dev server
         "http://localhost:4173",            // vite preview
