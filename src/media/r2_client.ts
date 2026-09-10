@@ -52,14 +52,18 @@ export async function presignPutUrl(
   return getSignedUrl(client, cmd, { expiresIn });
 }
 
-/** true si el objeto ya existe en el bucket (se usa para confirmar la subida). */
-export async function objectExists(key: string): Promise<boolean> {
+/** Metadata del objeto (o null si no existe) — se usa para confirmar la subida
+ *  y para validar tamaño/tipo del lado del server (defensa por si alguien
+ *  hace un PUT directo a la URL firmada con algo que no es un avatar chico). */
+export async function headObject(
+  key: string,
+): Promise<{ size: number; contentType: string } | null> {
   if (!client) throw new Error("R2_NOT_CONFIGURED");
   try {
-    await client.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: key }));
-    return true;
+    const r = await client.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: key }));
+    return { size: r.ContentLength ?? 0, contentType: r.ContentType ?? "" };
   } catch {
-    return false;
+    return null;
   }
 }
 

@@ -92,6 +92,9 @@ export class UserController {
       if (result.error === "UPLOAD_NOT_FOUND") {
         return res.status(404).json({ ok: false, message: "No se encontró la imagen subida. Probá de nuevo." });
       }
+      if (result.error === "BAD_FILE") {
+        return res.status(400).json({ ok: false, message: "La imagen es inválida o muy pesada." });
+      }
       return res.status(400).json({ ok: false, message: "Solicitud inválida." });
     }
     return res.json({ ok: true, data: result.data });

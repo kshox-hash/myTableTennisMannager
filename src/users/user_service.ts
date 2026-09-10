@@ -5,12 +5,16 @@ import { type Result, ok, fail } from "../core/constants/result";
 import {
   r2Configured,
   presignPutUrl,
-  objectExists,
+  headObject,
   deleteObject,
   publicUrlFor,
 } from "../media/r2_client";
 
 const AVATAR_CONTENT_TYPES = ["image/webp", "image/jpeg", "image/png"];
+// El cliente manda un webp de 256px (~15 KB). 500 KB es un techo generoso
+// que solo se cruza si alguien hace un PUT directo a la URL firmada con
+// basura — ahí se borra y se rechaza.
+const MAX_AVATAR_BYTES = 500 * 1024;
 // Un key fijo por usuario: subir de nuevo pisa la foto anterior, sin
 // acumular basura en el bucket. La extensión .webp calza con lo que manda
 // el navegador (canvas.toBlob a webp).
@@ -133,11 +137,20 @@ export class UserService {
   async confirmAvatar(
     id_user: string,
     key: string,
-  ): Promise<Result<UserProfileDB, "R2_NOT_CONFIGURED" | "BAD_KEY" | "UPLOAD_NOT_FOUND" | "USER_NOT_FOUND">> {
+  ): Promise<Result<UserProfileDB, "R2_NOT_CONFIGURED" | "BAD_KEY" | "UPLOAD_NOT_FOUND" | "BAD_FILE" | "USER_NOT_FOUND">> {
     if (!r2Configured) return fail("R2_NOT_CONFIGURED");
     // El key SIEMPRE tiene que ser el de este usuario — no se acepta uno arbitrario.
     if (key !== avatarKey(id_user)) return fail("BAD_KEY");
-    if (!(await objectExists(key))) return fail("UPLOAD_NOT_FOUND");
+
+    const meta = await headObject(key);
+    if (!meta) return fail("UPLOAD_NOT_FOUND");
+    // Defensa server-side: si el objeto subido no es una imagen chica, se
+    // borra y se rechaza (el cliente nunca manda esto, pero la URL firmada
+    // acepta cualquier PUT hasta que expira).
+    if (meta.size > MAX_AVATAR_BYTES || !meta.contentType.startsWith("image/")) {
+      await deleteObject(key).catch(() => {});
+      return fail("BAD_FILE");
+    }
 
     // ?v=<ts> para que el navegador no muestre la foto vieja cacheada al
     // reemplazarla (el key es fijo, la URL sin query sería idéntica).
