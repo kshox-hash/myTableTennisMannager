@@ -58,6 +58,6 @@ export function requireTournamentOwnership(
       return res.status(403).json({ ok: false, message: "Tu invitación a este campeonato es de solo lectura" });
     }
 
-    return res.status(403).json({ ok: false, message: "No sos organizador de este campeonato" });
+    return res.status(403).json({ ok: false, message: "No eres organizador de este campeonato" });
   };
 }

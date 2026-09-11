@@ -35,7 +35,7 @@ const ERR: Record<string, [number, string]> = {
   PLAYER_NOT_FOUND: [404, "Jugador no encontrado"],
   NOT_ENOUGH_PLAYERS: [400, "Se necesitan al menos 3 participantes para generar el fixture"],
   LEAGUE_NOT_FOUND: [404, "Liga no encontrada"],
-  LEAGUE_IS_DOUBLES: [400, "Esta liga es de dobles — agregá parejas, no jugadores sueltos"],
+  LEAGUE_IS_DOUBLES: [400, "Esta liga es de dobles — agrega parejas, no jugadores sueltos"],
   LEAGUE_IS_SINGLES: [400, "Esta liga es individual, no de dobles"],
   SAME_PLAYER: [400, "Una pareja necesita dos jugadores distintos"],
   ALREADY_IN_TEAM: [409, "Uno de los jugadores ya está en otra pareja de esta liga"],

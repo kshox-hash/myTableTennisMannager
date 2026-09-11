@@ -167,7 +167,7 @@ export class BracketsService {
         {
           type: "groups_started",
           title: "Arrancó la fase de grupos",
-          message: `Ya se generaron los grupos de ${names.categoryType} ${names.categoryRange} (${names.tournamentName}). Revisá tu grupo y tus partidos.`,
+          message: `Ya se generaron los grupos de ${names.categoryType} ${names.categoryRange} (${names.tournamentName}). Revisa tu grupo y tus partidos.`,
           idTournament: tournamentId,
           idCategory: categoryId,
         }
@@ -209,7 +209,7 @@ export class BracketsService {
         {
           type: "groups_started",
           title: "Se rearmaron los grupos",
-          message: `Se volvieron a armar los grupos de ${names.categoryType} ${names.categoryRange} (${names.tournamentName}) con los inscritos actuales. Revisá tu grupo y tus partidos.`,
+          message: `Se volvieron a armar los grupos de ${names.categoryType} ${names.categoryRange} (${names.tournamentName}) con los inscritos actuales. Revisa tu grupo y tus partidos.`,
           idTournament: tournamentId,
           idCategory: categoryId,
         }
@@ -266,7 +266,7 @@ export class BracketsService {
       await this.repo.notifications.createForMany(flatIds, {
         type: "groups_started",
         title: "Se rearmaron los grupos",
-        message: `El organizador rearmó manualmente los grupos de ${names.categoryType} ${names.categoryRange} (${names.tournamentName}). Revisá tu grupo y tus partidos.`,
+        message: `El organizador rearmó manualmente los grupos de ${names.categoryType} ${names.categoryRange} (${names.tournamentName}). Revisa tu grupo y tus partidos.`,
         idTournament: tournamentId,
         idCategory: categoryId,
       });
@@ -676,7 +676,7 @@ export class BracketsService {
       await this.repo.notifications.createForMany(realPlayers, {
         type: "bracket_generated",
         title: "Se generó el cuadro eliminatorio",
-        message: `Ya está el cuadro eliminatorio de ${names.categoryType} ${names.categoryRange} (${names.tournamentName}). Mirá contra quién te toca.`,
+        message: `Ya está el cuadro eliminatorio de ${names.categoryType} ${names.categoryRange} (${names.tournamentName}). Mira contra quién te toca.`,
         idTournament: tournamentId,
         idCategory: categoryId,
       });

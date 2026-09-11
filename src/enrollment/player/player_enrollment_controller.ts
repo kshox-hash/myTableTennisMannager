@@ -49,7 +49,7 @@ export class EnrollmentsController {
       if (error?.message === "GENDER_REQUIRED") {
         return res.status(409).json({
           ok: false,
-          message: "Completá tu género en tu perfil para poder inscribirte en esta categoría",
+          message: "Completa tu género en tu perfil para poder inscribirte en esta categoría",
         });
       }
 
@@ -63,7 +63,7 @@ export class EnrollmentsController {
       if (error?.message === "BIRTH_DATE_REQUIRED") {
         return res.status(409).json({
           ok: false,
-          message: "Completá tu fecha de nacimiento en tu perfil para poder inscribirte en esta categoría",
+          message: "Completa tu fecha de nacimiento en tu perfil para poder inscribirte en esta categoría",
         });
       }
 

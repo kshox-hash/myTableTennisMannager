@@ -105,7 +105,7 @@ export class UserController {
         return res.status(503).json({ ok: false, message: "El almacenamiento de imágenes no está configurado." });
       }
       if (result.error === "UPLOAD_NOT_FOUND") {
-        return res.status(404).json({ ok: false, message: "No se encontró la imagen subida. Probá de nuevo." });
+        return res.status(404).json({ ok: false, message: "No se encontró la imagen subida. Inténtalo de nuevo." });
       }
       if (result.error === "BAD_FILE") {
         return res.status(400).json({ ok: false, message: "La imagen es inválida o muy pesada." });

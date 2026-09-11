@@ -10,5 +10,5 @@ export const authRateLimit = rateLimit({
   limit: 10,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { ok: false, message: "Demasiados intentos. Probá de nuevo en unos minutos." },
+  message: { ok: false, message: "Demasiados intentos. Inténtalo de nuevo en unos minutos." },
 });

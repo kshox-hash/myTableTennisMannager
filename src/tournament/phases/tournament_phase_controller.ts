@@ -84,7 +84,7 @@ export class TournamentPhaseController {
       if (result.error === "GROUPS_OUT_OF_DATE")
         return res.status(409).json({
           ok: false,
-          message: "El fixture que estás confirmando ya no coincide con los inscritos actuales — volvé a previsualizar",
+          message: "El fixture que estás confirmando ya no coincide con los inscritos actuales — vuelve a previsualizar",
           code: "GROUPS_OUT_OF_DATE",
         });
       return res.status(400).json({ ok: false, message: result.error });
@@ -137,7 +137,7 @@ export class TournamentPhaseController {
       if (result.error === "SEEDING_OUT_OF_DATE")
         return res.status(409).json({
           ok: false,
-          message: "El sorteo que estás confirmando ya no coincide con los clasificados actuales — volvé a previsualizar",
+          message: "El sorteo que estás confirmando ya no coincide con los clasificados actuales — vuelve a previsualizar",
           code: "SEEDING_OUT_OF_DATE",
         });
       return res.status(400).json({ ok: false, message: result.error });

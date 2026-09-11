@@ -64,7 +64,7 @@ export class AdminTournamentController {
         return res.status(404).json({ ok: false, message: "Campeonato no encontrado" });
       }
       if (result.error === ADMIN_TOURNAMENT_ERRORS.NOT_TOURNAMENT_OWNER) {
-        return res.status(403).json({ ok: false, message: "No sos el organizador de este campeonato" });
+        return res.status(403).json({ ok: false, message: "No eres el organizador de este campeonato" });
       }
       if (result.error === ADMIN_TOURNAMENT_ERRORS.TOURNAMENT_ALREADY_CANCELLED) {
         return res.status(409).json({ ok: false, message: "No se puede editar un campeonato cancelado" });
@@ -163,7 +163,7 @@ export class AdminTournamentController {
         return res.status(404).json({ ok: false, message: "Campeonato no encontrado" });
       }
       if (result.error === ADMIN_TOURNAMENT_ERRORS.NOT_TOURNAMENT_OWNER) {
-        return res.status(403).json({ ok: false, message: "No sos organizador de este campeonato" });
+        return res.status(403).json({ ok: false, message: "No eres organizador de este campeonato" });
       }
       return res.status(400).json({ ok: false, message: result.error });
     }
@@ -301,7 +301,7 @@ export class AdminTournamentController {
         return res.status(404).json({ ok: false, message: "Campeonato no encontrado" });
       }
       if (result.error === ADMIN_TOURNAMENT_ERRORS.NOT_TOURNAMENT_OWNER) {
-        return res.status(403).json({ ok: false, message: "No sos el organizador de este campeonato" });
+        return res.status(403).json({ ok: false, message: "No eres el organizador de este campeonato" });
       }
       if (result.error === ADMIN_TOURNAMENT_ERRORS.TOURNAMENT_ALREADY_CANCELLED) {
         return res.status(409).json({ ok: false, message: "Este campeonato ya estaba cancelado" });
@@ -327,7 +327,7 @@ export class AdminTournamentController {
         return res.status(404).json({ ok: false, message: "Campeonato no encontrado" });
       }
       if (result.error === ADMIN_TOURNAMENT_ERRORS.NOT_TOURNAMENT_OWNER) {
-        return res.status(403).json({ ok: false, message: "No sos el organizador de este campeonato" });
+        return res.status(403).json({ ok: false, message: "No eres el organizador de este campeonato" });
       }
       return res.status(400).json({ ok: false, message: result.error });
     }
@@ -359,7 +359,7 @@ export class AdminTournamentController {
         return res.status(404).json({ ok: false, message: "Categoría no encontrada" });
       }
       if (result.error === ADMIN_TOURNAMENT_ERRORS.NOT_TOURNAMENT_OWNER) {
-        return res.status(403).json({ ok: false, message: "No sos el organizador de este campeonato" });
+        return res.status(403).json({ ok: false, message: "No eres el organizador de este campeonato" });
       }
       return res.status(400).json({ ok: false, message: result.error });
     }
@@ -390,7 +390,7 @@ export class AdminTournamentController {
         return res.status(404).json({ ok: false, message: "Categoría no encontrada" });
       }
       if (result.error === ADMIN_TOURNAMENT_ERRORS.NOT_TOURNAMENT_OWNER) {
-        return res.status(403).json({ ok: false, message: "No sos el organizador de este campeonato" });
+        return res.status(403).json({ ok: false, message: "No eres el organizador de este campeonato" });
       }
       return res.status(400).json({ ok: false, message: result.error });
     }
