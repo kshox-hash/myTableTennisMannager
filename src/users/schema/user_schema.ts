@@ -31,3 +31,16 @@ export const quickCreatePlayerSchema = z
   .strict();
 
 export type QuickCreatePlayerDTO = z.infer<typeof quickCreatePlayerSchema>;
+
+// Alta de otro administrador desde el panel — solo la puede hacer un admin
+// ya logueado (no necesita ADMIN_SECRET, ese es para el registro público).
+export const createAdminSchema = z
+  .object({
+    email: z.string().trim().toLowerCase().email("Email inválido").max(150),
+    password: z.string().min(8, "La contraseña debe tener al menos 8 caracteres").max(72),
+    first_name: z.string().trim().min(1).max(100).optional(),
+    last_name: z.string().trim().min(1).max(100).optional(),
+  })
+  .strict();
+
+export type CreateAdminDTO = z.infer<typeof createAdminSchema>;

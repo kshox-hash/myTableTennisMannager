@@ -1,6 +1,6 @@
 import { UserRepository } from "./user_repository";
 import type { UserProfileDB, PlayerStatsDB, UserSearchRow } from "./dto/user_dto";
-import type { UpdateProfileDTO, QuickCreatePlayerDTO } from "./schema/user_schema";
+import type { UpdateProfileDTO, QuickCreatePlayerDTO, CreateAdminDTO } from "./schema/user_schema";
 import { type Result, ok, fail } from "../core/constants/result";
 import {
   r2Configured,
@@ -106,6 +106,25 @@ export class UserService {
 
     const data = await this.repo.searchPlayers(trimmed);
     return ok(data);
+  }
+
+  // --- Administradores ---
+  async listAdmins() {
+    return this.repo.listAdmins();
+  }
+
+  async createAdmin(input: CreateAdminDTO): Promise<Result<
+    { id_user: string; email: string; first_name: string | null; last_name: string | null; created_at: string },
+    "EMAIL_TAKEN"
+  >> {
+    if (await this.repo.emailExists(input.email)) return fail("EMAIL_TAKEN");
+    const admin = await this.repo.createAdmin({
+      email: input.email,
+      password: input.password,
+      first_name: input.first_name,
+      last_name: input.last_name,
+    });
+    return ok(admin);
   }
 
   // Crea un jugador sin cuenta (walk-in) y lo devuelve listo para inscribir.
