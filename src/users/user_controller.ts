@@ -91,7 +91,7 @@ export class UserController {
       if (result.error === "R2_NOT_CONFIGURED") {
         return res.status(503).json({ ok: false, message: "El almacenamiento de imágenes no está configurado." });
       }
-      return res.status(400).json({ ok: false, message: "Formato de imagen no permitido (usá JPG, PNG o WEBP)." });
+      return res.status(400).json({ ok: false, message: "Formato de imagen no permitido (usa JPG, PNG o WEBP)." });
     }
     return res.json({ ok: true, data: result.data });
   };

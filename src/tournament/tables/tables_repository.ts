@@ -68,7 +68,7 @@ export class TablesRepository {
     await this.notifications.createForMany(userIds, {
       type: "match_on_table",
       title: "¡Tu mesa está lista!",
-      message: `Tu partido de ${categoryLabel} ya tiene mesa: Mesa ${tableNumber}. Andá para allá.`,
+      message: `Tu partido de ${categoryLabel} ya tiene mesa: Mesa ${tableNumber}. Ve para allá.`,
       idTournament,
       idCategory,
     });

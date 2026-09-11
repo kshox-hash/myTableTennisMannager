@@ -30,7 +30,7 @@ export function errorMiddleware(
   const message =
     isDev && err instanceof Error && err.message
       ? err.message
-      : "Ocurrió un error interno. Intentá de nuevo más tarde.";
+      : "Ocurrió un error interno. Inténtalo de nuevo más tarde.";
 
   return res.status(500).json({
     ok: false,
