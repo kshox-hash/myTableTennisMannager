@@ -7,7 +7,7 @@ import { validateBody } from "../../middlewares/validate_body_middleware";
 import { asyncHandler } from "../../middlewares/wrap_async_middleware";
 import { authRateLimit } from "../../middlewares/rate_limit_middleware";
 
-import { signInSchema, signUpSchema } from "../schema/auth_schema";
+import { signInSchema, signUpSchema, googleAuthSchema } from "../schema/auth_schema";
 
 const router = Router();
 
@@ -29,6 +29,14 @@ router.post(
   authRateLimit,
   validateBody(signInSchema),
   asyncHandler(controller.signIn)
+);
+
+// GOOGLE (login y registro en un solo paso — ver auth_service.loginWithGoogle)
+router.post(
+  "/google",
+  authRateLimit,
+  validateBody(googleAuthSchema),
+  asyncHandler(controller.google)
 );
 
 export default router;

@@ -46,9 +46,32 @@ export class AuthController {
         });
       }
 
+      if (result.error === ERRORS.GOOGLE_ONLY_ACCOUNT) {
+        return res.status(401).json({
+          ok: false,
+          message: "Esta cuenta usa Google para iniciar sesión — usa el botón \"Continuar con Google\".",
+        });
+      }
+
       return res.status(400).json({
         ok: false,
         message: result.error,
+      });
+    }
+
+    return res.status(200).json({
+      ok: true,
+      data: result.data,
+    });
+  };
+
+  google = async (req: Request, res: Response) => {
+    const result = await this.service.loginWithGoogle(req.body.credential);
+
+    if (!result.ok) {
+      return res.status(401).json({
+        ok: false,
+        message: "No se pudo verificar la cuenta de Google. Inténtalo de nuevo.",
       });
     }
 

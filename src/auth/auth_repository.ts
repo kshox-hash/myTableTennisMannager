@@ -6,6 +6,8 @@ import type {
   UserCreatedDB,
   RoleIdDB,
   UserWithPasswordDB,
+  UserAuthProfileDB,
+  CreateGoogleUserInput,
 } from "./dto/auth_dto";
 
 export class AuthRepository {
@@ -105,5 +107,57 @@ export class AuthRepository {
     const res = await this.pool.query<UserWithPasswordDB>(query, [email]);
 
     return res.rows[0] ?? null;
+  }
+
+  async findAuthProfileByGoogleSub(googleSub: string): Promise<UserAuthProfileDB | null> {
+    const query = `
+      SELECT u.id_user, u.email, u.gender, u.google_sub, r.name AS role
+      FROM ${this.usersTable} u
+      JOIN ${this.rolesTable} r ON r.id_role = u.id_role
+      WHERE u.google_sub = $1
+      LIMIT 1;
+    `;
+    const res = await this.pool.query<UserAuthProfileDB>(query, [googleSub]);
+    return res.rows[0] ?? null;
+  }
+
+  async findAuthProfileByEmail(email: string): Promise<UserAuthProfileDB | null> {
+    const query = `
+      SELECT u.id_user, u.email, u.gender, u.google_sub, r.name AS role
+      FROM ${this.usersTable} u
+      JOIN ${this.rolesTable} r ON r.id_role = u.id_role
+      WHERE u.email = $1
+      LIMIT 1;
+    `;
+    const res = await this.pool.query<UserAuthProfileDB>(query, [email]);
+    return res.rows[0] ?? null;
+  }
+
+  // Cuenta existente (creada por email/contraseña) que inicia sesión con
+  // Google por primera vez — le sumamos el google_sub para reconocerla la
+  // próxima vez sin tocar nada más (nombre, club, password, etc. quedan
+  // como estaban).
+  async linkGoogleSub(id_user: string, googleSub: string): Promise<void> {
+    await this.pool.query(`UPDATE ${this.usersTable} SET google_sub = $1 WHERE id_user = $2`, [googleSub, id_user]);
+  }
+
+  async createGoogleUser(params: CreateGoogleUserInput): Promise<UserAuthProfileDB> {
+    const query = `
+      INSERT INTO ${this.usersTable} (
+        email, password_hash, id_role, first_name, last_name, google_sub, avatar_url
+      )
+      VALUES ($1, NULL, $2, $3, $4, $5, $6)
+      RETURNING id_user, email, gender, google_sub;
+    `;
+    const values = [
+      params.email,
+      ROLE_IDS.player,
+      params.first_name ?? null,
+      params.last_name ?? null,
+      params.google_sub,
+      params.avatar_url ?? null,
+    ];
+    const res = await this.pool.query(query, values);
+    return { ...res.rows[0], role: "player" } as UserAuthProfileDB;
   }
 }

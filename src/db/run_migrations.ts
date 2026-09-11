@@ -52,6 +52,7 @@ const INCREMENTAL = [
   "044_doubles_categories.sql",
   "045_leagues.sql",
   "046_user_avatar.sql",
+  "047_google_auth.sql",
 ];
 
 export async function runMigrations(): Promise<void> {

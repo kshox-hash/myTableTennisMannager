@@ -39,5 +39,12 @@ export const signInSchema = z.object({
   password: z.string().min(1, "La contraseña es obligatoria"),
 });
 
+export const googleAuthSchema = z.object({
+  // El ID token (JWT) que entrega Google Identity Services — se verifica
+  // contra Google en auth_service, acá solo se chequea que venga algo.
+  credential: z.string().min(10, "Falta el token de Google"),
+});
+
 export type SignUpDTO = z.infer<typeof signUpSchema>;
 export type SignInDTO = z.infer<typeof signInSchema>;
+export type GoogleAuthDTO = z.infer<typeof googleAuthSchema>;
