@@ -23,6 +23,7 @@ export const signUpSchema = z.object({
   last_name: z.string().trim().min(1).max(100).optional(),
   gender: z.enum(["male", "female", "other"]).optional(),
   club_name: z.string().trim().max(150).optional(),
+  dominant_hand: z.enum(["right-handed", "left-handed"]).optional(),
   birth_date: z.string().trim().min(1).max(10).optional(),
   country: z.string().trim().max(100).optional(),
   id_document: z.string().trim().max(50).optional(),

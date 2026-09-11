@@ -43,6 +43,7 @@ export class AuthService {
       last_name: input.last_name,
       gender: input.gender,
       club_name: input.club_name,
+      dominant_hand: input.dominant_hand,
       birth_date: input.birth_date,
       country: input.country,
       id_document: input.id_document,

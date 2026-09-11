@@ -37,6 +37,7 @@ export type CreateUserInput = {
   last_name?: string;
   gender?: "male" | "female" | "other";
   club_name?: string;
+  dominant_hand?: "right-handed" | "left-handed";
   birth_date?: string;
   country?: string;
   id_document?: string;
