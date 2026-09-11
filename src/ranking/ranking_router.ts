@@ -19,6 +19,7 @@ function shapeRankingRow(r: RankingRow) {
     first_name: r.first_name,
     last_name: r.last_name,
     club_name: r.club_name,
+    avatar_url: r.avatar_url,
     ranking_points: r.ranking_points,
     ranking_position: r.ranking_position,
     matches_played: r.matches_played,

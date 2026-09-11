@@ -393,10 +393,12 @@ export class PublicTournamentRepository {
       player1_first: string | null;
       player1_last: string | null;
       player1_club: string | null;
+      player1_avatar_url: string | null;
       player2_id: string | null;
       player2_first: string | null;
       player2_last: string | null;
       player2_club: string | null;
+      player2_avatar_url: string | null;
       winner_id: string | null;
       sets_player1: number;
       sets_player2: number;
@@ -410,8 +412,8 @@ export class PublicTournamentRepository {
     const union = `
       SELECT gm.id_match, 'group' AS stage, tc.category_type, tc.category_range, tc.gender,
              NULL::int AS round,
-             gm.player1_id, u1.first_name AS player1_first, u1.last_name AS player1_last, c1.name AS player1_club,
-             gm.player2_id, u2.first_name AS player2_first, u2.last_name AS player2_last, c2.name AS player2_club,
+             gm.player1_id, u1.first_name AS player1_first, u1.last_name AS player1_last, c1.name AS player1_club, u1.avatar_url AS player1_avatar_url,
+             gm.player2_id, u2.first_name AS player2_first, u2.last_name AS player2_last, c2.name AS player2_club, u2.avatar_url AS player2_avatar_url,
              gm.winner_id, gm.sets_player1, gm.sets_player2, gm.status, gm.best_of_sets, gm.played_at, gm.set_scores
       FROM group_matches gm
       JOIN tournament_categories tc ON tc.id_category = gm.id_category
@@ -425,8 +427,8 @@ export class PublicTournamentRepository {
 
       SELECT bm.id_match, 'bracket' AS stage, tc.category_type, tc.category_range, tc.gender,
              bm.round,
-             bm.player1_id, u1.first_name AS player1_first, u1.last_name AS player1_last, c1.name AS player1_club,
-             bm.player2_id, u2.first_name AS player2_first, u2.last_name AS player2_last, c2.name AS player2_club,
+             bm.player1_id, u1.first_name AS player1_first, u1.last_name AS player1_last, c1.name AS player1_club, u1.avatar_url AS player1_avatar_url,
+             bm.player2_id, u2.first_name AS player2_first, u2.last_name AS player2_last, c2.name AS player2_club, u2.avatar_url AS player2_avatar_url,
              bm.winner_id, bm.sets_player1, bm.sets_player2, bm.status, bm.best_of_sets, bm.played_at, bm.set_scores
       FROM bracket_matches bm
       JOIN tournament_categories tc ON tc.id_category = bm.id_category
@@ -455,23 +457,26 @@ export class PublicTournamentRepository {
 
   async getCategoryDetail(id_category: string): Promise<{
     category: { id_category: string; id_tournament: string; category_type: string; category_range: string; gender: string } | null;
-    players: Array<{ id_user: string; first_name: string | null; last_name: string | null; club_name: string | null }>;
+    players: Array<{ id_user: string; first_name: string | null; last_name: string | null; club_name: string | null; avatar_url: string | null }>;
     groups: Array<{
       id_group: string;
       group_name: string;
       standings: Array<{
-        id_user: string; name: string; played: number; won: number; lost: number;
+        id_user: string; name: string; avatar_url: string | null; played: number; won: number; lost: number;
         sets_for: number; sets_against: number; position: number | null; qualified_to_bracket: boolean;
       }>;
       matches: Array<{
-        id_match: string; player1_id: string; player1_name: string; player2_id: string; player2_name: string;
+        id_match: string; player1_id: string; player1_name: string; player1_avatar_url: string | null;
+        player2_id: string; player2_name: string; player2_avatar_url: string | null;
         sets_player1: number; sets_player2: number; status: string; best_of_sets: number;
         set_scores: unknown;
       }>;
     }>;
     bracketMatches: Array<{
       id_match: string; round: number; match_number: number; player1_id: string | null; player1_name: string | null;
-      player2_id: string | null; player2_name: string | null; winner_id: string | null;
+      player1_avatar_url: string | null;
+      player2_id: string | null; player2_name: string | null; player2_avatar_url: string | null;
+      winner_id: string | null;
       sets_player1: number; sets_player2: number; status: string; is_bye: boolean; best_of_sets: number;
       set_scores: unknown;
     }>;
@@ -487,7 +492,7 @@ export class PublicTournamentRepository {
     }
 
     const playersRes = await this.pool.query(
-      `SELECT DISTINCT u.id_user, u.first_name, u.last_name, c.name AS club_name
+      `SELECT DISTINCT u.id_user, u.first_name, u.last_name, u.avatar_url, c.name AS club_name
        FROM enrollments e
        JOIN users u ON u.id_user = e.id_user
        LEFT JOIN clubs c ON c.id_club = u.id_club
@@ -504,7 +509,7 @@ export class PublicTournamentRepository {
     const groups = [];
     for (const g of groupsRes.rows) {
       const standingsRes = await this.pool.query(
-        `SELECT gs.id_user, u.first_name, u.last_name, gs.played, gs.won, gs.lost,
+        `SELECT gs.id_user, u.first_name, u.last_name, u.avatar_url, gs.played, gs.won, gs.lost,
                 gs.sets_for, gs.sets_against, gs.position, gs.qualified_to_bracket
          FROM group_standings gs
          JOIN users u ON u.id_user = gs.id_user
@@ -513,8 +518,8 @@ export class PublicTournamentRepository {
         [g.id_group]
       );
       const matchesRes = await this.pool.query(
-        `SELECT gm.id_match, gm.player1_id, u1.first_name AS p1_first, u1.last_name AS p1_last,
-                gm.player2_id, u2.first_name AS p2_first, u2.last_name AS p2_last,
+        `SELECT gm.id_match, gm.player1_id, u1.first_name AS p1_first, u1.last_name AS p1_last, u1.avatar_url AS p1_avatar,
+                gm.player2_id, u2.first_name AS p2_first, u2.last_name AS p2_last, u2.avatar_url AS p2_avatar,
                 gm.sets_player1, gm.sets_player2, gm.status, gm.best_of_sets, gm.set_scores
          FROM group_matches gm
          JOIN users u1 ON u1.id_user = gm.player1_id
@@ -529,6 +534,7 @@ export class PublicTournamentRepository {
         standings: standingsRes.rows.map((r) => ({
           id_user: r.id_user,
           name: `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim(),
+          avatar_url: r.avatar_url,
           played: r.played,
           won: r.won,
           lost: r.lost,
@@ -541,8 +547,10 @@ export class PublicTournamentRepository {
           id_match: r.id_match,
           player1_id: r.player1_id,
           player1_name: `${r.p1_first ?? ""} ${r.p1_last ?? ""}`.trim(),
+          player1_avatar_url: r.p1_avatar,
           player2_id: r.player2_id,
           player2_name: `${r.p2_first ?? ""} ${r.p2_last ?? ""}`.trim(),
+          player2_avatar_url: r.p2_avatar,
           sets_player1: r.sets_player1,
           sets_player2: r.sets_player2,
           status: r.status,
@@ -553,8 +561,8 @@ export class PublicTournamentRepository {
     }
 
     const bracketRes = await this.pool.query(
-      `SELECT bm.id_match, bm.round, bm.match_number, bm.player1_id, u1.first_name AS p1_first, u1.last_name AS p1_last,
-              bm.player2_id, u2.first_name AS p2_first, u2.last_name AS p2_last,
+      `SELECT bm.id_match, bm.round, bm.match_number, bm.player1_id, u1.first_name AS p1_first, u1.last_name AS p1_last, u1.avatar_url AS p1_avatar,
+              bm.player2_id, u2.first_name AS p2_first, u2.last_name AS p2_last, u2.avatar_url AS p2_avatar,
               bm.winner_id, bm.sets_player1, bm.sets_player2, bm.status, bm.is_bye, bm.best_of_sets, bm.set_scores
        FROM bracket_matches bm
        LEFT JOIN users u1 ON u1.id_user = bm.player1_id
@@ -574,8 +582,10 @@ export class PublicTournamentRepository {
         match_number: r.match_number,
         player1_id: r.player1_id,
         player1_name: r.player1_id ? `${r.p1_first ?? ""} ${r.p1_last ?? ""}`.trim() : null,
+        player1_avatar_url: r.player1_id ? r.p1_avatar : null,
         player2_id: r.player2_id,
         player2_name: r.player2_id ? `${r.p2_first ?? ""} ${r.p2_last ?? ""}`.trim() : null,
+        player2_avatar_url: r.player2_id ? r.p2_avatar : null,
         winner_id: r.winner_id,
         sets_player1: r.sets_player1,
         sets_player2: r.sets_player2,
@@ -604,10 +614,10 @@ export class PublicTournamentRepository {
         gm.match_number, gm.best_of_sets,
         gm.player1_id,
         COALESCE(NULLIF(TRIM(p1.first_name || ' ' || p1.last_name), ''), 'Jugador sin nombre') AS player1_name,
-        p1cl.name AS player1_club,
+        p1cl.name AS player1_club, p1.avatar_url AS player1_avatar_url,
         gm.player2_id,
         COALESCE(NULLIF(TRIM(p2.first_name || ' ' || p2.last_name), ''), 'Jugador sin nombre') AS player2_name,
-        p2cl.name AS player2_club,
+        p2cl.name AS player2_club, p2.avatar_url AS player2_avatar_url,
         gm.winner_id, gm.sets_player1, gm.sets_player2, gm.set_scores,
         gm.status, gm.played_at::text, gm.table_number, gm.played_table_number,
         NULL::int AS seed1, NULL::int AS seed2
@@ -631,10 +641,10 @@ export class PublicTournamentRepository {
         bm.match_number, bm.best_of_sets,
         bm.player1_id,
         COALESCE(NULLIF(TRIM(p1.first_name || ' ' || p1.last_name), ''), 'Jugador sin nombre') AS player1_name,
-        p1cl.name AS player1_club,
+        p1cl.name AS player1_club, p1.avatar_url AS player1_avatar_url,
         bm.player2_id,
         COALESCE(NULLIF(TRIM(p2.first_name || ' ' || p2.last_name), ''), 'Jugador sin nombre') AS player2_name,
-        p2cl.name AS player2_club,
+        p2cl.name AS player2_club, p2.avatar_url AS player2_avatar_url,
         bm.winner_id, bm.sets_player1, bm.sets_player2, bm.set_scores,
         bm.status, bm.played_at::text, bm.table_number, bm.played_table_number,
         bm.seed1, bm.seed2

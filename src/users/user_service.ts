@@ -65,6 +65,7 @@ export class UserService {
       last_name: user.last_name,
       club_name: user.club_name,
       gender: user.gender,
+      avatar_url: user.avatar_url,
       stats: stats ?? {
         matches_played: 0,
         matches_won: 0,
@@ -96,6 +97,7 @@ export class UserService {
       dominant_hand: user.dominant_hand,
       country: user.country,
       age: computeAge(user.birth_date),
+      avatar_url: user.avatar_url,
     });
   }
 

@@ -29,6 +29,7 @@ export type RankingRow = {
   last_name: string | null;
   email: string;
   club_name: string | null;
+  avatar_url: string | null;
   ranking_points: number;
   ranking_position: number;
   matches_played: number;
@@ -46,7 +47,7 @@ export class RankingRepository {
     const q = `
       WITH ranked_players AS (${RANKED_PLAYERS_CTE})
       SELECT
-        rp.id_user, u.first_name, u.last_name, u.email,
+        rp.id_user, u.first_name, u.last_name, u.email, u.avatar_url,
         cl.name AS club_name,
         rp.ranking_points, rp.ranking_position, rp.matches_played, rp.matches_won
       FROM ranked_players rp
@@ -67,7 +68,7 @@ export class RankingRepository {
     const q = `
       WITH ranked_players AS (${RANKED_PLAYERS_CTE})
       SELECT
-        rp.id_user, u.first_name, u.last_name, u.email,
+        rp.id_user, u.first_name, u.last_name, u.email, u.avatar_url,
         cl.name AS club_name,
         rp.ranking_points, rp.ranking_position, rp.matches_played, rp.matches_won
       FROM ranked_players rp
@@ -119,7 +120,7 @@ export class RankingRepository {
         FROM players p
       )
       SELECT
-        a.id_user, u.first_name, u.last_name, u.email,
+        a.id_user, u.first_name, u.last_name, u.email, u.avatar_url,
         cl.name AS club_name,
         (a.ranked_wins * ${RANKING_POINTS_PER_WIN}) AS ranking_points,
         a.matches_played, a.matches_won,
