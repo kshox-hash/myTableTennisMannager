@@ -20,6 +20,27 @@ import {
   type AdminTournamentError,
 } from "../dto/tournament_dto";
 
+// Fase de prueba de la plataforma: nadie puede dejar un torneo como
+// "public" (ni al crearlo ni editándolo), ni siquiera contra la API
+// directo — el frontend ya sacó "Abierto" del selector, esto es el
+// cierre del lado del servidor. Se resuelve con un downgrade silencioso
+// a "private" en vez de rechazar el pedido entero: así, editar CUALQUIER
+// campo de un torneo que ya estaba public (creado antes de este cambio)
+// no queda bloqueado por un visibility que ni se tocó — de paso, guardar
+// cualquier edición en uno de esos torneos viejos lo termina de pasar a
+// privado solo. Se puede levantar sin tocar código:
+// LOCK_PUBLIC_TOURNAMENTS=false en las env vars. Cuando termine la fase
+// de prueba, sacar esto (y el comentario en AdminTournamentCreatePage.tsx
+// que lo menciona del lado del front).
+const PUBLIC_VISIBILITY_LOCKED = process.env.LOCK_PUBLIC_TOURNAMENTS !== "false";
+
+function lockPublicVisibility<T extends { visibility?: string }>(payload: T): T {
+  if (PUBLIC_VISIBILITY_LOCKED && payload.visibility === "public") {
+    return { ...payload, visibility: "private" };
+  }
+  return payload;
+}
+
 export class AdminTournamentService {
   constructor(private repo: AdminTournamentRepository) {}
 
@@ -27,7 +48,7 @@ export class AdminTournamentService {
   async createTournamentService(
     payload: TournamentCreateDTO
   ): Promise<Result<ITournament, AdminTournamentError>> {
-    const data = await this.repo.createTournament(payload);
+    const data = await this.repo.createTournament(lockPublicVisibility(payload));
     return ok(data);
   }
 
@@ -37,7 +58,7 @@ export class AdminTournamentService {
     requestedBy: string,
     payload: TournamentUpdateDTO
   ): Promise<Result<ITournament, AdminTournamentError>> {
-    const result = await this.repo.updateTournament(tournamentId, requestedBy, payload);
+    const result = await this.repo.updateTournament(tournamentId, requestedBy, lockPublicVisibility(payload));
 
     if (!result.tournament) {
       if (result.error === "TOURNAMENT_NOT_FOUND") return fail(ADMIN_TOURNAMENT_ERRORS.TOURNAMENT_NOT_FOUND);
