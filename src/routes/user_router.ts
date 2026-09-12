@@ -6,7 +6,7 @@ import { asyncHandler } from "../middlewares/wrap_async_middleware";
 import { UserRepository } from "../users/user_repository";
 import { UserService } from "../users/user_service";
 import { UserController } from "../users/user_controller";
-import { updateProfileSchema, quickCreatePlayerSchema, createAdminSchema } from "../users/schema/user_schema";
+import { updateProfileSchema, quickCreatePlayerSchema } from "../users/schema/user_schema";
 
 const userRouter = Router();
 
@@ -35,21 +35,6 @@ userRouter.post(
   requireRole("admin"),
   validateBody(quickCreatePlayerSchema),
   asyncHandler(controller.adminQuickCreatePlayer)
-);
-
-// --- Gestión de administradores (panel "Administradores") — solo admins ---
-userRouter.get(
-  "/admins",
-  authRequired,
-  requireRole("admin"),
-  asyncHandler(controller.listAdmins)
-);
-userRouter.post(
-  "/admins",
-  authRequired,
-  requireRole("admin"),
-  validateBody(createAdminSchema),
-  asyncHandler(controller.createAdmin)
 );
 
 // GET /api/v1/users/:id_user/profile

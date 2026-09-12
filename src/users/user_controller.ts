@@ -59,21 +59,6 @@ export class UserController {
     return res.status(201).json({ ok: true, data: result.data });
   };
 
-  // GET /api/v1/users/admins — lista de administradores (panel de gestión)
-  listAdmins = async (_req: Request, res: Response) => {
-    const admins = await this.service.listAdmins();
-    return res.json({ ok: true, data: admins });
-  };
-
-  // POST /api/v1/users/admins — alta de otro administrador
-  createAdmin = async (req: Request, res: Response) => {
-    const result = await this.service.createAdmin(req.body);
-    if (!result.ok) {
-      return res.status(409).json({ ok: false, message: "Ya existe una cuenta con ese email." });
-    }
-    return res.status(201).json({ ok: true, data: result.data });
-  };
-
   // PATCH /api/v1/users/me
   updateMe = async (req: Request, res: Response) => {
     const result = await this.service.updateProfile(req.user!.id_user, req.body);

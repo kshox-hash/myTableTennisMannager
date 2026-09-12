@@ -143,51 +143,6 @@ export class UserRepository {
   // Alta rápida de un jugador sin cuenta (walk-in): genera un email y password
   // sintéticos únicos porque la tabla users los exige NOT NULL/UNIQUE, pero
   // nadie va a usarlos para loguearse — el admin lo gestiona directamente.
-  // --- Gestión de administradores (panel "Administradores") ---
-
-  async listAdmins(): Promise<
-    Array<{
-      id_user: string;
-      email: string;
-      first_name: string | null;
-      last_name: string | null;
-      created_at: string;
-      tournament_count: number;
-    }>
-  > {
-    const res = await this.pool.query(
-      `SELECT
-         u.id_user, u.email, u.first_name, u.last_name, u.created_at::text,
-         (SELECT COUNT(*) FROM tournaments t WHERE t.created_by = u.id_user)::int AS tournament_count
-       FROM users u
-       WHERE u.id_role = $1
-       ORDER BY u.created_at ASC`,
-      [ROLE_IDS.admin]
-    );
-    return res.rows.map((r: any) => ({ ...r, tournament_count: Number(r.tournament_count) }));
-  }
-
-  async emailExists(email: string): Promise<boolean> {
-    const res = await this.pool.query(`SELECT 1 FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1`, [email]);
-    return (res.rowCount ?? 0) > 0;
-  }
-
-  async createAdmin(input: {
-    email: string;
-    password: string;
-    first_name?: string;
-    last_name?: string;
-  }): Promise<{ id_user: string; email: string; first_name: string | null; last_name: string | null; created_at: string }> {
-    const passwordHash = await hashPassword(input.password);
-    const res = await this.pool.query(
-      `INSERT INTO users (email, password_hash, id_role, first_name, last_name)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING id_user, email, first_name, last_name, created_at::text`,
-      [input.email, passwordHash, ROLE_IDS.admin, input.first_name ?? null, input.last_name ?? null]
-    );
-    return res.rows[0];
-  }
-
   async createQuickPlayer(input: {
     firstName: string;
     lastName?: string;
