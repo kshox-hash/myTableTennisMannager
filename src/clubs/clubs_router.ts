@@ -38,6 +38,7 @@ const ERR: Record<string, [number, string]> = {
   CLUB_NOT_FOUND: [404, "Club no encontrado"],
   ALREADY_PENDING: [409, "Ya tienes una solicitud pendiente — espera la respuesta o cancélala"],
   REQUEST_NOT_FOUND: [404, "Solicitud no encontrada"],
+  ALREADY_HAS_CLUB: [409, "Ya tienes un club creado — cada cuenta puede tener uno solo"],
 };
 
 const createSchema = z.object({
@@ -60,13 +61,29 @@ router.post(
   asyncHandler(async (req, res) => {
     const p = createSchema.safeParse(req.body);
     if (!p.success) return res.status(400).json({ ok: false, message: "Datos inválidos", issues: p.error.issues });
-    const idClub = await repo.create({
-      created_by: req.user!.id_user,
-      name: p.data.name,
-      description: p.data.description ?? null,
-      founded_date: p.data.founded_date ?? null,
-    });
-    return res.status(201).json({ ok: true, data: { id_club: idClub } });
+
+    if (await repo.hasClub(req.user!.id_user)) {
+      const [code, msg] = ERR.ALREADY_HAS_CLUB;
+      return res.status(code).json({ ok: false, message: msg });
+    }
+
+    try {
+      const idClub = await repo.create({
+        created_by: req.user!.id_user,
+        name: p.data.name,
+        description: p.data.description ?? null,
+        founded_date: p.data.founded_date ?? null,
+      });
+      return res.status(201).json({ ok: true, data: { id_club: idClub } });
+    } catch (e: any) {
+      // Viola idx_clubs_one_per_admin — dos POST casi simultáneos ganándole
+      // al chequeo de arriba (mismo criterio que ALREADY_PENDING en /join).
+      if (e?.code === "23505") {
+        const [code, msg] = ERR.ALREADY_HAS_CLUB;
+        return res.status(code).json({ ok: false, message: msg });
+      }
+      throw e;
+    }
   })
 );
 

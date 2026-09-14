@@ -82,6 +82,13 @@ export class ClubsRepository {
   }
 
   // ─────────────────────────────────────────────────────────
+  // Un admin solo puede tener UN club — evita que una misma cuenta arme
+  // varios "clanes" y confunda a los jugadores sobre a cuál pedir unirse.
+  async hasClub(idAdmin: string): Promise<boolean> {
+    const res = await this.pool.query(`SELECT 1 FROM clubs WHERE created_by = $1 LIMIT 1`, [idAdmin]);
+    return (res.rowCount ?? 0) > 0;
+  }
+
   async create(input: {
     created_by: string;
     name: string;
