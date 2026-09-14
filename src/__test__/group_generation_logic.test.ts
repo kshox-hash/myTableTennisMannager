@@ -5,6 +5,7 @@ import {
   assignPlayersToGroups,
   generateRoundRobinMatches,
   generateGroupsFromPlayers,
+  nextManualGroupName,
   type CompetitionPlayerInput,
 } from "../group_generation_logic";
 
@@ -143,5 +144,37 @@ describe("generateGroupsFromPlayers", () => {
     }
     expect(matchesByGroup.get("group_1")).toBe(3); // grupo de 3
     expect(matchesByGroup.get("group_2")).toBe(6); // grupo de 4
+  });
+});
+
+describe("nextManualGroupName", () => {
+  it("sin grupos existentes -> GR-1", () => {
+    expect(nextManualGroupName([])).toBe("GR-1");
+  });
+
+  it("secuencia normal -> sigue del último", () => {
+    expect(nextManualGroupName(["GR-1", "GR-2", "GR-3"])).toBe("GR-4");
+  });
+
+  it("no importa el orden en que vengan los nombres", () => {
+    expect(nextManualGroupName(["GR-3", "GR-1", "GR-2"])).toBe("GR-4");
+  });
+
+  it("con un hueco (GR-2 no existe) -> sigue del máximo, no rellena el hueco", () => {
+    expect(nextManualGroupName(["GR-1", "GR-3"])).toBe("GR-4");
+  });
+
+  it("un solo grupo manual creado antes -> GR-2", () => {
+    expect(nextManualGroupName(["GR-1"])).toBe("GR-2");
+  });
+
+  it("ignora nombres que no matchean el patrón GR-N (defensivo, no debería pasar en la práctica)", () => {
+    expect(nextManualGroupName(["GR-1", "Grupo raro", "GR-5", ""])).toBe("GR-6");
+  });
+
+  it("números de dos o más dígitos se comparan numéricamente, no como texto", () => {
+    // "GR-9" < "GR-10" numéricamente, pero como string "GR-10" < "GR-9" —
+    // confirma que se compara el número extraído, no el string entero.
+    expect(nextManualGroupName(["GR-9", "GR-10"])).toBe("GR-11");
   });
 });

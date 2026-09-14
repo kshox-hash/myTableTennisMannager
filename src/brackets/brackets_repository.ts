@@ -1,6 +1,7 @@
 import type { Pool, PoolClient } from "pg";
 import DB from "../db/db_configuration";
 import type { CompetitionPlayerInput, GeneratedGroupsResult } from "../group_generation_logic";
+import { nextManualGroupName } from "../group_generation_logic";
 import type { GeneratedBracketResult } from "../bracket_generation_logic";
 import { NotificationsRepository } from "../notifications/notifications_repository";
 import { ActivityLogRepository } from "../activity/activity_log_repository";
@@ -1159,10 +1160,22 @@ export class BracketsRepository {
       );
     }
 
-    await client.query(
-      `UPDATE category_groups SET target_size = $1, group_kind = $2 WHERE id_group = $3`,
-      [newCount, newCount === 2 ? "playoff_two" : "normal", groupId]
-    );
+    // Sin este guard: el primer miembro de un grupo recién creado (newCount
+    // === 1, solo posible desde createManualGroup — addPlayerToGroup nunca
+    // llama esto con currentCount 0 porque siempre suma a un grupo YA
+    // establecido con 2+) pisaría target_size a 1, y la tabla tiene
+    // CHECK (target_size IN (2, 3, 4)) — Postgres aborta la transacción ahí
+    // mismo. No hace falta el UPDATE en ese caso: createManualGroup ya
+    // insertó el grupo con el target_size final correcto (la cantidad
+    // total de miembros que se van a agregar), y ese valor sigue siendo
+    // válido hasta que newCount lo alcance (o lo confirme) más adelante en
+    // el mismo bucle/transacción.
+    if (newCount >= 2) {
+      await client.query(
+        `UPDATE category_groups SET target_size = $1, group_kind = $2 WHERE id_group = $3`,
+        [newCount, newCount === 2 ? "playoff_two" : "normal", groupId]
+      );
+    }
   }
 
   // Agrega directamente a un jugador ya inscrito (qualification "group") a un
@@ -1313,18 +1326,17 @@ export class BracketsRepository {
       }
 
       // group_name sigue el mismo "GR-N" que arma el generador automático
-      // (group_generation_logic.ts) — se calcula el próximo N libre a
-      // partir de los nombres existentes, no de la cantidad de filas, por
-      // si algún día queda un hueco.
-      const nextRes = await client.query<{ next_sort: number; next_num: number }>(
-        `SELECT
-           COALESCE(MAX(sort_order), 0) + 1 AS next_sort,
-           COALESCE(MAX((regexp_match(group_name, '^GR-(\\d+)$'))[1]::int), 0) + 1 AS next_num
-         FROM category_groups WHERE id_category = $1`,
+      // — nextManualGroupName (group_generation_logic.ts, con sus propios
+      // tests unitarios) calcula el próximo N libre a partir de los
+      // nombres existentes, no de la cantidad de filas, por si algún día
+      // queda un hueco. Se resuelve en JS, no con una regex de Postgres,
+      // para poder probarlo sin necesitar una base de datos.
+      const existingRes = await client.query<{ group_name: string; sort_order: number }>(
+        `SELECT group_name, sort_order FROM category_groups WHERE id_category = $1`,
         [categoryId]
       );
-      const sortOrder = Number(nextRes.rows[0]?.next_sort ?? 1);
-      const groupName = `GR-${Number(nextRes.rows[0]?.next_num ?? 1)}`;
+      const sortOrder = existingRes.rows.reduce((max, r) => Math.max(max, r.sort_order), 0) + 1;
+      const groupName = nextManualGroupName(existingRes.rows.map((r) => r.group_name));
 
       // target_size va con la cantidad inicial de miembros (no puede ser 0
       // o 1 acá: el CHECK de la tabla solo permite 2/3/4, por eso el
@@ -1351,6 +1363,15 @@ export class BracketsRepository {
         });
         currentCount++;
       }
+
+      // addMemberToGroup pisa group_kind a "normal"/"playoff_two" en cada
+      // vuelta (ver su propio comentario) — acá se lo vuelve a dejar en
+      // "manual" a propósito, sin tocar target_size (ese sí quedó bien:
+      // coincide con memberUserIds.length porque el bucle recién terminó).
+      // Así el admin distingue de un vistazo (chip "Manual" en GroupsPanel,
+      // GROUP_KIND_LABEL) cuáles grupos salieron del sorteo automático y
+      // cuáles se armaron a mano después.
+      await client.query(`UPDATE category_groups SET group_kind = 'manual' WHERE id_group = $1`, [groupId]);
 
       const ctxRes = await client.query<{
         tournament_name: string;

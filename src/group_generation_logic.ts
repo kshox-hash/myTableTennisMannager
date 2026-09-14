@@ -103,6 +103,27 @@ function buildGroupName(index: number): string {
   return `GR-${index + 1}`;
 }
 
+// Próximo nombre libre para un grupo MANUAL que se agrega aparte de los que
+// ya existen (ver brackets_repository.createManualGroup) — a diferencia de
+// buildGroupName (que siempre arranca en 0 porque asume que TODOS los
+// grupos se arman de cero, como hace buildManualGroups/generateGroupsFromPlayers),
+// acá hay que seguir la numeración desde donde quedaron los grupos ya
+// creados. Toma el máximo "N" visto en cualquier "GR-N" existente y suma
+// uno — no rellena huecos (si en algún momento se borra "GR-2" y quedan
+// "GR-1"/"GR-3", el próximo es "GR-4", no "GR-2" de nuevo) para no arriesgar
+// un choque de nombre con algo que ya se haya referenciado en otro lado
+// (capturas de pantalla, notificaciones ya mandadas, etc.).
+export function nextManualGroupName(existingGroupNames: string[]): string {
+  let maxNum = 0;
+  for (const name of existingGroupNames) {
+    const match = /^GR-(\d+)$/.exec(name);
+    if (!match) continue;
+    const num = Number(match[1]);
+    if (num > maxNum) maxNum = num;
+  }
+  return buildGroupName(maxNum);
+}
+
 function buildTempGroupId(index: number): string {
   return `group_${index + 1}`;
 }
