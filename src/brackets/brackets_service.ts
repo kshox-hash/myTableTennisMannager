@@ -326,6 +326,19 @@ export class BracketsService {
     return ok({ added: true });
   }
 
+  // Grupo nuevo aparte de los existentes — para sumar gente que llegó
+  // después del sorteo sin tocar los grupos que ya están jugando (ver
+  // brackets_repository.createManualGroup).
+  async createManualGroup(
+    tournamentId: string,
+    categoryId: string,
+    memberUserIds: string[]
+  ): Promise<Result<{ groupId: string; groupName: string }, BracketsError>> {
+    const result = await this.repo.createManualGroup({ tournamentId, categoryId, memberUserIds });
+    if (!result.created) return fail(result.error);
+    return ok({ groupId: result.groupId, groupName: result.groupName });
+  }
+
   async getGroups(
     tournamentId: string,
     categoryId: string

@@ -208,6 +208,27 @@ export class BracketsController {
     return res.status(201).json({ ok: true, data: result.data });
   };
 
+  // POST /api/v1/bracket/tournaments/:id_tournament/categories/:id_category/groups
+  createManualGroup = async (req: Request, res: Response) => {
+    const tournamentId = req.params.id_tournament?.trim();
+    const categoryId = req.params.id_category?.trim();
+    const memberUserIds = (req.body?.member_user_ids as string[]) ?? [];
+
+    const result = await this.service.createManualGroup(tournamentId, categoryId, memberUserIds);
+
+    if (!result.ok) {
+      const messages: Record<string, string> = {
+        [BRACKETS_ERRORS.GROUPS_LOCKED]: "La categoría ya no está en fase de grupos",
+        [BRACKETS_ERRORS.PLAYER_NOT_ENROLLED]: "Alguno de los jugadores no está inscrito activamente en esta categoría",
+        [BRACKETS_ERRORS.ALREADY_IN_A_GROUP]: "Alguno de los jugadores ya está en un grupo de esta categoría",
+        [BRACKETS_ERRORS.DUPLICATE_PLAYER]: "Elegiste al mismo jugador dos veces",
+      };
+      return res.status(409).json({ ok: false, message: messages[result.error] ?? result.error });
+    }
+
+    return res.status(201).json({ ok: true, data: result.data });
+  };
+
   // PATCH /api/v1/bracket/bracket-matches/:id_match/referee
   setBracketMatchReferee = async (req: Request, res: Response) => {
     const matchId = req.params.id_match?.trim();

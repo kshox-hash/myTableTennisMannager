@@ -1259,6 +1259,131 @@ export class BracketsRepository {
     });
   }
 
+  // Crea un grupo NUEVO, aparte de los que ya existen, con la lista exacta
+  // de jugadores que pasa el admin — para cuando llega gente después del
+  // sorteo y los grupos existentes ya están llenos (o ya jugando: no se
+  // tocan). A diferencia de setGroupsManual (que REARMA todo desde cero),
+  // esto solo agrega — reusa addMemberToGroup jugador por jugador, así los
+  // partidos todos-contra-todos del grupo nuevo se generan igual que
+  // cuando addPlayerToGroup suma a alguien a un grupo existente.
+  async createManualGroup(params: {
+    tournamentId: string;
+    categoryId: string;
+    memberUserIds: string[];
+  }): Promise<
+    | { created: true; groupId: string; groupName: string }
+    | { created: false; error: BracketsError }
+  > {
+    const { tournamentId, categoryId, memberUserIds } = params;
+
+    return this.withTransaction(async (client) => {
+      const phaseRes = await client.query<{ phase: string }>(
+        `SELECT phase FROM tournament_categories WHERE id_category = $1 FOR UPDATE`,
+        [categoryId]
+      );
+      if ((phaseRes.rows[0]?.phase ?? "enrollment") !== "groups") {
+        return { created: false, error: "GROUPS_LOCKED" as BracketsError };
+      }
+
+      // Mismas dos validaciones que addPlayerToGroup, una por cada
+      // jugador propuesto — nada se inserta hasta que TODOS pasen (si uno
+      // falla, no queda un grupo a medio armar).
+      for (const userId of memberUserIds) {
+        const enrolledRes = await client.query(
+          `SELECT 1 FROM enrollments
+           WHERE id_user = $1 AND id_tournament = $2 AND id_category = $3
+             AND status = 'active' AND qualification_type = 'group'`,
+          [userId, tournamentId, categoryId]
+        );
+        if ((enrolledRes.rowCount ?? 0) === 0) {
+          return { created: false, error: "PLAYER_NOT_ENROLLED" as BracketsError };
+        }
+        const alreadyInGroupRes = await client.query(
+          `SELECT 1 FROM group_members gm
+           JOIN category_groups cg ON cg.id_group = gm.id_group
+           WHERE gm.id_user = $1 AND cg.id_category = $2`,
+          [userId, categoryId]
+        );
+        if ((alreadyInGroupRes.rowCount ?? 0) > 0) {
+          return { created: false, error: "ALREADY_IN_A_GROUP" as BracketsError };
+        }
+      }
+      if (new Set(memberUserIds).size !== memberUserIds.length) {
+        return { created: false, error: "DUPLICATE_PLAYER" as BracketsError };
+      }
+
+      // group_name sigue el mismo "GR-N" que arma el generador automático
+      // (group_generation_logic.ts) — se calcula el próximo N libre a
+      // partir de los nombres existentes, no de la cantidad de filas, por
+      // si algún día queda un hueco.
+      const nextRes = await client.query<{ next_sort: number; next_num: number }>(
+        `SELECT
+           COALESCE(MAX(sort_order), 0) + 1 AS next_sort,
+           COALESCE(MAX((regexp_match(group_name, '^GR-(\\d+)$'))[1]::int), 0) + 1 AS next_num
+         FROM category_groups WHERE id_category = $1`,
+        [categoryId]
+      );
+      const sortOrder = Number(nextRes.rows[0]?.next_sort ?? 1);
+      const groupName = `GR-${Number(nextRes.rows[0]?.next_num ?? 1)}`;
+
+      // target_size va con la cantidad inicial de miembros (no puede ser 0
+      // o 1 acá: el CHECK de la tabla solo permite 2/3/4, por eso el
+      // schema ya exige mínimo 2 miembros para crear el grupo).
+      const insertRes = await client.query<{ id_group: string }>(
+        `INSERT INTO category_groups
+           (id_tournament, id_category, group_name, target_size, sort_order, status, group_kind)
+         VALUES ($1, $2, $3, $4, $5, 'active', 'manual')
+         RETURNING id_group`,
+        [tournamentId, categoryId, groupName, memberUserIds.length, sortOrder]
+      );
+      const groupId = insertRes.rows[0].id_group;
+
+      let currentCount = 0;
+      for (const userId of memberUserIds) {
+        await this.addMemberToGroup(client, {
+          groupId,
+          tournamentId,
+          categoryId,
+          userId,
+          seed: null,
+          currentCount,
+          assignmentType: "manual",
+        });
+        currentCount++;
+      }
+
+      const ctxRes = await client.query<{
+        tournament_name: string;
+        category_type: string;
+        category_range: string;
+      }>(
+        `SELECT t.tournament_name, tc.category_type, tc.category_range
+         FROM tournaments t
+         JOIN tournament_categories tc ON tc.id_category = $1
+         WHERE t.id_tournament = $2`,
+        [categoryId, tournamentId]
+      );
+      const ctx = ctxRes.rows[0];
+      if (ctx) {
+        for (const userId of memberUserIds) {
+          await this.notifications.create(
+            {
+              idUser: userId,
+              type: "group_changed",
+              title: "Te sumaron a un grupo",
+              message: `Te agregaron al grupo ${groupName} de ${ctx.category_type} ${ctx.category_range} (${ctx.tournament_name}). Revisa tus partidos.`,
+              idTournament: tournamentId,
+              idCategory: categoryId,
+            },
+            client
+          );
+        }
+      }
+
+      return { created: true, groupId, groupName };
+    });
+  }
+
   // Árbitro sugerido/anotado para un partido puntual — no es un rol oficial,
   // así que no valida nada (puede ser cualquier inscrito, o limpiarse con null).
   async setGroupMatchReferee(matchId: string, refereeId: string | null): Promise<boolean> {

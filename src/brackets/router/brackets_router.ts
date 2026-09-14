@@ -22,6 +22,7 @@ import {
   moveGroupMemberSchema,
   setGroupsManualSchema,
   addPlayerToGroupSchema,
+  createManualGroupSchema,
 } from "../schema/brackets_schema";
 
 const repo         = new BracketsRepository();
@@ -119,6 +120,18 @@ router.post(
   requireTournamentOwnership(resolveTournamentFromGroup),
   validateBody(addPlayerToGroupSchema),
   asyncHandler(controller.addPlayerToGroup)
+);
+
+// Crear un grupo NUEVO manual (aparte de los que ya existen) — para sumar
+// gente que llegó después del sorteo sin tocar los grupos que ya juegan
+// POST /api/v1/bracket/tournaments/:id_tournament/categories/:id_category/groups
+router.post(
+  "/tournaments/:id_tournament/categories/:id_category/groups",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(),
+  validateBody(createManualGroupSchema),
+  asyncHandler(controller.createManualGroup)
 );
 
 // Ajustar manualmente cuántos clasifican de un grupo puntual
