@@ -42,7 +42,15 @@ class Server {
 
 const server = new Server()
 
-server.start();
+// Si el arranque falla (ej. una migración rota) esto antes quedaba como una
+// unhandled promise rejection silenciosa — Render podía marcar el deploy
+// "vivo" mientras en realidad nunca llegó a app.listen(). Ahora se loguea
+// fuerte y se corta el proceso: Render lo ve como deploy fallido de una,
+// no como un estado ambiguo a medio arrancar.
+server.start().catch((err) => {
+  console.error("[server] no se pudo arrancar:", err);
+  process.exit(1);
+});
 
 export default server;
 
