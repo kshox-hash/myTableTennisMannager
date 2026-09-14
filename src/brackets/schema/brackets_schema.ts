@@ -54,11 +54,13 @@ export const addPlayerToGroupSchema = z
 
 // Crear un grupo NUEVO manual, aparte de los que ya existen — para sumar
 // jugadores que llegaron después del sorteo sin tocar los grupos que ya
-// están jugando. Mínimo 2 (un grupo de 1 no tiene partidos), máximo 4
-// (mismo tope que cualquier grupo — ver TARGET_GROUP_FULL).
+// están jugando. A diferencia de los grupos automáticos (2 a 4, todos-
+// contra-todos), un grupo manual puede arrancar vacío (0) y crecer a
+// cualquier cantidad después, uno a la vez, vía POST /groups/:id/members —
+// no tiene el tope de 4 que sí tienen los grupos automáticos.
 export const createManualGroupSchema = z
   .object({
-    member_user_ids: z.array(z.string().uuid()).min(2).max(4),
+    member_user_ids: z.array(z.string().uuid()).max(200),
   })
   .strict();
 

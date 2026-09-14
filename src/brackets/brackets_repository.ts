@@ -1010,8 +1010,8 @@ export class BracketsRepository {
         return { moved: false, error: "GROUPS_LOCKED" as BracketsError };
       }
 
-      const fromRes = await client.query<{ id_group: string; seed: number | null }>(
-        `SELECT cg.id_group, gm.seed
+      const fromRes = await client.query<{ id_group: string; seed: number | null; group_kind: string }>(
+        `SELECT cg.id_group, gm.seed, cg.group_kind
          FROM group_members gm
          JOIN category_groups cg ON cg.id_group = gm.id_group
          WHERE gm.id_user = $1 AND cg.id_tournament = $2 AND cg.id_category = $3`,
@@ -1021,12 +1021,13 @@ export class BracketsRepository {
       if (!from) return { moved: false, error: "PLAYER_NOT_IN_GROUP" as BracketsError };
       if (from.id_group === toGroupId) return { moved: false, error: "SAME_GROUP" as BracketsError };
 
-      const toRes = await client.query(
-        `SELECT id_group FROM category_groups
+      const toRes = await client.query<{ id_group: string; group_kind: string }>(
+        `SELECT id_group, group_kind FROM category_groups
          WHERE id_group = $1 AND id_tournament = $2 AND id_category = $3`,
         [toGroupId, tournamentId, categoryId]
       );
-      if (!toRes.rows[0]) return { moved: false, error: "GROUP_NOT_FOUND" as BracketsError };
+      const to = toRes.rows[0];
+      if (!to) return { moved: false, error: "GROUP_NOT_FOUND" as BracketsError };
 
       const playedRes = await client.query(
         `SELECT 1 FROM group_matches
@@ -1047,8 +1048,15 @@ export class BracketsRepository {
       const fromCount = counts.get(from.id_group) ?? 0;
       const toCount = counts.get(toGroupId) ?? 0;
 
-      if (fromCount - 1 < 2) return { moved: false, error: "SOURCE_GROUP_TOO_SMALL" as BracketsError };
-      if (toCount + 1 > 4) return { moved: false, error: "TARGET_GROUP_FULL" as BracketsError };
+      // Un grupo manual no tiene piso ni techo — puede quedar en 0 miembros
+      // o crecer a cualquier cantidad. Los automáticos siguen con las
+      // mismas reglas de siempre (2 a 4, todos-contra-todos).
+      if (from.group_kind !== "manual" && fromCount - 1 < 2) {
+        return { moved: false, error: "SOURCE_GROUP_TOO_SMALL" as BracketsError };
+      }
+      if (to.group_kind !== "manual" && toCount + 1 > 4) {
+        return { moved: false, error: "TARGET_GROUP_FULL" as BracketsError };
+      }
 
       // Sale del grupo de origen: sus partidos ahí seguían sin jugar (ya validado arriba).
       await client.query(
@@ -1059,9 +1067,10 @@ export class BracketsRepository {
       await client.query(`DELETE FROM group_members WHERE id_group = $1 AND id_user = $2`, [from.id_group, userId]);
 
       const newFromCount = fromCount - 1;
+      const fromIsManual = from.group_kind === "manual";
       await client.query(
         `UPDATE category_groups SET target_size = $1, group_kind = $2 WHERE id_group = $3`,
-        [newFromCount, newFromCount === 2 ? "playoff_two" : "normal", from.id_group]
+        [newFromCount, fromIsManual ? "manual" : newFromCount === 2 ? "playoff_two" : "normal", from.id_group]
       );
 
       // Entra al grupo destino, conservando su semilla original.
@@ -1119,6 +1128,16 @@ export class BracketsRepository {
     );
     const groupPosition = Number(positionRes.rows[0]?.next_position ?? 1);
 
+    // Un grupo MANUAL nunca deja de serlo, sin importar cuántos miembros
+    // tenga — así no pierde la etiqueta "Manual" (GroupsPanel.tsx) al ir
+    // sumando gente, y de paso no queda atado al límite de 4 que sí tienen
+    // los grupos automáticos (playoff_two/normal, ver más abajo).
+    const kindRes = await client.query<{ group_kind: string }>(
+      `SELECT group_kind FROM category_groups WHERE id_group = $1`,
+      [groupId]
+    );
+    const isManual = kindRes.rows[0]?.group_kind === "manual";
+
     await client.query(
       `INSERT INTO group_members (id_group, id_user, seed, assignment_type, group_position) VALUES ($1, $2, $3, $4, $5)`,
       [groupId, userId, seed, assignmentType, groupPosition]
@@ -1155,27 +1174,20 @@ export class BracketsRepository {
         [
           groupId, tournamentId, categoryId, matchNumber, bestOfSets,
           userId, member.id_user,
-          newCount === 2 ? "two_player_group" : "group_stage",
+          !isManual && newCount === 2 ? "two_player_group" : "group_stage",
         ]
       );
     }
 
-    // Sin este guard: el primer miembro de un grupo recién creado (newCount
-    // === 1, solo posible desde createManualGroup — addPlayerToGroup nunca
-    // llama esto con currentCount 0 porque siempre suma a un grupo YA
-    // establecido con 2+) pisaría target_size a 1, y la tabla tiene
-    // CHECK (target_size IN (2, 3, 4)) — Postgres aborta la transacción ahí
-    // mismo. No hace falta el UPDATE en ese caso: createManualGroup ya
-    // insertó el grupo con el target_size final correcto (la cantidad
-    // total de miembros que se van a agregar), y ese valor sigue siendo
-    // válido hasta que newCount lo alcance (o lo confirme) más adelante en
-    // el mismo bucle/transacción.
-    if (newCount >= 2) {
-      await client.query(
-        `UPDATE category_groups SET target_size = $1, group_kind = $2 WHERE id_group = $3`,
-        [newCount, newCount === 2 ? "playoff_two" : "normal", groupId]
-      );
-    }
+    // target_size siempre queda en el conteo real actual — ya no hay CHECK
+    // que limite a 2/3/4 (ver migración 048), así que esto vale incluso
+    // para el primer miembro de un grupo recién creado (newCount === 1).
+    // group_kind: un grupo manual se queda "manual" siempre; uno automático
+    // sigue el criterio de siempre (2 -> playoff_two, si no -> normal).
+    await client.query(
+      `UPDATE category_groups SET target_size = $1, group_kind = $2 WHERE id_group = $3`,
+      [newCount, isManual ? "manual" : newCount === 2 ? "playoff_two" : "normal", groupId]
+    );
   }
 
   // Agrega directamente a un jugador ya inscrito (qualification "group") a un
@@ -1190,8 +1202,8 @@ export class BracketsRepository {
     const { groupId, userId } = params;
 
     return this.withTransaction(async (client) => {
-      const groupRes = await client.query<{ id_tournament: string; id_category: string }>(
-        `SELECT id_tournament, id_category FROM category_groups WHERE id_group = $1 FOR UPDATE`,
+      const groupRes = await client.query<{ id_tournament: string; id_category: string; group_kind: string }>(
+        `SELECT id_tournament, id_category, group_kind FROM category_groups WHERE id_group = $1 FOR UPDATE`,
         [groupId]
       );
       const group = groupRes.rows[0];
@@ -1230,7 +1242,13 @@ export class BracketsRepository {
         [groupId]
       );
       const count = Number(countRes.rows[0]?.count ?? 0);
-      if (count + 1 > 4) return { added: false, error: "TARGET_GROUP_FULL" as BracketsError };
+
+      // El tope de 4 es del formato todos-contra-todos automático — un
+      // grupo manual (group_kind = 'manual') no lo tiene, a pedido: se le
+      // puede aplicar cualquier cantidad de jugadores.
+      if (group.group_kind !== "manual" && count + 1 > 4) {
+        return { added: false, error: "TARGET_GROUP_FULL" as BracketsError };
+      }
 
       await this.addMemberToGroup(client, {
         groupId,
@@ -1350,9 +1368,10 @@ export class BracketsRepository {
       );
       const qualifiersPerGroup = Number(qualifiersRes.rows[0]?.qualifiers_per_group ?? 2);
 
-      // target_size va con la cantidad inicial de miembros (no puede ser 0
-      // o 1 acá: el CHECK de la tabla solo permite 2/3/4, por eso el
-      // schema ya exige mínimo 2 miembros para crear el grupo).
+      // target_size arranca con la cantidad inicial de miembros — puede ser
+      // 0 (grupo vacío, se le van sumando jugadores uno a uno después vía
+      // POST /groups/:id/members). Sin CHECK de 2/3/4 (migración 048), no
+      // hace falta ningún mínimo acá.
       const insertRes = await client.query<{ id_group: string }>(
         `INSERT INTO category_groups
            (id_tournament, id_category, group_name, target_size, sort_order, status, group_kind, qualifiers_per_group)
@@ -1375,15 +1394,6 @@ export class BracketsRepository {
         });
         currentCount++;
       }
-
-      // addMemberToGroup pisa group_kind a "normal"/"playoff_two" en cada
-      // vuelta (ver su propio comentario) — acá se lo vuelve a dejar en
-      // "manual" a propósito, sin tocar target_size (ese sí quedó bien:
-      // coincide con memberUserIds.length porque el bucle recién terminó).
-      // Así el admin distingue de un vistazo (chip "Manual" en GroupsPanel,
-      // GROUP_KIND_LABEL) cuáles grupos salieron del sorteo automático y
-      // cuáles se armaron a mano después.
-      await client.query(`UPDATE category_groups SET group_kind = 'manual' WHERE id_group = $1`, [groupId]);
 
       const ctxRes = await client.query<{
         tournament_name: string;
