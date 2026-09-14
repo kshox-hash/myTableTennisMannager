@@ -1428,6 +1428,211 @@ export class BracketsRepository {
     });
   }
 
+  // "Crear una llave" — postergar a un jugador YA sembrado en un partido de
+  // ronda 1 (todavía no jugado) a una pre-llave nueva (ronda 0), para poder
+  // sumar ahí a alguien que llegó tarde sin tocar el resto del cuadro ya
+  // generado. Reusa EXACTAMENTE el mismo mecanismo de pre-llave que ya usa
+  // buildBracketWithPreRound (next_round/next_match_number/next_match_slot
+  // apuntando al cupo que se vació) — así recordBracketResult/
+  // advanceBracketWinner no necesitan saber que este partido se creó a
+  // mano: para ellos es un partido de ronda 0 más.
+  //
+  // Solo se permite postergar desde un partido con status 'pending' o
+  // 'ready' (nunca 'bye'/'played'/'walkover'): en la ronda 1 de este
+  // sistema nunca hay dead_slot propio (ver bracket_generation_logic.ts),
+  // así que cualquier partido 'pending'/'ready' tiene su OTRO cupo real (ya
+  // ocupado, o legítimamente esperando el resultado de otra pre-llave
+  // previa) — nunca un cupo estructuralmente muerto. Eso evita tener que
+  // tocar dead_slot acá.
+  async createBracketPreRoundMatch(params: {
+    tournamentId: string;
+    categoryId: string;
+    pullUserId: string;
+  }): Promise<
+    | { created: true; matchId: string; pulledFromMatchId: string }
+    | { created: false; error: BracketsError }
+  > {
+    const { tournamentId, categoryId, pullUserId } = params;
+
+    return this.withTransaction(async (client) => {
+      const phaseRes = await client.query<{ phase: string }>(
+        `SELECT phase FROM tournament_categories WHERE id_category = $1 FOR UPDATE`,
+        [categoryId]
+      );
+      if ((phaseRes.rows[0]?.phase ?? "enrollment") !== "bracket") {
+        return { created: false, error: "BRACKET_LOCKED" as BracketsError };
+      }
+
+      const candidateRes = await client.query<{
+        id_match: string;
+        match_number: number;
+        player1_id: string | null;
+        player2_id: string | null;
+        best_of_sets: 3 | 5 | 7;
+      }>(
+        `SELECT id_match, match_number, player1_id, player2_id, best_of_sets
+         FROM bracket_matches
+         WHERE id_tournament = $1 AND id_category = $2 AND round = 1
+           AND status IN ('pending', 'ready')
+           AND (player1_id = $3 OR player2_id = $3)
+         FOR UPDATE`,
+        [tournamentId, categoryId, pullUserId]
+      );
+      const candidate = candidateRes.rows[0];
+      if (!candidate) {
+        return { created: false, error: "PLAYER_NOT_PULLABLE" as BracketsError };
+      }
+      const slot: 1 | 2 = candidate.player1_id === pullUserId ? 1 : 2;
+
+      const roundZeroRes = await client.query<{ max_num: number | null }>(
+        `SELECT MAX(match_number) AS max_num FROM bracket_matches
+         WHERE id_tournament = $1 AND id_category = $2 AND round = 0`,
+        [tournamentId, categoryId]
+      );
+      const newMatchNumber = Number(roundZeroRes.rows[0]?.max_num ?? 0) + 1;
+
+      const insertRes = await client.query<{ id_match: string }>(
+        `INSERT INTO bracket_matches
+           (id_tournament, id_category, round, match_number,
+            player1_id, player2_id,
+            next_round, next_match_number, next_match_slot,
+            best_of_sets, status)
+         VALUES ($1, $2, 0, $3, $4, NULL, 1, $5, $6, $7, 'pending')
+         RETURNING id_match`,
+        [tournamentId, categoryId, newMatchNumber, pullUserId, candidate.match_number, slot, candidate.best_of_sets]
+      );
+      const matchId = insertRes.rows[0].id_match;
+
+      // Vaciar el cupo que se acaba de postergar — el partido de ronda 1
+      // vuelve a 'pending' (ya no puede estar 'ready') hasta que la
+      // pre-llave se juegue y advanceBracketWinner lo rellene solo.
+      await client.query(
+        slot === 1
+          ? `UPDATE bracket_matches SET player1_id = NULL, status = 'pending' WHERE id_match = $1`
+          : `UPDATE bracket_matches SET player2_id = NULL, status = 'pending' WHERE id_match = $1`,
+        [candidate.id_match]
+      );
+
+      const ctx = await this.getTournamentCategoryNames(tournamentId, categoryId);
+      if (ctx) {
+        await this.notifications.create(
+          {
+            idUser: pullUserId,
+            type: "bracket_changed",
+            title: "Tu partido de llave cambió",
+            message: `Tu partido de primera ronda de ${ctx.categoryType} ${ctx.categoryRange} (${ctx.tournamentName}) ahora depende de una pre-llave: primero juegas esa, y si ganas sigues donde ya estabas.`,
+            idTournament: tournamentId,
+            idCategory: categoryId,
+          },
+          client
+        );
+      }
+
+      return { created: true, matchId, pulledFromMatchId: candidate.id_match };
+    });
+  }
+
+  // "Agregar un jugador" a la pre-llave manual creada arriba — llena el
+  // cupo vacío (player2, siempre el que queda libre) con quien llegó tarde.
+  // Una vez lleno, el partido queda 'ready' y sigue el camino normal
+  // (MatchResultForm → recordBracketResult → advanceBracketWinner), sin
+  // ningún código nuevo de avance: nada distingue una pre-llave manual de
+  // una automática desde ese punto en adelante.
+  async addPlayerToBracketMatch(params: {
+    matchId: string;
+    userId: string;
+  }): Promise<
+    | { added: true; opponentId: string }
+    | { added: false; error: BracketsError }
+  > {
+    const { matchId, userId } = params;
+
+    return this.withTransaction(async (client) => {
+      // A diferencia de createBracketPreRoundMatch (que arranca desde
+      // tournamentId/categoryId de la URL), esta ruta solo trae id_match
+      // (mismo patrón que recordBracketResult/setBracketMatchReferee) — el
+      // torneo/categoría se derivan del propio partido.
+      const matchRes = await client.query<{
+        id_match: string;
+        id_tournament: string;
+        id_category: string;
+        player1_id: string | null;
+        player2_id: string | null;
+      }>(
+        `SELECT id_match, id_tournament, id_category, player1_id, player2_id
+         FROM bracket_matches
+         WHERE id_match = $1
+           AND round = 0 AND status = 'pending'
+           AND (player1_id IS NULL OR player2_id IS NULL)
+         FOR UPDATE`,
+        [matchId]
+      );
+      const match = matchRes.rows[0];
+      if (!match) {
+        return { added: false, error: "PRE_ROUND_SLOT_NOT_FOUND" as BracketsError };
+      }
+      const { id_tournament: tournamentId, id_category: categoryId } = match;
+
+      const phaseRes = await client.query<{ phase: string }>(
+        `SELECT phase FROM tournament_categories WHERE id_category = $1 FOR UPDATE`,
+        [categoryId]
+      );
+      if ((phaseRes.rows[0]?.phase ?? "enrollment") !== "bracket") {
+        return { added: false, error: "BRACKET_LOCKED" as BracketsError };
+      }
+
+      const opponentId = match.player1_id ?? match.player2_id;
+      if (!opponentId) {
+        return { added: false, error: "PRE_ROUND_SLOT_NOT_FOUND" as BracketsError };
+      }
+      if (opponentId === userId) {
+        return { added: false, error: "DUPLICATE_PLAYER" as BracketsError };
+      }
+
+      const enrolledRes = await client.query(
+        `SELECT 1 FROM enrollments
+         WHERE id_user = $1 AND id_tournament = $2 AND id_category = $3 AND status = 'active'`,
+        [userId, tournamentId, categoryId]
+      );
+      if ((enrolledRes.rowCount ?? 0) === 0) {
+        return { added: false, error: "PLAYER_NOT_ENROLLED" as BracketsError };
+      }
+
+      const alreadyInBracketRes = await client.query(
+        `SELECT 1 FROM bracket_matches
+         WHERE id_tournament = $1 AND id_category = $2 AND (player1_id = $3 OR player2_id = $3)`,
+        [tournamentId, categoryId, userId]
+      );
+      if ((alreadyInBracketRes.rowCount ?? 0) > 0) {
+        return { added: false, error: "ALREADY_IN_BRACKET" as BracketsError };
+      }
+
+      await client.query(
+        match.player1_id === null
+          ? `UPDATE bracket_matches SET player1_id = $1, status = 'ready' WHERE id_match = $2`
+          : `UPDATE bracket_matches SET player2_id = $1, status = 'ready' WHERE id_match = $2`,
+        [userId, matchId]
+      );
+
+      const ctx = await this.getTournamentCategoryNames(tournamentId, categoryId);
+      if (ctx) {
+        await this.notifications.createForMany(
+          [userId, opponentId],
+          {
+            type: "bracket_changed",
+            title: "Nuevo partido de pre-llave",
+            message: `Se armó tu partido de pre-llave de ${ctx.categoryType} ${ctx.categoryRange} (${ctx.tournamentName}). Mira contra quién te toca.`,
+            idTournament: tournamentId,
+            idCategory: categoryId,
+          },
+          client
+        );
+      }
+
+      return { added: true, opponentId };
+    });
+  }
+
   // Árbitro sugerido/anotado para un partido puntual — no es un rol oficial,
   // así que no valida nada (puede ser cualquier inscrito, o limpiarse con null).
   async setGroupMatchReferee(matchId: string, refereeId: string | null): Promise<boolean> {

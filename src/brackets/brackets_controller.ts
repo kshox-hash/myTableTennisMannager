@@ -323,6 +323,48 @@ export class BracketsController {
     return res.status(201).json({ ok: true, data: result.data });
   };
 
+  // POST /api/v1/bracket/tournaments/:id_tournament/categories/:id_category/pre-round-matches
+  createBracketPreRoundMatch = async (req: Request, res: Response) => {
+    const tournamentId = req.params.id_tournament?.trim();
+    const categoryId   = req.params.id_category?.trim();
+    const pullUserId   = req.body?.pull_user_id as string;
+
+    const result = await this.service.createBracketPreRoundMatch(tournamentId, categoryId, pullUserId);
+
+    if (!result.ok) {
+      const messages: Record<string, string> = {
+        [BRACKETS_ERRORS.BRACKET_LOCKED]: "La categoría no está en fase de llave (o ya terminó)",
+        [BRACKETS_ERRORS.PLAYER_NOT_PULLABLE]:
+          "Ese jugador no tiene un partido de primera ronda pendiente para postergar",
+      };
+      return res.status(409).json({ ok: false, message: messages[result.error] ?? result.error });
+    }
+
+    return res.status(201).json({ ok: true, data: result.data });
+  };
+
+  // POST /api/v1/bracket/bracket-matches/:id_match/players
+  addPlayerToBracketMatch = async (req: Request, res: Response) => {
+    const matchId = req.params.id_match?.trim();
+    const userId  = req.body?.id_user as string;
+
+    const result = await this.service.addPlayerToBracketMatch(matchId, userId);
+
+    if (!result.ok) {
+      const messages: Record<string, string> = {
+        [BRACKETS_ERRORS.BRACKET_LOCKED]: "La categoría no está en fase de llave (o ya terminó)",
+        [BRACKETS_ERRORS.PRE_ROUND_SLOT_NOT_FOUND]: "Esa pre-llave no existe o ya tiene los dos jugadores",
+        [BRACKETS_ERRORS.PLAYER_NOT_ENROLLED]: "El jugador no está inscrito activamente en esta categoría",
+        [BRACKETS_ERRORS.ALREADY_IN_BRACKET]: "El jugador ya está en un partido de este cuadro",
+        [BRACKETS_ERRORS.DUPLICATE_PLAYER]: "Elegiste al mismo jugador que ya está en esa pre-llave",
+      };
+      const status = result.error === BRACKETS_ERRORS.PRE_ROUND_SLOT_NOT_FOUND ? 404 : 409;
+      return res.status(status).json({ ok: false, message: messages[result.error] ?? result.error });
+    }
+
+    return res.status(201).json({ ok: true, data: result.data });
+  };
+
   // GET /api/v1/bracket/tournaments/:id_tournament/categories/:id_category/bracket
   getBracket = async (req: Request, res: Response) => {
     const tournamentId = req.params.id_tournament?.trim();

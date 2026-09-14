@@ -713,6 +713,28 @@ export class BracketsService {
     return this.getBracket(tournamentId, categoryId);
   }
 
+  // "Crear una llave" — ver el comentario largo en
+  // brackets_repository.ts#createBracketPreRoundMatch.
+  async createBracketPreRoundMatch(
+    tournamentId: string,
+    categoryId: string,
+    pullUserId: string
+  ): Promise<Result<{ matchId: string }, BracketsError>> {
+    const result = await this.repo.createBracketPreRoundMatch({ tournamentId, categoryId, pullUserId });
+    if (!result.created) return fail(result.error);
+    return ok({ matchId: result.matchId });
+  }
+
+  // "Agregar un jugador" a la pre-llave creada arriba.
+  async addPlayerToBracketMatch(
+    matchId: string,
+    userId: string
+  ): Promise<Result<{ opponentId: string }, BracketsError>> {
+    const result = await this.repo.addPlayerToBracketMatch({ matchId, userId });
+    if (!result.added) return fail(result.error);
+    return ok({ opponentId: result.opponentId });
+  }
+
   async getBracket(
     tournamentId: string,
     categoryId: string

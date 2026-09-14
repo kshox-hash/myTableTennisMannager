@@ -64,6 +64,25 @@ export const createManualGroupSchema = z
   })
   .strict();
 
+// Postergar a un jugador YA sembrado en la ronda 1 a una pre-llave nueva
+// (ronda 0), para liberar su lugar y poder sumar ahí a alguien que llegó
+// tarde — mismo "crear una llave" que pidió el usuario, análogo a crear un
+// grupo manual nuevo. Solo el id del jugador a postergar: el partido de
+// ronda 1 y el cupo (1 o 2) se resuelven solos en el repositorio.
+export const createBracketPreRoundMatchSchema = z
+  .object({
+    pull_user_id: z.string().uuid("pull_user_id inválido"),
+  })
+  .strict();
+
+// Llenar el cupo vacío de una pre-llave manual ya creada — análogo a
+// addPlayerToGroupSchema.
+export const addPlayerToBracketMatchSchema = z
+  .object({
+    id_user: z.string().uuid("id_user inválido"),
+  })
+  .strict();
+
 export const moveGroupMemberSchema = z
   .object({
     id_user: z.string().uuid("id_user inválido"),
@@ -80,3 +99,5 @@ export type MoveGroupMemberBody = z.infer<typeof moveGroupMemberSchema>;
 export type SetGroupsManualBody = z.infer<typeof setGroupsManualSchema>;
 export type AddPlayerToGroupBody = z.infer<typeof addPlayerToGroupSchema>;
 export type CreateManualGroupBody = z.infer<typeof createManualGroupSchema>;
+export type CreateBracketPreRoundMatchBody = z.infer<typeof createBracketPreRoundMatchSchema>;
+export type AddPlayerToBracketMatchBody = z.infer<typeof addPlayerToBracketMatchSchema>;

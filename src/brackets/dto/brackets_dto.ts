@@ -34,6 +34,20 @@ export const BRACKETS_ERRORS = {
   // entre previsualizar el fixture y confirmarlo) — hay que volver a
   // previsualizar.
   GROUPS_OUT_OF_DATE: "GROUPS_OUT_OF_DATE",
+  // La categoría todavía no tiene cuadro eliminatorio generado (o ya
+  // terminó) — crear una pre-llave manual solo tiene sentido mientras la
+  // categoría está en fase "bracket".
+  BRACKET_LOCKED: "BRACKET_LOCKED",
+  // El jugador que se quiere postergar a una pre-llave no está en ningún
+  // partido de la ronda 1 todavía pendiente de jugarse (ya jugó, tiene bye,
+  // o no existe en este cuadro).
+  PLAYER_NOT_PULLABLE: "PLAYER_NOT_PULLABLE",
+  // El jugador que llega tarde ya está en algún partido de este cuadro
+  // (no se puede duplicar).
+  ALREADY_IN_BRACKET: "ALREADY_IN_BRACKET",
+  // El id_match indicado no es una pre-llave manual con un cupo libre
+  // (o ya se llenó, o no existe, o no es de esta categoría).
+  PRE_ROUND_SLOT_NOT_FOUND: "PRE_ROUND_SLOT_NOT_FOUND",
 } as const;
 
 export type BracketsError = (typeof BRACKETS_ERRORS)[keyof typeof BRACKETS_ERRORS];

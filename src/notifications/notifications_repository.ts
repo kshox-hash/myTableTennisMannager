@@ -9,6 +9,7 @@ export type NotificationType =
   | "group_changed"
   | "bracket_generated"
   | "bracket_bye"
+  | "bracket_changed"
   | "next_match_ready"
   | "match_on_table"
   | "match_result"

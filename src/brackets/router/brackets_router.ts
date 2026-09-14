@@ -23,6 +23,8 @@ import {
   setGroupsManualSchema,
   addPlayerToGroupSchema,
   createManualGroupSchema,
+  createBracketPreRoundMatchSchema,
+  addPlayerToBracketMatchSchema,
 } from "../schema/brackets_schema";
 
 const repo         = new BracketsRepository();
@@ -207,6 +209,29 @@ router.get(
   "/tournaments/:id_tournament/categories/:id_category/bracket",
   authRequired,
   asyncHandler(controller.getBracket)
+);
+
+// "Crear una llave": postergar a un jugador de ronda 1 (todavía no jugó) a
+// una pre-llave nueva, liberando su cupo para alguien que llegó tarde
+// POST /api/v1/bracket/tournaments/:id_tournament/categories/:id_category/pre-round-matches
+router.post(
+  "/tournaments/:id_tournament/categories/:id_category/pre-round-matches",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(),
+  validateBody(createBracketPreRoundMatchSchema),
+  asyncHandler(controller.createBracketPreRoundMatch)
+);
+
+// "Agregar un jugador" al cupo vacío de esa pre-llave
+// POST /api/v1/bracket/bracket-matches/:id_match/players
+router.post(
+  "/bracket-matches/:id_match/players",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(resolveTournamentFromBracketMatch),
+  validateBody(addPlayerToBracketMatchSchema),
+  asyncHandler(controller.addPlayerToBracketMatch)
 );
 
 // Registrar resultado de partido de llave (avanza ganador automáticamente)
