@@ -1338,15 +1338,27 @@ export class BracketsRepository {
       const sortOrder = existingRes.rows.reduce((max, r) => Math.max(max, r.sort_order), 0) + 1;
       const groupName = nextManualGroupName(existingRes.rows.map((r) => r.group_name));
 
+      // Mismo qualifiers_per_group que ya tienen TODOS los demás grupos de
+      // esta categoría (insertGroupsData lo aplica parejo a cada grupo al
+      // generar/rearmar) — sin esto, el grupo manual quedaba pegado al
+      // default de la columna (2) sin importar lo que el admin haya
+      // configurado para la categoría, dejando un grupo con un criterio de
+      // clasificación distinto al resto sin que nadie lo haya elegido así.
+      const qualifiersRes = await client.query<{ qualifiers_per_group: number }>(
+        `SELECT qualifiers_per_group FROM tournament_categories WHERE id_category = $1`,
+        [categoryId]
+      );
+      const qualifiersPerGroup = Number(qualifiersRes.rows[0]?.qualifiers_per_group ?? 2);
+
       // target_size va con la cantidad inicial de miembros (no puede ser 0
       // o 1 acá: el CHECK de la tabla solo permite 2/3/4, por eso el
       // schema ya exige mínimo 2 miembros para crear el grupo).
       const insertRes = await client.query<{ id_group: string }>(
         `INSERT INTO category_groups
-           (id_tournament, id_category, group_name, target_size, sort_order, status, group_kind)
-         VALUES ($1, $2, $3, $4, $5, 'active', 'manual')
+           (id_tournament, id_category, group_name, target_size, sort_order, status, group_kind, qualifiers_per_group)
+         VALUES ($1, $2, $3, $4, $5, 'active', 'manual', $6)
          RETURNING id_group`,
-        [tournamentId, categoryId, groupName, memberUserIds.length, sortOrder]
+        [tournamentId, categoryId, groupName, memberUserIds.length, sortOrder, qualifiersPerGroup]
       );
       const groupId = insertRes.rows[0].id_group;
 
@@ -1386,19 +1398,20 @@ export class BracketsRepository {
       );
       const ctx = ctxRes.rows[0];
       if (ctx) {
-        for (const userId of memberUserIds) {
-          await this.notifications.create(
-            {
-              idUser: userId,
-              type: "group_changed",
-              title: "Te sumaron a un grupo",
-              message: `Te agregaron al grupo ${groupName} de ${ctx.category_type} ${ctx.category_range} (${ctx.tournament_name}). Revisa tus partidos.`,
-              idTournament: tournamentId,
-              idCategory: categoryId,
-            },
-            client
-          );
-        }
+        // Mismo mensaje para todos los miembros nuevos — createForMany en
+        // vez de un create() por jugador (mismo criterio que ya usan
+        // regenerateGroups/setGroupsManual para este mismo tipo de aviso).
+        await this.notifications.createForMany(
+          memberUserIds,
+          {
+            type: "group_changed",
+            title: "Te sumaron a un grupo",
+            message: `Te agregaron al grupo ${groupName} de ${ctx.category_type} ${ctx.category_range} (${ctx.tournament_name}). Revisa tus partidos.`,
+            idTournament: tournamentId,
+            idCategory: categoryId,
+          },
+          client
+        );
       }
 
       return { created: true, groupId, groupName };
