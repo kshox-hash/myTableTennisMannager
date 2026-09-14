@@ -202,6 +202,13 @@ export class ClubsRepository {
     await this.pool.query(`UPDATE clubs SET crest_image_url = $2 WHERE id_club = $1`, [idClub, url]);
   }
 
+  // ON DELETE CASCADE en club_join_requests y ON DELETE SET NULL en
+  // users.id_club se encargan solas de limpiar las solicitudes y de
+  // desasignar a los jugadores — no hace falta tocarlas acá.
+  async delete(idClub: string): Promise<void> {
+    await this.pool.query(`DELETE FROM clubs WHERE id_club = $1`, [idClub]);
+  }
+
   // ─────────────────────────────────────────────────────────
   async getMyRequest(idUser: string): Promise<MyRequestRow | null> {
     const res = await this.pool.query<MyRequestRow>(

@@ -186,6 +186,24 @@ router.patch(
   })
 );
 
+// DELETE /api/v1/clubs/:id_club  (admin, dueño)
+router.delete(
+  "/:id_club",
+  authRequired,
+  requireRole("admin"),
+  requireOwnClub,
+  asyncHandler(async (req, res) => {
+    // Best-effort: si el borrado del objeto en R2 falla (ya no existía,
+    // R2 no configurado, etc.) no bloquea borrar el club igual.
+    await Promise.all([
+      deleteObject(headerKey(req.params.id_club)).catch(() => {}),
+      deleteObject(crestKey(req.params.id_club)).catch(() => {}),
+    ]);
+    await repo.delete(req.params.id_club);
+    return res.json({ ok: true });
+  })
+);
+
 // POST /api/v1/clubs/:id_club/requests/:id_request/approve  (admin, dueño)
 router.post(
   "/:id_club/requests/:id_request/approve",
