@@ -1,9 +1,10 @@
 import type { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
+import type { EffectiveRole } from "../core/constants/roles";
 
 export interface AuthPayload {
   id_user: string;
-  role: "admin" | "player";
+  role: EffectiveRole;
 }
 
 declare global {

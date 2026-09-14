@@ -1,3 +1,5 @@
+import type { EffectiveRole } from "../../core/constants/roles";
+
 export const ERRORS = {
   EMAIL_ALREADY_EXISTS: "EMAIL_ALREADY_EXISTS",
   INVALID_CREDENTIALS: "INVALID_CREDENTIALS",
@@ -20,7 +22,10 @@ export type AuthSuccess = {
   user: {
     id_user: string;
     email: string;
-    role: UserRole;
+    // Puede ser "superadmin" (ver resolveEffectiveRole) sin que la cuenta
+    // tenga esa fila en la base — UserRole (abajo) sigue reflejando lo
+    // que hay realmente guardado en users.id_role.
+    role: EffectiveRole;
   };
   // Solo lo manda el login con Google: true si a esta cuenta le falta el
   // género (dato clave para inscribirse en categorías) — el registro por

@@ -5,7 +5,7 @@ import type { SignInDTO, SignUpDTO } from "./schema/auth_schema";
 import { Result, ok, fail } from "../core/constants/result";
 import { hashPassword, comparePassword } from "../bcrypt/bcrypt";
 import { signToken } from "../jwt/jwt";
-import { ROLE_IDS } from "../core/constants/roles";
+import { ROLE_IDS, resolveEffectiveRole } from "../core/constants/roles";
 
 // Sin GOOGLE_CLIENT_ID el server igual levanta (dev local sin Google
 // configurado) — el endpoint /auth/google devuelve error recién cuando se
@@ -50,14 +50,15 @@ export class AuthService {
       category: input.category,
     });
 
-    const token = signToken({ id_user: userCreated.id_user, role });
+    const effectiveRole = resolveEffectiveRole(userCreated.email, role);
+    const token = signToken({ id_user: userCreated.id_user, role: effectiveRole });
 
     return ok<AuthSuccess>({
       token,
       user: {
         id_user: userCreated.id_user,
         email: userCreated.email,
-        role,
+        role: effectiveRole,
       },
     });
   }
@@ -85,14 +86,15 @@ export class AuthService {
       return fail<AuthError>(ERRORS.INVALID_CREDENTIALS);
     }
 
-    const token = signToken({ id_user: user.id_user, role: user.role });
+    const effectiveRole = resolveEffectiveRole(user.email, user.role);
+    const token = signToken({ id_user: user.id_user, role: effectiveRole });
 
     return ok<AuthSuccess>({
       token,
       user: {
         id_user: user.id_user,
         email: user.email,
-        role: user.role,
+        role: effectiveRole,
       },
     });
   }
@@ -150,14 +152,15 @@ export class AuthService {
       }
     }
 
-    const token = signToken({ id_user: profile.id_user, role: profile.role });
+    const effectiveRole = resolveEffectiveRole(profile.email, profile.role);
+    const token = signToken({ id_user: profile.id_user, role: effectiveRole });
 
     return ok<AuthSuccess>({
       token,
       user: {
         id_user: profile.id_user,
         email: profile.email,
-        role: profile.role,
+        role: effectiveRole,
       },
       // Solo aplica a jugadores — un admin que se logueó por Google
       // (vinculó una cuenta admin ya existente, por ejemplo) no tiene por
