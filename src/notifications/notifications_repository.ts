@@ -13,7 +13,10 @@ export type NotificationType =
   | "next_match_ready"
   | "match_on_table"
   | "match_result"
-  | "tournament_cancelled";
+  | "tournament_cancelled"
+  | "club_join_request"
+  | "club_join_approved"
+  | "club_join_rejected";
 
 export type NotificationRow = {
   id_notification: string;
