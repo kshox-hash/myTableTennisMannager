@@ -81,11 +81,11 @@ router.get(
   })
 );
 
-// GET /api/v1/clubs — selector del jugador (cualquier usuario logueado)
+// GET /api/v1/clubs — selector del club: sin login, para que ya aparezca en
+// el formulario de registro (antes de que exista sesión) y no solo en Perfil.
+// Solo expone nombre/escudo, nada sensible.
 router.get(
   "/",
-  authRequired,
-  requireRole(["admin", "player"]),
   asyncHandler(async (_req, res) => {
     const rows = await repo.listPublic();
     return res.json({ ok: true, data: rows });
