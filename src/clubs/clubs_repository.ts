@@ -77,6 +77,16 @@ export type ClubCashSummary = {
   movements: ClubCashMovementRow[];
 };
 
+export type ClubArrearsRow = {
+  id_user: string;
+  name: string;
+  email: string;
+  totalPeriods: number;
+  paidPeriods: number;
+  owedPeriods: number;
+  owedAmount: number;
+};
+
 export type MyRequestRow = {
   id_request: string;
   id_club: string;
@@ -347,6 +357,62 @@ export class ClubsRepository {
        DO UPDATE SET paid = $5, paid_at = CASE WHEN $5 THEN NOW() ELSE NULL END, amount = $4`,
       [idClub, idUser, period, amount, paid]
     );
+  }
+
+  // Morosidad — a diferencia de getDues (una foto de UN mes), esto mira
+  // todos los periodos desde que cada jugador entró al club (fecha de
+  // aprobación de su solicitud; si no hay registro, desde que se creó el
+  // club) hasta el mes actual, y cuenta cuántos quedaron sin pagar. Tope
+  // de 36 meses hacia atrás para no generar una serie enorme en clubes
+  // muy antiguos. Sin cuota mensual configurada no hay nada que deber,
+  // así que el router no llama esto si clubs.monthly_fee es NULL.
+  async getArrears(idClub: string): Promise<ClubArrearsRow[]> {
+    const res = await this.pool.query<{
+      id_user: string; name: string; email: string;
+      total_periods: string; paid_periods: string; owed_amount: string;
+    }>(
+      `WITH member_start AS (
+         SELECT u.id_user,
+                COALESCE(
+                  (SELECT MIN(r.decided_at) FROM club_join_requests r
+                   WHERE r.id_club = $1 AND r.id_user = u.id_user AND r.status = 'approved'),
+                  c.created_at
+                ) AS start_at
+         FROM users u
+         JOIN clubs c ON c.id_club = $1
+         WHERE u.id_club = $1
+       ),
+       periods AS (
+         SELECT ms.id_user, to_char(gs, 'YYYY-MM') AS period
+         FROM member_start ms
+         CROSS JOIN LATERAL generate_series(
+           date_trunc('month', GREATEST(ms.start_at, NOW() - INTERVAL '35 months')),
+           date_trunc('month', NOW()),
+           INTERVAL '1 month'
+         ) AS gs
+       )
+       SELECT p.id_user, ${NAME_SQL} AS name, u.email,
+              COUNT(*)::int AS total_periods,
+              COUNT(*) FILTER (WHERE d.paid IS TRUE)::int AS paid_periods,
+              COALESCE(SUM(CASE WHEN d.paid IS NOT TRUE THEN COALESCE(d.amount, c.monthly_fee, 0) ELSE 0 END), 0) AS owed_amount
+       FROM periods p
+       JOIN users u ON u.id_user = p.id_user
+       JOIN clubs c ON c.id_club = $1
+       LEFT JOIN club_dues d ON d.id_club = $1 AND d.id_user = p.id_user AND d.period = p.period
+       GROUP BY p.id_user, name, u.email
+       ORDER BY (COUNT(*) - COUNT(*) FILTER (WHERE d.paid IS TRUE)) DESC, name ASC`,
+      [idClub]
+    );
+    return res.rows.map((r) => {
+      const totalPeriods = Number(r.total_periods);
+      const paidPeriods = Number(r.paid_periods);
+      return {
+        id_user: r.id_user, name: r.name, email: r.email,
+        totalPeriods, paidPeriods,
+        owedPeriods: totalPeriods - paidPeriods,
+        owedAmount: Number(r.owed_amount),
+      };
+    });
   }
 
   // ─────────────────────────────────────────────────────────

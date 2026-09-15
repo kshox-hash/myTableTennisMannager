@@ -302,6 +302,18 @@ router.put(
   })
 );
 
+// GET /api/v1/clubs/:id_club/arrears  (admin, dueño) — morosidad acumulada
+router.get(
+  "/:id_club/arrears",
+  authRequired,
+  requireRole("admin"),
+  requireOwnClub,
+  asyncHandler(async (req, res) => {
+    const rows = await repo.getArrears(req.params.id_club);
+    return res.json({ ok: true, data: rows });
+  })
+);
+
 // --- Caja ---
 
 // GET /api/v1/clubs/:id_club/cash  (admin, dueño)
