@@ -51,6 +51,24 @@ const updateSchema = z.object({
   name: z.string().trim().min(1).max(150).optional(),
   description: z.string().trim().max(4000).nullable().optional(),
   founded_date: z.string().trim().nullable().optional(),
+  monthly_fee: z.number().min(0).max(99999999).nullable().optional(),
+});
+
+const dueSchema = z.object({
+  period: z.string().trim().regex(/^\d{4}-\d{2}$/, "Periodo inválido (usa YYYY-MM)"),
+  paid: z.boolean(),
+  amount: z.number().min(0).max(99999999),
+});
+
+const cashMovementSchema = z.object({
+  type: z.enum(["income", "expense"]),
+  amount: z.number().positive().max(99999999),
+  description: z.string().trim().min(1).max(200),
+  occurred_at: z.string().trim().nullable().optional(),
+});
+
+const selectedSchema = z.object({
+  selected: z.boolean(),
 });
 
 // POST /api/v1/clubs
@@ -245,6 +263,111 @@ router.post(
       message: "Tu solicitud para unirte al club fue rechazada.",
     });
     return res.json({ ok: true });
+  })
+);
+
+// --- Cuotas ---
+
+// GET /api/v1/clubs/:id_club/dues?period=YYYY-MM  (admin, dueño)
+router.get(
+  "/:id_club/dues",
+  authRequired,
+  requireRole("admin"),
+  requireOwnClub,
+  asyncHandler(async (req, res) => {
+    const period = typeof req.query.period === "string" ? req.query.period : "";
+    if (!/^\d{4}-\d{2}$/.test(period)) {
+      return res.status(400).json({ ok: false, message: "Periodo inválido (usa YYYY-MM)" });
+    }
+    const rows = await repo.getDues(req.params.id_club, period);
+    return res.json({ ok: true, data: rows });
+  })
+);
+
+// PUT /api/v1/clubs/:id_club/dues/:id_user  (admin, dueño) — marcar pagada/pendiente
+router.put(
+  "/:id_club/dues/:id_user",
+  authRequired,
+  requireRole("admin"),
+  requireOwnClub,
+  asyncHandler(async (req, res) => {
+    const p = dueSchema.safeParse(req.body);
+    if (!p.success) return res.status(400).json({ ok: false, message: "Datos inválidos", issues: p.error.issues });
+    if (!(await repo.isMember(req.params.id_club, req.params.id_user))) {
+      return res.status(404).json({ ok: false, message: "Ese jugador no es socio de este club" });
+    }
+    await repo.setDuePaid(req.params.id_club, req.params.id_user, p.data.period, p.data.paid, p.data.amount);
+    const rows = await repo.getDues(req.params.id_club, p.data.period);
+    return res.json({ ok: true, data: rows });
+  })
+);
+
+// --- Caja ---
+
+// GET /api/v1/clubs/:id_club/cash  (admin, dueño)
+router.get(
+  "/:id_club/cash",
+  authRequired,
+  requireRole("admin"),
+  requireOwnClub,
+  asyncHandler(async (req, res) => {
+    const summary = await repo.getCashMovements(req.params.id_club);
+    return res.json({ ok: true, data: summary });
+  })
+);
+
+// POST /api/v1/clubs/:id_club/cash  (admin, dueño)
+router.post(
+  "/:id_club/cash",
+  authRequired,
+  requireRole("admin"),
+  requireOwnClub,
+  asyncHandler(async (req, res) => {
+    const p = cashMovementSchema.safeParse(req.body);
+    if (!p.success) return res.status(400).json({ ok: false, message: "Datos inválidos", issues: p.error.issues });
+    await repo.addCashMovement(req.params.id_club, {
+      type: p.data.type,
+      amount: p.data.amount,
+      description: p.data.description,
+      occurred_at: p.data.occurred_at ?? null,
+      created_by: req.user!.id_user,
+    });
+    const summary = await repo.getCashMovements(req.params.id_club);
+    return res.status(201).json({ ok: true, data: summary });
+  })
+);
+
+// DELETE /api/v1/clubs/:id_club/cash/:id_movement  (admin, dueño)
+router.delete(
+  "/:id_club/cash/:id_movement",
+  authRequired,
+  requireRole("admin"),
+  requireOwnClub,
+  asyncHandler(async (req, res) => {
+    const removed = await repo.deleteCashMovement(req.params.id_club, req.params.id_movement);
+    if (!removed) return res.status(404).json({ ok: false, message: "Movimiento no encontrado" });
+    const summary = await repo.getCashMovements(req.params.id_club);
+    return res.json({ ok: true, data: summary });
+  })
+);
+
+// --- Plantel seleccionado ---
+
+// PUT /api/v1/clubs/:id_club/selected/:id_user  (admin, dueño)
+router.put(
+  "/:id_club/selected/:id_user",
+  authRequired,
+  requireRole("admin"),
+  requireOwnClub,
+  asyncHandler(async (req, res) => {
+    const p = selectedSchema.safeParse(req.body);
+    if (!p.success) return res.status(400).json({ ok: false, message: "Datos inválidos", issues: p.error.issues });
+    if (!(await repo.isMember(req.params.id_club, req.params.id_user))) {
+      return res.status(404).json({ ok: false, message: "Ese jugador no es socio de este club" });
+    }
+    await repo.setSelected(req.params.id_club, req.params.id_user, p.data.selected);
+    const d = await repo.getDetail(req.params.id_club);
+    return res.json({ ok: true, data: d });
   })
 );
 

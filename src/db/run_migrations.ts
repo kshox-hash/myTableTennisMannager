@@ -56,6 +56,7 @@ const INCREMENTAL = [
   "048_manual_group_any_size.sql",
   "049_clubs.sql",
   "050_one_club_per_admin.sql",
+  "051_club_admin.sql",
 ];
 
 export async function runMigrations(): Promise<void> {

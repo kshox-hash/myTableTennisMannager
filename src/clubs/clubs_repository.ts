@@ -29,6 +29,7 @@ export type ClubMemberRow = {
   id_user: string;
   name: string;
   email: string;
+  selected: boolean;
 };
 
 export type ClubRequestRow = {
@@ -46,10 +47,34 @@ export type ClubDetail = {
   founded_date: string | null;
   header_image_url: string | null;
   crest_image_url: string | null;
+  monthly_fee: number | null;
   created_at: string;
   created_by: string;
   members: ClubMemberRow[];
   pending_requests: ClubRequestRow[];
+};
+
+export type ClubDueRow = {
+  id_user: string;
+  name: string;
+  email: string;
+  amount: number;
+  paid: boolean;
+  paid_at: string | null;
+};
+
+export type ClubCashMovementRow = {
+  id_movement: string;
+  type: "income" | "expense";
+  amount: number;
+  description: string;
+  occurred_at: string;
+  created_at: string;
+};
+
+export type ClubCashSummary = {
+  balance: number;
+  movements: ClubCashMovementRow[];
 };
 
 export type MyRequestRow = {
@@ -131,6 +156,11 @@ export class ClubsRepository {
     return res.rows;
   }
 
+  async isMember(idClub: string, idUser: string): Promise<boolean> {
+    const res = await this.pool.query(`SELECT 1 FROM users WHERE id_club = $1 AND id_user = $2`, [idClub, idUser]);
+    return (res.rowCount ?? 0) > 0;
+  }
+
   async getOwner(idClub: string): Promise<string | null> {
     const res = await this.pool.query<{ created_by: string | null }>(
       `SELECT created_by FROM clubs WHERE id_club = $1`,
@@ -142,9 +172,10 @@ export class ClubsRepository {
   async getDetail(idClub: string): Promise<ClubDetail | null> {
     const head = await this.pool.query<{
       id_club: string; name: string; description: string | null; founded_date: string | null;
-      header_image_url: string | null; crest_image_url: string | null; created_at: string; created_by: string | null;
+      header_image_url: string | null; crest_image_url: string | null; monthly_fee: string | null;
+      created_at: string; created_by: string | null;
     }>(
-      `SELECT id_club, name, description, founded_date, header_image_url, crest_image_url, created_at, created_by
+      `SELECT id_club, name, description, founded_date, header_image_url, crest_image_url, monthly_fee, created_at, created_by
        FROM clubs WHERE id_club = $1`,
       [idClub]
     );
@@ -153,8 +184,11 @@ export class ClubsRepository {
 
     const [membersRes, requestsRes] = await Promise.all([
       this.pool.query<ClubMemberRow>(
-        `SELECT id_user, ${NAME_SQL} AS name, email
-         FROM users WHERE id_club = $1
+        `SELECT u.id_user, ${NAME_SQL} AS name, u.email,
+                (s.id_user IS NOT NULL) AS selected
+         FROM users u
+         LEFT JOIN club_selected_players s ON s.id_club = u.id_club AND s.id_user = u.id_user
+         WHERE u.id_club = $1
          ORDER BY name ASC`,
         [idClub]
       ),
@@ -169,7 +203,9 @@ export class ClubsRepository {
 
     return {
       id_club: h.id_club, name: h.name, description: h.description, founded_date: h.founded_date,
-      header_image_url: h.header_image_url, crest_image_url: h.crest_image_url, created_at: h.created_at,
+      header_image_url: h.header_image_url, crest_image_url: h.crest_image_url,
+      monthly_fee: h.monthly_fee === null ? null : Number(h.monthly_fee),
+      created_at: h.created_at,
       created_by: h.created_by!,
       members: membersRes.rows,
       pending_requests: requestsRes.rows,
@@ -177,19 +213,21 @@ export class ClubsRepository {
   }
 
   async update(idClub: string, patch: {
-    name?: string; description?: string | null; founded_date?: string | null;
+    name?: string; description?: string | null; founded_date?: string | null; monthly_fee?: number | null;
   }): Promise<void> {
     await this.pool.query(
       `UPDATE clubs SET
          name         = COALESCE($2, name),
          description  = CASE WHEN $3 THEN $4 ELSE description END,
-         founded_date = CASE WHEN $5 THEN $6 ELSE founded_date END
+         founded_date = CASE WHEN $5 THEN $6 ELSE founded_date END,
+         monthly_fee  = CASE WHEN $7 THEN $8 ELSE monthly_fee END
        WHERE id_club = $1`,
       [
         idClub,
         patch.name?.trim(),
         patch.description !== undefined, patch.description ?? null,
         patch.founded_date !== undefined, patch.founded_date ?? null,
+        patch.monthly_fee !== undefined, patch.monthly_fee ?? null,
       ]
     );
   }
@@ -273,5 +311,95 @@ export class ClubsRepository {
 
       return ok({ id_user: idUser });
     });
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Cuotas — una fila por (socio, periodo). Se calcula el monto por
+  // defecto desde clubs.monthly_fee salvo que el admin lo pise a mano
+  // (ej. una cuota rebajada puntual), por eso `amount` vive en la fila
+  // y no se recalcula desde clubs en cada lectura.
+  async getDues(idClub: string, period: string): Promise<ClubDueRow[]> {
+    const res = await this.pool.query<{ id_user: string; name: string; email: string; amount: string | null; paid: boolean | null; paid_at: string | null }>(
+      `SELECT u.id_user, ${NAME_SQL} AS name, u.email,
+              COALESCE(d.amount, c.monthly_fee) AS amount,
+              COALESCE(d.paid, FALSE) AS paid,
+              d.paid_at
+       FROM users u
+       JOIN clubs c ON c.id_club = u.id_club
+       LEFT JOIN club_dues d ON d.id_club = u.id_club AND d.id_user = u.id_user AND d.period = $2
+       WHERE u.id_club = $1
+       ORDER BY name ASC`,
+      [idClub, period]
+    );
+    return res.rows.map((r) => ({
+      id_user: r.id_user, name: r.name, email: r.email,
+      amount: r.amount === null ? 0 : Number(r.amount),
+      paid: r.paid ?? false,
+      paid_at: r.paid_at,
+    }));
+  }
+
+  async setDuePaid(idClub: string, idUser: string, period: string, paid: boolean, amount: number): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO club_dues (id_club, id_user, period, amount, paid, paid_at)
+       VALUES ($1, $2, $3, $4, $5, CASE WHEN $5 THEN NOW() ELSE NULL END)
+       ON CONFLICT (id_club, id_user, period)
+       DO UPDATE SET paid = $5, paid_at = CASE WHEN $5 THEN NOW() ELSE NULL END, amount = $4`,
+      [idClub, idUser, period, amount, paid]
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Caja — libro simple, el saldo se calcula sumando al leer (no se
+  // guarda un saldo acumulado en ninguna parte).
+  async getCashMovements(idClub: string): Promise<ClubCashSummary> {
+    const res = await this.pool.query<{ id_movement: string; type: "income" | "expense"; amount: string; description: string; occurred_at: string; created_at: string }>(
+      `SELECT id_movement, type, amount, description, occurred_at, created_at
+       FROM club_cash_movements
+       WHERE id_club = $1
+       ORDER BY occurred_at DESC, created_at DESC`,
+      [idClub]
+    );
+    const movements = res.rows.map((r) => ({ ...r, amount: Number(r.amount) }));
+    const balance = movements.reduce((acc, m) => acc + (m.type === "income" ? m.amount : -m.amount), 0);
+    return { balance, movements };
+  }
+
+  async addCashMovement(idClub: string, input: {
+    type: "income" | "expense"; amount: number; description: string; occurred_at: string | null; created_by: string;
+  }): Promise<string> {
+    const res = await this.pool.query<{ id_movement: string }>(
+      `INSERT INTO club_cash_movements (id_club, type, amount, description, occurred_at, created_by)
+       VALUES ($1, $2, $3, $4, COALESCE($5, CURRENT_DATE), $6)
+       RETURNING id_movement`,
+      [idClub, input.type, input.amount, input.description.trim(), input.occurred_at, input.created_by]
+    );
+    return res.rows[0].id_movement;
+  }
+
+  async deleteCashMovement(idClub: string, idMovement: string): Promise<boolean> {
+    const res = await this.pool.query(
+      `DELETE FROM club_cash_movements WHERE id_club = $1 AND id_movement = $2`,
+      [idClub, idMovement]
+    );
+    return (res.rowCount ?? 0) > 0;
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Plantel seleccionado — no saca a nadie del listado general de
+  // socios, solo marca/desmarca la fila puente.
+  async setSelected(idClub: string, idUser: string, selected: boolean): Promise<void> {
+    if (selected) {
+      await this.pool.query(
+        `INSERT INTO club_selected_players (id_club, id_user) VALUES ($1, $2)
+         ON CONFLICT (id_club, id_user) DO NOTHING`,
+        [idClub, idUser]
+      );
+    } else {
+      await this.pool.query(
+        `DELETE FROM club_selected_players WHERE id_club = $1 AND id_user = $2`,
+        [idClub, idUser]
+      );
+    }
   }
 }
