@@ -356,13 +356,18 @@ export class ClubsRepository {
     if (club.rowCount === 0) return null;
     const frequency = club.rows[0].fee_frequency;
 
+    // Esta consulta no necesita idClub (solo la frecuencia, ya la
+    // tenemos) — usar $1 acá y no $2 es a propósito: Postgres no puede
+    // inferir el tipo de un parámetro que nunca se referencia en el
+    // texto ("could not determine data type of parameter $1") si se
+    // salta un número, así que solo se pasa lo que realmente se usa.
     const bounds = await this.pool.query<{ period_start: string; period_end: string }>(
       frequency === "weekly"
-        ? `SELECT (date_trunc('week', NOW()) + make_interval(weeks => $2::int))::date AS period_start,
-                  (date_trunc('week', NOW()) + make_interval(weeks => $2::int) + INTERVAL '6 days')::date AS period_end`
-        : `SELECT (date_trunc('month', NOW()) + make_interval(months => $2::int))::date AS period_start,
-                  (date_trunc('month', NOW()) + make_interval(months => $2::int) + INTERVAL '1 month' - INTERVAL '1 day')::date AS period_end`,
-      [idClub, offset]
+        ? `SELECT (date_trunc('week', NOW()) + make_interval(weeks => $1::int))::date AS period_start,
+                  (date_trunc('week', NOW()) + make_interval(weeks => $1::int) + INTERVAL '6 days')::date AS period_end`
+        : `SELECT (date_trunc('month', NOW()) + make_interval(months => $1::int))::date AS period_start,
+                  (date_trunc('month', NOW()) + make_interval(months => $1::int) + INTERVAL '1 month' - INTERVAL '1 day')::date AS period_end`,
+      [offset]
     );
     const { period_start, period_end } = bounds.rows[0];
 
