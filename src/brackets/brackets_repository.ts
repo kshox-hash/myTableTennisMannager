@@ -5,7 +5,7 @@ import { nextManualGroupName } from "../group_generation_logic";
 import type { GeneratedBracketResult } from "../bracket_generation_logic";
 import { NotificationsRepository } from "../notifications/notifications_repository";
 import { ActivityLogRepository } from "../activity/activity_log_repository";
-import { RANKING_POINTS_PER_WIN, RANKED_PLAYERS_CTE } from "../ranking/ranking_repository";
+import { RANKING_POINTS_PER_WIN, RANKED_PLAYERS_CTE, GLOBAL_RANKING_ENABLED } from "../ranking/ranking_repository";
 import type {
   GroupRow,
   GroupMemberRow,
@@ -407,7 +407,7 @@ export class BracketsRepository {
 
     await this.withTransaction(async (client) => {
       const isRanked = await this.isTournamentRanked(client, tournamentId);
-      const pointsAwarded = isRanked ? RANKING_POINTS_PER_WIN : 0;
+      const pointsAwarded = GLOBAL_RANKING_ENABLED && isRanked ? RANKING_POINTS_PER_WIN : 0;
 
       // Resultado del partido
       await client.query(
@@ -529,9 +529,10 @@ export class BracketsRepository {
 
     await this.withTransaction(async (client) => {
       // Mismo flag que en recordMatchResult: si el torneo no era puntuable
-      // no se le restan puntos a nadie (nunca se le sumaron).
+      // (o el ranking general está desactivado) no se le restan puntos a
+      // nadie (nunca se le sumaron).
       const isRanked = await this.isTournamentRanked(client, tournamentId);
-      const pointsToRevert = isRanked ? RANKING_POINTS_PER_WIN : 0;
+      const pointsToRevert = GLOBAL_RANKING_ENABLED && isRanked ? RANKING_POINTS_PER_WIN : 0;
 
       await client.query(
         `UPDATE group_matches
@@ -927,7 +928,7 @@ export class BracketsRepository {
 
     await this.withTransaction(async (client) => {
       const isRanked = await this.isTournamentRanked(client, tournamentId);
-      const pointsAwarded = isRanked ? RANKING_POINTS_PER_WIN : 0;
+      const pointsAwarded = GLOBAL_RANKING_ENABLED && isRanked ? RANKING_POINTS_PER_WIN : 0;
 
       // Resultado del partido de llave
       await client.query(

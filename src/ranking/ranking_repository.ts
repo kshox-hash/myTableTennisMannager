@@ -6,6 +6,25 @@ import DB from "../db/db_configuration";
 // dinámico (Elo) todavía.
 export const RANKING_POINTS_PER_WIN = 3;
 
+// Ranking general/nacional (toda la plataforma) — DESACTIVADO a pedido
+// explícito del usuario: la pantalla que lo mostraba (RankingPage/
+// PublicRankingPage) ya estaba escondida del menú, y no tiene sentido
+// seguir sumando puntos a una tabla que nadie puede ver. Este interruptor
+// es la única fuente de verdad: en falso, BracketsRepository deja de
+// acreditar ranking_points en cada victoria (ver pointsAwarded en
+// recordMatchResult/recordBracketResult/undoGroupMatchResult) y
+// ranking_router.ts deja de servir datos en /, /me y /public.
+//
+// NO se borra nada — ni la columna player_stats.ranking_points, ni estas
+// consultas, ni las rutas: solo se corta el flujo acá. Reactivarlo es
+// cambiar esta única línea a `true`.
+//
+// El ranking PRIVADO por organizador (getOrganizerRanking, "Mi Ranking" y
+// la ficha pública de Comunidad) es un cálculo completamente aparte — no
+// lee player_stats, recalcula desde los partidos en el momento — así que
+// esto NO lo afecta para nada.
+export const GLOBAL_RANKING_ENABLED = false;
+
 // La posición NO se guarda — se calcula acá, al leer. Recalcularla en cada
 // resultado de partido implicaría tocar a TODOS los jugadores de la
 // plataforma (a diferencia de la posición dentro de un grupo, que son 2-4

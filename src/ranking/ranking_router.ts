@@ -2,7 +2,7 @@ import { Router } from "express";
 import { asyncHandler } from "../middlewares/wrap_async_middleware";
 import { authRequired } from "../middlewares/auth_required_middleware";
 import { requireRole } from "../middlewares/require_role_middleware";
-import { RankingRepository, type RankingRow } from "./ranking_repository";
+import { RankingRepository, type RankingRow, GLOBAL_RANKING_ENABLED } from "./ranking_repository";
 
 const router = Router();
 const repo = new RankingRepository();
@@ -28,24 +28,28 @@ function shapeRankingRow(r: RankingRow) {
 }
 
 // GET /api/v1/ranking — ranking global (todos los torneos, todas las categorías)
+// Desactivado (ver GLOBAL_RANKING_ENABLED en ranking_repository.ts): responde
+// vacío en vez de consultar player_stats, que ya no se sigue actualizando.
 router.get(
   "/",
   authRequired,
   requireRole(["admin", "player"]),
   asyncHandler(async (_req, res) => {
+    if (!GLOBAL_RANKING_ENABLED) return res.json({ ok: true, data: [] });
     const data = await repo.getGlobalRanking();
     return res.json({ ok: true, data: data.map(shapeRankingRow) });
   })
 );
 
-// GET /api/v1/ranking/me — la posición del propio jugador logueado, para
-// la tarjeta "Ranking nacional" del dashboard de inicio. null = todavía
-// no jugó ningún partido en la plataforma (no está rankeado todavía).
+// GET /api/v1/ranking/me — la posición del propio jugador logueado. Ya no se
+// usa desde ninguna pantalla (la tarjeta "Ranking nacional" del dashboard se
+// sacó junto con el resto del ranking general) — desactivado igual que arriba.
 router.get(
   "/me",
   authRequired,
   requireRole(["admin", "player"]),
   asyncHandler(async (req, res) => {
+    if (!GLOBAL_RANKING_ENABLED) return res.json({ ok: true, data: null });
     const row = await repo.getPlayerRanking(req.user!.id_user);
     return res.json({ ok: true, data: row ? shapeRankingRow(row) : null });
   })
@@ -67,10 +71,12 @@ router.get(
 
 // GET /api/v1/ranking/public — mismo ranking, sin login. Vitrina pública,
 // igual que /tournament/public/*: reusa el mismo repositorio/criterio de
-// orden que la versión autenticada, no duplica la lógica.
+// orden que la versión autenticada, no duplica la lógica. Desactivado igual
+// que arriba.
 router.get(
   "/public",
   asyncHandler(async (req, res) => {
+    if (!GLOBAL_RANKING_ENABLED) return res.json({ ok: true, data: [] });
     const limit = req.query.limit ? Math.min(200, Math.max(1, Number(req.query.limit))) : 100;
     const data = await repo.getGlobalRanking(limit);
     return res.json({ ok: true, data: data.map(shapeRankingRow) });
