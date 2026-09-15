@@ -175,7 +175,8 @@ export class BracketsService {
     }
 
     const qualifiersPerGroup = await this.repo.getCategoryQualifiersPerGroup(categoryId);
-    await this.repo.persistGroups(tournamentId, categoryId, generated, qualifiersPerGroup);
+    const persisted = await this.repo.persistGroups(tournamentId, categoryId, generated, qualifiersPerGroup);
+    if (!persisted.persisted) return fail(BRACKETS_ERRORS.GROUPS_ALREADY_EXIST);
 
     const names = await this.repo.getTournamentCategoryNames(tournamentId, categoryId);
     if (names) {

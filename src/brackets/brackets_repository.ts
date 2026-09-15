@@ -195,15 +195,36 @@ export class BracketsRepository {
     }
   }
 
+  // El chequeo "GROUPS_ALREADY_EXIST" en generateGroups (service) es solo
+  // un fail-fast antes de correr el algoritmo — la verificación que
+  // realmente cuenta es esta de acá: bloquea la fila de la categoría
+  // (mismo patrón que createManualGroup/addPlayerToGroup/moveGroupMember)
+  // y recién ahí vuelve a chequear si ya hay grupos, todo en la misma
+  // transacción del INSERT. Sin esto, dos "Confirmar grupos" casi
+  // simultáneos (doble clic, o dos admins) podían pasar los dos el
+  // chequeo de afuera antes de que cualquiera escribiera, y terminar
+  // creando dos juegos de grupos duplicados para la misma categoría —
+  // category_groups no tiene ningún UNIQUE que lo evite a nivel de base.
   async persistGroups(
     tournamentId: string,
     categoryId: string,
     result: GeneratedGroupsResult,
     qualifiersPerGroup: number
-  ): Promise<void> {
-    await this.withTransaction((client) =>
-      this.insertGroupsData(client, tournamentId, categoryId, result, qualifiersPerGroup)
-    );
+  ): Promise<{ persisted: true } | { persisted: false; error: "GROUPS_ALREADY_EXIST" }> {
+    return this.withTransaction(async (client) => {
+      await client.query(`SELECT 1 FROM tournament_categories WHERE id_category = $1 FOR UPDATE`, [categoryId]);
+
+      const existsRes = await client.query(
+        `SELECT 1 FROM category_groups WHERE id_tournament = $1 AND id_category = $2 LIMIT 1`,
+        [tournamentId, categoryId]
+      );
+      if ((existsRes.rowCount ?? 0) > 0) {
+        return { persisted: false, error: "GROUPS_ALREADY_EXIST" as const };
+      }
+
+      await this.insertGroupsData(client, tournamentId, categoryId, result, qualifiersPerGroup);
+      return { persisted: true as const };
+    });
   }
 
   // Verdadero si algún partido de grupo de la categoría ya tiene resultado cargado.

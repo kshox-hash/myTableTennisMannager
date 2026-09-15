@@ -1,4 +1,4 @@
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import DB from "../../db/db_configuration";
 import { NotificationsRepository } from "../../notifications/notifications_repository";
 import { ActivityLogRepository } from "../../activity/activity_log_repository";
@@ -141,16 +141,21 @@ export class TablesRepository {
   // Jugadores que en este momento ya están jugando en alguna mesa (de
   // cualquier categoría del torneo). Un partido "listo" cuyo jugador esté
   // acá no puede recibir mesa: nadie juega dos partidos a la vez.
-  private async getBusyPlayerIds(id_tournament: string): Promise<Set<string>> {
+  // `client` opcional: assignTable lo pasa para leer dentro de la misma
+  // transacción/lock que sostiene mientras decide, en vez de una lectura
+  // suelta contra el pool que podría no ver una asignación concurrente
+  // recién comprometida.
+  private async getBusyPlayerIds(id_tournament: string, client?: PoolClient): Promise<Set<string>> {
+    const db = client ?? this.pool;
     const [groupRes, bracketRes] = await Promise.all([
-      this.pool.query<{ player1_id: string; player2_id: string }>(
+      db.query<{ player1_id: string; player2_id: string }>(
         `SELECT gm.player1_id, gm.player2_id
          FROM group_matches gm
          JOIN category_groups cg ON cg.id_group = gm.id_group
          WHERE cg.id_tournament = $1 AND gm.table_number IS NOT NULL`,
         [id_tournament]
       ),
-      this.pool.query<{ player1_id: string | null; player2_id: string | null }>(
+      db.query<{ player1_id: string | null; player2_id: string | null }>(
         `SELECT bm.player1_id, bm.player2_id
          FROM bracket_matches bm
          WHERE bm.id_tournament = $1 AND bm.table_number IS NOT NULL`,
@@ -344,59 +349,96 @@ export class TablesRepository {
       category_type: string;
       category_range: string;
     };
-    const playersRes =
-      match_type === "group"
-        ? await this.pool.query<MatchRow>(
-            `SELECT gm.player1_id, gm.player2_id, cg.id_tournament, tc.id_category, tc.category_type, tc.category_range
-             FROM group_matches gm
-             JOIN category_groups cg ON cg.id_group = gm.id_group
-             JOIN tournament_categories tc ON tc.id_category = cg.id_category
-             WHERE gm.id_match = $1`,
-            [id_match]
-          )
-        : await this.pool.query<MatchRow>(
-            `SELECT bm.player1_id, bm.player2_id, bm.id_tournament, tc.id_category, tc.category_type, tc.category_range
-             FROM bracket_matches bm
-             JOIN tournament_categories tc ON tc.id_category = bm.id_category
-             WHERE bm.id_match = $1`,
-            [id_match]
-          );
-    const match = playersRes.rows[0];
-    if (!match) throw new Error("MATCH_NOT_FOUND");
 
-    // La mesa solo puede estar "ocupada" dentro del mismo torneo — el número
-    // de mesa no es un identificador global, cada torneo numera las suyas.
-    const [groupOccupied, bracketOccupied] = await Promise.all([
-      this.pool.query(
-        `SELECT 1 FROM group_matches gm
-         JOIN category_groups cg ON cg.id_group = gm.id_group
-         WHERE gm.table_number = $1 AND cg.id_tournament = $2 AND gm.id_match != $3 LIMIT 1`,
-        [table_number, match.id_tournament, match_type === "group" ? id_match : "00000000-0000-0000-0000-000000000000"]
-      ),
-      this.pool.query(
-        `SELECT 1 FROM bracket_matches
-         WHERE table_number = $1 AND id_tournament = $2 AND id_match != $3 LIMIT 1`,
-        [table_number, match.id_tournament, match_type === "bracket" ? id_match : "00000000-0000-0000-0000-000000000000"]
-      ),
-    ]);
-    if ((groupOccupied.rowCount ?? 0) > 0 || (bracketOccupied.rowCount ?? 0) > 0) {
-      throw new Error("TABLE_ALREADY_OCCUPIED");
+    // "Mesa libre" y "nadie juega 2 partidos a la vez" son condiciones que
+    // dependen de FILAS DE OTRAS mesas (no hay una fila propia por "mesa N
+    // del torneo X" para bloquear con FOR UPDATE) — antes esto se
+    // comprobaba con SELECTs sueltos contra el pool y recién después el
+    // UPDATE, así que dos asignaciones casi simultáneas (dos admins en un
+    // evento en vivo) podían pasar las dos el chequeo antes de que
+    // cualquiera escribiera, y terminar dos partidos en la misma mesa (o
+    // un jugador en dos mesas). Un lock advisory por torneo serializa
+    // todas las asignaciones de ESE torneo entre sí — se libera solo al
+    // terminar la transacción (COMMIT o ROLLBACK), no hace falta soltarlo
+    // a mano.
+    const client = await this.pool.connect();
+    let match: MatchRow;
+    try {
+      await client.query("BEGIN");
+
+      const playersRes =
+        match_type === "group"
+          ? await client.query<MatchRow>(
+              `SELECT gm.player1_id, gm.player2_id, cg.id_tournament, tc.id_category, tc.category_type, tc.category_range
+               FROM group_matches gm
+               JOIN category_groups cg ON cg.id_group = gm.id_group
+               JOIN tournament_categories tc ON tc.id_category = cg.id_category
+               WHERE gm.id_match = $1`,
+              [id_match]
+            )
+          : await client.query<MatchRow>(
+              `SELECT bm.player1_id, bm.player2_id, bm.id_tournament, tc.id_category, tc.category_type, tc.category_range
+               FROM bracket_matches bm
+               JOIN tournament_categories tc ON tc.id_category = bm.id_category
+               WHERE bm.id_match = $1`,
+              [id_match]
+            );
+      const found = playersRes.rows[0];
+      if (!found) {
+        await client.query("ROLLBACK");
+        throw new Error("MATCH_NOT_FOUND");
+      }
+      match = found;
+
+      await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [match.id_tournament]);
+
+      // La mesa solo puede estar "ocupada" dentro del mismo torneo — el número
+      // de mesa no es un identificador global, cada torneo numera las suyas.
+      const [groupOccupied, bracketOccupied] = await Promise.all([
+        client.query(
+          `SELECT 1 FROM group_matches gm
+           JOIN category_groups cg ON cg.id_group = gm.id_group
+           WHERE gm.table_number = $1 AND cg.id_tournament = $2 AND gm.id_match != $3 LIMIT 1`,
+          [table_number, match.id_tournament, match_type === "group" ? id_match : "00000000-0000-0000-0000-000000000000"]
+        ),
+        client.query(
+          `SELECT 1 FROM bracket_matches
+           WHERE table_number = $1 AND id_tournament = $2 AND id_match != $3 LIMIT 1`,
+          [table_number, match.id_tournament, match_type === "bracket" ? id_match : "00000000-0000-0000-0000-000000000000"]
+        ),
+      ]);
+      if ((groupOccupied.rowCount ?? 0) > 0 || (bracketOccupied.rowCount ?? 0) > 0) {
+        await client.query("ROLLBACK");
+        throw new Error("TABLE_ALREADY_OCCUPIED");
+      }
+
+      const busyPlayers = await this.getBusyPlayerIds(match.id_tournament, client);
+      if (
+        (match.player1_id && busyPlayers.has(match.player1_id)) ||
+        (match.player2_id && busyPlayers.has(match.player2_id))
+      ) {
+        await client.query("ROLLBACK");
+        throw new Error("PLAYER_ALREADY_PLAYING");
+      }
+
+      await client.query(
+        `UPDATE ${table}
+         SET table_number = $1
+         WHERE id_match = $2`,
+        [table_number, id_match]
+      );
+
+      await client.query("COMMIT");
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        /* ignore */
+      }
+      throw error;
+    } finally {
+      client.release();
     }
-
-    const busyPlayers = await this.getBusyPlayerIds(match.id_tournament);
-    if (
-      (match.player1_id && busyPlayers.has(match.player1_id)) ||
-      (match.player2_id && busyPlayers.has(match.player2_id))
-    ) {
-      throw new Error("PLAYER_ALREADY_PLAYING");
-    }
-
-    await this.pool.query(
-      `UPDATE ${table}
-       SET table_number = $1
-       WHERE id_match = $2`,
-      [table_number, id_match]
-    );
 
     await this.notifyPlayersTableAssigned({
       player1Id: match.player1_id,
