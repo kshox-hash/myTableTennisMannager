@@ -304,7 +304,10 @@ router.put(
     if (!(await repo.isMember(req.params.id_club, req.params.id_user))) {
       return res.status(404).json({ ok: false, message: "Ese jugador no es socio de este club" });
     }
-    await repo.setDuePaid(req.params.id_club, req.params.id_user, p.data.period_start, p.data.paid, p.data.amount);
+    const result = await repo.setDuePaid(req.params.id_club, req.params.id_user, p.data.period_start, p.data.paid, p.data.amount);
+    if (!result.ok) {
+      return res.status(400).json({ ok: false, message: "Ese periodo es anterior a que este jugador fuera socio del club" });
+    }
     const period = await repo.getDues(req.params.id_club, p.data.offset);
     return res.json({ ok: true, data: period });
   })

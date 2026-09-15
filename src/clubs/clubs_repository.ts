@@ -376,17 +376,34 @@ export class ClubsRepository {
     // resuelve un ORDER BY/GROUP BY "name" ambiguo a favor de la columna de
     // tabla, no del alias — el ORDER BY quedaba ordenando por el nombre del
     // club (constante, un solo club) en vez del jugador, en silencio.
+    //
+    // member_start (mismo criterio que getArrears): un socio no aparece en
+    // un periodo anterior a que se uniera — antes esto no se filtraba acá,
+    // así que navegando a un mes previo a que alguien fuera socio igual
+    // aparecía "debiendo" ese mes, con el toggle de pagar funcionando.
     const res = await this.pool.query<{ id_user: string; player_name: string; email: string; amount: string | null; paid: boolean | null; paid_at: string | null }>(
-      `SELECT u.id_user, ${NAME_SQL} AS player_name, u.email,
+      `WITH member_start AS (
+         SELECT u.id_user,
+                COALESCE(
+                  (SELECT MIN(r.decided_at) FROM club_join_requests r
+                   WHERE r.id_club = $1 AND r.id_user = u.id_user AND r.status = 'approved'),
+                  c.created_at
+                ) AS start_at
+         FROM users u
+         JOIN clubs c ON c.id_club = $1
+         WHERE u.id_club = $1
+       )
+       SELECT u.id_user, ${NAME_SQL} AS player_name, u.email,
               COALESCE(d.amount, c.monthly_fee) AS amount,
               COALESCE(d.paid, FALSE) AS paid,
               d.paid_at
        FROM users u
        JOIN clubs c ON c.id_club = u.id_club
+       JOIN member_start ms ON ms.id_user = u.id_user
        LEFT JOIN club_dues d ON d.id_club = u.id_club AND d.id_user = u.id_user AND d.period_start = $2::date
-       WHERE u.id_club = $1
+       WHERE u.id_club = $1 AND ms.start_at <= $3::date
        ORDER BY player_name ASC`,
-      [idClub, period_start]
+      [idClub, period_start, period_end]
     );
 
     return {
@@ -402,7 +419,26 @@ export class ClubsRepository {
     };
   }
 
-  async setDuePaid(idClub: string, idUser: string, periodStart: string, paid: boolean, amount: number): Promise<void> {
+  // Mismo criterio que getDues: no se puede marcar pagada/pendiente una
+  // cuota de un periodo anterior a que la persona fuera socia — antes esto
+  // no se validaba acá, así que aunque la UI ya no lo muestre, un llamado
+  // directo a la API todavía podía crear una cuota "de antes de existir".
+  async setDuePaid(
+    idClub: string, idUser: string, periodStart: string, paid: boolean, amount: number
+  ): Promise<{ ok: true } | { ok: false; error: "PERIOD_BEFORE_MEMBERSHIP" }> {
+    const startRes = await this.pool.query<{ allowed: boolean }>(
+      `SELECT $3::date >= COALESCE(
+         (SELECT MIN(r.decided_at) FROM club_join_requests r
+          WHERE r.id_club = $1 AND r.id_user = $2 AND r.status = 'approved'),
+         c.created_at
+       )::date AS allowed
+       FROM clubs c WHERE c.id_club = $1`,
+      [idClub, idUser, periodStart]
+    );
+    if (startRes.rows[0] && !startRes.rows[0].allowed) {
+      return { ok: false, error: "PERIOD_BEFORE_MEMBERSHIP" };
+    }
+
     await this.pool.query(
       `INSERT INTO club_dues (id_club, id_user, period_start, period_end, amount, paid, paid_at)
        SELECT $1, $2, $3::date,
@@ -416,6 +452,7 @@ export class ClubsRepository {
        DO UPDATE SET paid = $5, paid_at = CASE WHEN $5 THEN NOW() ELSE NULL END, amount = $4`,
       [idClub, idUser, periodStart, amount, paid]
     );
+    return { ok: true };
   }
 
   // Morosidad — a diferencia de getDues (una foto de UN periodo), esto
