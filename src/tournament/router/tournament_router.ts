@@ -144,6 +144,16 @@ router.patch(
   asyncHandler(controller.adminUpdateCategoryStatus)
 );
 
+// "EMPEZAR CAMPEONATO" / CANCELAR SEMBRADO — bloquea o desbloquea el botón,
+// persiste en el servidor (sobrevive recargar la página).
+router.patch(
+  "/admin/tournaments/:id_tournament/category/:id_category/seeding-in-progress",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(),
+  asyncHandler(controller.adminSetSeedingInProgress)
+);
+
 // REMOVE ENROLLMENT (admin cancels)
 router.post(
   "/admin/tournaments/:id_tournament/enrollments/remove",

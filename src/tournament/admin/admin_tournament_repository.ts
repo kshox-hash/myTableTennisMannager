@@ -1004,6 +1004,7 @@ export class AdminTournamentRepository {
         c.format,
         c.qualifiers_per_group,
         c.priority,
+        c.seeding_in_progress,
         COUNT(e.id_enrollment) FILTER (WHERE e.status = 'active')::int AS enrolled_count
       FROM ${this.tournamentCategoriesTable} c
       LEFT JOIN ${this.enrollmentsTable} e
@@ -1193,6 +1194,65 @@ export class AdminTournamentRepository {
         [status, categoryId, tournamentId]
       );
       if (res.rowCount === 0) {
+        await client.query("ROLLBACK");
+        return { updated: false, error: "CATEGORY_NOT_FOUND" };
+      }
+
+      await client.query("COMMIT");
+      return { updated: true };
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        /* ignore */
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  // "Empezar campeonato" → seeding_in_progress = true (bloquea el botón,
+  // sobrevive un F5 a diferencia del estado que antes vivía solo en el
+  // navegador). Se apaga al confirmar los grupos de verdad (el propio
+  // startGroupsPhase ya cambia la fase, así que no hace falta tocarlo acá)
+  // o al cancelar el sembrado desde el frontend. Restringido a fase
+  // 'enrollment': no tiene sentido "seguir armando el sembrado" de una
+  // categoría que ya tiene grupos.
+  async setSeedingInProgress(
+    tournamentId: string,
+    categoryId: string,
+    requestedBy: string,
+    inProgress: boolean
+  ): Promise<{
+    updated: boolean;
+    error?: "TOURNAMENT_NOT_FOUND" | "NOT_TOURNAMENT_OWNER" | "CATEGORY_NOT_FOUND";
+  }> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      const tRes = await client.query<{ created_by: string }>(
+        `SELECT created_by FROM ${this.tournamentsTable} WHERE id_tournament = $1 FOR UPDATE`,
+        [tournamentId]
+      );
+      const t = tRes.rows[0];
+      if (!t) {
+        await client.query("ROLLBACK");
+        return { updated: false, error: "TOURNAMENT_NOT_FOUND" };
+      }
+      if (!(await this.isOwnerOrOrganizer(client, tournamentId, requestedBy, t.created_by))) {
+        await client.query("ROLLBACK");
+        return { updated: false, error: "NOT_TOURNAMENT_OWNER" };
+      }
+
+      const res2 = await client.query(
+        `UPDATE ${this.tournamentCategoriesTable}
+         SET seeding_in_progress = $1
+         WHERE id_category = $2 AND id_tournament = $3 AND phase = 'enrollment'`,
+        [inProgress, categoryId, tournamentId]
+      );
+      if (res2.rowCount === 0) {
         await client.query("ROLLBACK");
         return { updated: false, error: "CATEGORY_NOT_FOUND" };
       }

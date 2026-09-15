@@ -208,6 +208,7 @@ export type AdminCategoryRow = {
   enrolled_count: number;
   qualifiers_per_group: number;
   priority: number;
+  seeding_in_progress: boolean;
 };
 
 // Players by category for admin

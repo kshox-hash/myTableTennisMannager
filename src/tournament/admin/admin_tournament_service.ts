@@ -231,6 +231,24 @@ export class AdminTournamentService {
     return ok({ updated: true });
   }
 
+  // "EMPEZAR CAMPEONATO" — bloquea/desbloquea el botón, sobrevive F5
+  async setSeedingInProgress(
+    tournamentId: string,
+    categoryId: string,
+    requestedBy: string,
+    inProgress: boolean
+  ): Promise<Result<{ updated: true }, AdminTournamentError>> {
+    const result = await this.repo.setSeedingInProgress(tournamentId, categoryId, requestedBy, inProgress);
+
+    if (!result.updated) {
+      if (result.error === "TOURNAMENT_NOT_FOUND") return fail(ADMIN_TOURNAMENT_ERRORS.TOURNAMENT_NOT_FOUND);
+      if (result.error === "CATEGORY_NOT_FOUND") return fail(ADMIN_TOURNAMENT_ERRORS.CATEGORY_NOT_FOUND);
+      return fail(ADMIN_TOURNAMENT_ERRORS.NOT_TOURNAMENT_OWNER);
+    }
+
+    return ok({ updated: true });
+  }
+
   // UPDATE CATEGORY PRIORITY (cola de orden entre categorías)
   async updateCategoryPriority(
     tournamentId: string,

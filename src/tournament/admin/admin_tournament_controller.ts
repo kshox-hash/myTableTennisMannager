@@ -367,6 +367,39 @@ export class AdminTournamentController {
     return res.json({ ok: true, data: result.data });
   };
 
+  // PATCH /admin/tournaments/:id_tournament/category/:id_category/seeding-in-progress
+  // body: { in_progress: boolean } — "Empezar campeonato" (true) /
+  // cancelar el sembrado sin confirmar (false).
+  adminSetSeedingInProgress = async (req: Request, res: Response) => {
+    const tournamentId = req.params.id_tournament?.trim();
+    const categoryId = req.params.id_category?.trim();
+    const inProgress = req.body?.in_progress;
+
+    if (!tournamentId || !categoryId) {
+      return res.status(400).json({ ok: false, message: "Falta id_tournament o id_category" });
+    }
+    if (typeof inProgress !== "boolean") {
+      return res.status(400).json({ ok: false, message: "in_progress debe ser true o false" });
+    }
+
+    const result = await this.service.setSeedingInProgress(tournamentId, categoryId, req.user!.id_user, inProgress);
+
+    if (!result.ok) {
+      if (result.error === ADMIN_TOURNAMENT_ERRORS.TOURNAMENT_NOT_FOUND) {
+        return res.status(404).json({ ok: false, message: "Campeonato no encontrado" });
+      }
+      if (result.error === ADMIN_TOURNAMENT_ERRORS.CATEGORY_NOT_FOUND) {
+        return res.status(404).json({ ok: false, message: "Categoría no encontrada" });
+      }
+      if (result.error === ADMIN_TOURNAMENT_ERRORS.NOT_TOURNAMENT_OWNER) {
+        return res.status(403).json({ ok: false, message: "No eres el organizador de este campeonato" });
+      }
+      return res.status(400).json({ ok: false, message: result.error });
+    }
+
+    return res.json({ ok: true, data: result.data });
+  };
+
   // PATCH /admin/tournaments/:id_tournament/category/:id_category/priority
   adminUpdateCategoryPriority = async (req: Request, res: Response) => {
     const tournamentId = req.params.id_tournament?.trim();
