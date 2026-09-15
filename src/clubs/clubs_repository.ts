@@ -40,6 +40,8 @@ export type ClubRequestRow = {
   requested_at: string;
 };
 
+export type FeeFrequency = "monthly" | "weekly";
+
 export type ClubDetail = {
   id_club: string;
   name: string;
@@ -48,6 +50,7 @@ export type ClubDetail = {
   header_image_url: string | null;
   crest_image_url: string | null;
   monthly_fee: number | null;
+  fee_frequency: FeeFrequency;
   created_at: string;
   created_by: string;
   members: ClubMemberRow[];
@@ -61,6 +64,13 @@ export type ClubDueRow = {
   amount: number;
   paid: boolean;
   paid_at: string | null;
+};
+
+export type ClubDuesPeriod = {
+  periodStart: string;
+  periodEnd: string;
+  frequency: FeeFrequency;
+  rows: ClubDueRow[];
 };
 
 export type ClubCashMovementRow = {
@@ -183,9 +193,9 @@ export class ClubsRepository {
     const head = await this.pool.query<{
       id_club: string; name: string; description: string | null; founded_date: string | null;
       header_image_url: string | null; crest_image_url: string | null; monthly_fee: string | null;
-      created_at: string; created_by: string | null;
+      fee_frequency: FeeFrequency; created_at: string; created_by: string | null;
     }>(
-      `SELECT id_club, name, description, founded_date, header_image_url, crest_image_url, monthly_fee, created_at, created_by
+      `SELECT id_club, name, description, founded_date, header_image_url, crest_image_url, monthly_fee, fee_frequency, created_at, created_by
        FROM clubs WHERE id_club = $1`,
       [idClub]
     );
@@ -215,6 +225,7 @@ export class ClubsRepository {
       id_club: h.id_club, name: h.name, description: h.description, founded_date: h.founded_date,
       header_image_url: h.header_image_url, crest_image_url: h.crest_image_url,
       monthly_fee: h.monthly_fee === null ? null : Number(h.monthly_fee),
+      fee_frequency: h.fee_frequency,
       created_at: h.created_at,
       created_by: h.created_by!,
       members: membersRes.rows,
@@ -224,13 +235,15 @@ export class ClubsRepository {
 
   async update(idClub: string, patch: {
     name?: string; description?: string | null; founded_date?: string | null; monthly_fee?: number | null;
+    fee_frequency?: FeeFrequency;
   }): Promise<void> {
     await this.pool.query(
       `UPDATE clubs SET
-         name         = COALESCE($2, name),
-         description  = CASE WHEN $3 THEN $4 ELSE description END,
-         founded_date = CASE WHEN $5 THEN $6 ELSE founded_date END,
-         monthly_fee  = CASE WHEN $7 THEN $8 ELSE monthly_fee END
+         name          = COALESCE($2, name),
+         description   = CASE WHEN $3 THEN $4 ELSE description END,
+         founded_date  = CASE WHEN $5 THEN $6 ELSE founded_date END,
+         monthly_fee   = CASE WHEN $7 THEN $8 ELSE monthly_fee END,
+         fee_frequency = COALESCE($9, fee_frequency)
        WHERE id_club = $1`,
       [
         idClub,
@@ -238,6 +251,7 @@ export class ClubsRepository {
         patch.description !== undefined, patch.description ?? null,
         patch.founded_date !== undefined, patch.founded_date ?? null,
         patch.monthly_fee !== undefined, patch.monthly_fee ?? null,
+        patch.fee_frequency ?? null,
       ]
     );
   }
@@ -328,7 +342,30 @@ export class ClubsRepository {
   // defecto desde clubs.monthly_fee salvo que el admin lo pise a mano
   // (ej. una cuota rebajada puntual), por eso `amount` vive en la fila
   // y no se recalcula desde clubs en cada lectura.
-  async getDues(idClub: string, period: string): Promise<ClubDueRow[]> {
+  //
+  // El periodo NO se pide como fecha desde el frontend — se navega con un
+  // `offset` entero (0 = periodo actual, -1 = el anterior, etc.) y acá se
+  // calculan las fechas reales según clubs.fee_frequency (semana ISO o
+  // mes calendario). Así el frontend no necesita saber si el club cobra
+  // semanal o mensual, solo mostrar "Anterior"/"Siguiente".
+  async getDues(idClub: string, offset: number): Promise<ClubDuesPeriod | null> {
+    const club = await this.pool.query<{ fee_frequency: FeeFrequency }>(
+      `SELECT fee_frequency FROM clubs WHERE id_club = $1`,
+      [idClub]
+    );
+    if (club.rowCount === 0) return null;
+    const frequency = club.rows[0].fee_frequency;
+
+    const bounds = await this.pool.query<{ period_start: string; period_end: string }>(
+      frequency === "weekly"
+        ? `SELECT (date_trunc('week', NOW()) + make_interval(weeks => $2::int))::date AS period_start,
+                  (date_trunc('week', NOW()) + make_interval(weeks => $2::int) + INTERVAL '6 days')::date AS period_end`
+        : `SELECT (date_trunc('month', NOW()) + make_interval(months => $2::int))::date AS period_start,
+                  (date_trunc('month', NOW()) + make_interval(months => $2::int) + INTERVAL '1 month' - INTERVAL '1 day')::date AS period_end`,
+      [idClub, offset]
+    );
+    const { period_start, period_end } = bounds.rows[0];
+
     // Alias distinto de "name" a propósito: clubs también tiene una columna
     // "name" (el nombre del club) y con JOIN clubs de por medio, Postgres
     // resuelve un ORDER BY/GROUP BY "name" ambiguo a favor de la columna de
@@ -341,36 +378,51 @@ export class ClubsRepository {
               d.paid_at
        FROM users u
        JOIN clubs c ON c.id_club = u.id_club
-       LEFT JOIN club_dues d ON d.id_club = u.id_club AND d.id_user = u.id_user AND d.period = $2
+       LEFT JOIN club_dues d ON d.id_club = u.id_club AND d.id_user = u.id_user AND d.period_start = $2::date
        WHERE u.id_club = $1
        ORDER BY player_name ASC`,
-      [idClub, period]
+      [idClub, period_start]
     );
-    return res.rows.map((r) => ({
-      id_user: r.id_user, name: r.player_name, email: r.email,
-      amount: r.amount === null ? 0 : Number(r.amount),
-      paid: r.paid ?? false,
-      paid_at: r.paid_at,
-    }));
+
+    return {
+      periodStart: period_start,
+      periodEnd: period_end,
+      frequency,
+      rows: res.rows.map((r) => ({
+        id_user: r.id_user, name: r.player_name, email: r.email,
+        amount: r.amount === null ? 0 : Number(r.amount),
+        paid: r.paid ?? false,
+        paid_at: r.paid_at,
+      })),
+    };
   }
 
-  async setDuePaid(idClub: string, idUser: string, period: string, paid: boolean, amount: number): Promise<void> {
+  async setDuePaid(idClub: string, idUser: string, periodStart: string, paid: boolean, amount: number): Promise<void> {
     await this.pool.query(
-      `INSERT INTO club_dues (id_club, id_user, period, amount, paid, paid_at)
-       VALUES ($1, $2, $3, $4, $5, CASE WHEN $5 THEN NOW() ELSE NULL END)
-       ON CONFLICT (id_club, id_user, period)
+      `INSERT INTO club_dues (id_club, id_user, period_start, period_end, amount, paid, paid_at)
+       SELECT $1, $2, $3::date,
+              CASE WHEN c.fee_frequency = 'weekly'
+                THEN $3::date + INTERVAL '6 days'
+                ELSE ($3::date + INTERVAL '1 month' - INTERVAL '1 day')
+              END,
+              $4, $5, CASE WHEN $5 THEN NOW() ELSE NULL END
+       FROM clubs c WHERE c.id_club = $1
+       ON CONFLICT (id_club, id_user, period_start)
        DO UPDATE SET paid = $5, paid_at = CASE WHEN $5 THEN NOW() ELSE NULL END, amount = $4`,
-      [idClub, idUser, period, amount, paid]
+      [idClub, idUser, periodStart, amount, paid]
     );
   }
 
-  // Morosidad — a diferencia de getDues (una foto de UN mes), esto mira
-  // todos los periodos desde que cada jugador entró al club (fecha de
-  // aprobación de su solicitud; si no hay registro, desde que se creó el
-  // club) hasta el mes actual, y cuenta cuántos quedaron sin pagar. Tope
-  // de 36 meses hacia atrás para no generar una serie enorme en clubes
-  // muy antiguos. Sin cuota mensual configurada no hay nada que deber,
-  // así que el router no llama esto si clubs.monthly_fee es NULL.
+  // Morosidad — a diferencia de getDues (una foto de UN periodo), esto
+  // mira todos los periodos desde que cada jugador entró al club (fecha
+  // de aprobación de su solicitud; si no hay registro, desde que se creó
+  // el club) hasta hoy, y cuenta cuántos quedaron sin pagar. El paso
+  // (semana o mes) sale de clubs.fee_frequency, con un tope hacia atrás
+  // distinto para cada uno (semanal genera muchos más periodos que
+  // mensual en el mismo lapso de tiempo, así que el tope es más corto en
+  // tiempo real para no generar una serie gigante en clubes muy viejos).
+  // Sin cuota configurada no hay nada que deber, así que el router no
+  // llama esto si clubs.monthly_fee es NULL.
   async getArrears(idClub: string): Promise<ClubArrearsRow[]> {
     // Mismo cuidado que getDues con el alias "name" — acá además el GROUP
     // BY usa las columnas reales (u.first_name/u.last_name/u.email), no el
@@ -383,25 +435,38 @@ export class ClubsRepository {
       id_user: string; player_name: string; email: string;
       total_periods: string; paid_periods: string; owed_amount: string;
     }>(
-      `WITH member_start AS (
+      `WITH club AS (
+         SELECT id_club, monthly_fee, fee_frequency, created_at FROM clubs WHERE id_club = $1
+       ),
+       member_start AS (
          SELECT u.id_user,
                 COALESCE(
                   (SELECT MIN(r.decided_at) FROM club_join_requests r
                    WHERE r.id_club = $1 AND r.id_user = u.id_user AND r.status = 'approved'),
-                  c.created_at
-                ) AS start_at
+                  cl.created_at
+                ) AS start_at,
+                cl.fee_frequency
          FROM users u
-         JOIN clubs c ON c.id_club = $1
+         CROSS JOIN club cl
          WHERE u.id_club = $1
        ),
-       periods AS (
-         SELECT ms.id_user, to_char(gs, 'YYYY-MM') AS period
+       bounds AS (
+         SELECT ms.id_user,
+                CASE WHEN ms.fee_frequency = 'weekly'
+                  THEN date_trunc('week', GREATEST(ms.start_at, NOW() - INTERVAL '104 weeks'))
+                  ELSE date_trunc('month', GREATEST(ms.start_at, NOW() - INTERVAL '35 months'))
+                END AS from_ts,
+                CASE WHEN ms.fee_frequency = 'weekly'
+                  THEN date_trunc('week', NOW())
+                  ELSE date_trunc('month', NOW())
+                END AS to_ts,
+                CASE WHEN ms.fee_frequency = 'weekly' THEN make_interval(weeks => 1) ELSE make_interval(months => 1) END AS step
          FROM member_start ms
-         CROSS JOIN LATERAL generate_series(
-           date_trunc('month', GREATEST(ms.start_at, NOW() - INTERVAL '35 months')),
-           date_trunc('month', NOW()),
-           INTERVAL '1 month'
-         ) AS gs
+       ),
+       periods AS (
+         SELECT b.id_user, gs::date AS period_start
+         FROM bounds b
+         CROSS JOIN LATERAL generate_series(b.from_ts, b.to_ts, b.step) AS gs
        )
        SELECT p.id_user, ${NAME_SQL} AS player_name, u.email,
               COUNT(*)::int AS total_periods,
@@ -410,7 +475,7 @@ export class ClubsRepository {
        FROM periods p
        JOIN users u ON u.id_user = p.id_user
        JOIN clubs c ON c.id_club = $1
-       LEFT JOIN club_dues d ON d.id_club = $1 AND d.id_user = p.id_user AND d.period = p.period
+       LEFT JOIN club_dues d ON d.id_club = $1 AND d.id_user = p.id_user AND d.period_start = p.period_start
        GROUP BY p.id_user, u.first_name, u.last_name, u.email
        ORDER BY (COUNT(*) - COUNT(*) FILTER (WHERE d.paid IS TRUE)) DESC, player_name ASC`,
       [idClub]

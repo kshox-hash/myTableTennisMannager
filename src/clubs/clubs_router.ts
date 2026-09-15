@@ -52,12 +52,17 @@ const updateSchema = z.object({
   description: z.string().trim().max(4000).nullable().optional(),
   founded_date: z.string().trim().nullable().optional(),
   monthly_fee: z.number().min(0).max(99999999).nullable().optional(),
+  fee_frequency: z.enum(["monthly", "weekly"]).optional(),
 });
 
 const dueSchema = z.object({
-  period: z.string().trim().regex(/^\d{4}-\d{2}$/, "Periodo inválido (usa YYYY-MM)"),
+  period_start: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha de periodo inválida"),
   paid: z.boolean(),
   amount: z.number().min(0).max(99999999),
+  // Qué periodo está mirando el admin ahora mismo (0 = actual, -1 = el
+  // anterior, etc.) — se usa solo para devolver ESE mismo periodo
+  // actualizado, no siempre el actual, si está revisando uno pasado.
+  offset: z.number().int().min(-1000).max(1000).default(0),
 });
 
 const cashMovementSchema = z.object({
@@ -268,19 +273,22 @@ router.post(
 
 // --- Cuotas ---
 
-// GET /api/v1/clubs/:id_club/dues?period=YYYY-MM  (admin, dueño)
+// GET /api/v1/clubs/:id_club/dues?offset=0  (admin, dueño)
+// offset entero: 0 = periodo actual (semana o mes según clubs.fee_frequency),
+// negativo = periodos anteriores. El frontend no arma fechas, solo navega.
 router.get(
   "/:id_club/dues",
   authRequired,
   requireRole("admin"),
   requireOwnClub,
   asyncHandler(async (req, res) => {
-    const period = typeof req.query.period === "string" ? req.query.period : "";
-    if (!/^\d{4}-\d{2}$/.test(period)) {
-      return res.status(400).json({ ok: false, message: "Periodo inválido (usa YYYY-MM)" });
+    const rawOffset = typeof req.query.offset === "string" ? Number(req.query.offset) : 0;
+    if (!Number.isInteger(rawOffset) || rawOffset < -1000 || rawOffset > 1000) {
+      return res.status(400).json({ ok: false, message: "Offset de periodo inválido" });
     }
-    const rows = await repo.getDues(req.params.id_club, period);
-    return res.json({ ok: true, data: rows });
+    const period = await repo.getDues(req.params.id_club, rawOffset);
+    if (!period) return res.status(404).json({ ok: false, message: "Club no encontrado" });
+    return res.json({ ok: true, data: period });
   })
 );
 
@@ -296,9 +304,9 @@ router.put(
     if (!(await repo.isMember(req.params.id_club, req.params.id_user))) {
       return res.status(404).json({ ok: false, message: "Ese jugador no es socio de este club" });
     }
-    await repo.setDuePaid(req.params.id_club, req.params.id_user, p.data.period, p.data.paid, p.data.amount);
-    const rows = await repo.getDues(req.params.id_club, p.data.period);
-    return res.json({ ok: true, data: rows });
+    await repo.setDuePaid(req.params.id_club, req.params.id_user, p.data.period_start, p.data.paid, p.data.amount);
+    const period = await repo.getDues(req.params.id_club, p.data.offset);
+    return res.json({ ok: true, data: period });
   })
 );
 
