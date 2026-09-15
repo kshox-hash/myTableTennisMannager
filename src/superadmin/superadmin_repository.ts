@@ -39,6 +39,8 @@ export type PlatformStatsRow = {
 export type RegistrationsByDayRow = { day: string; count: number };
 export type GenderBreakdownRow = { gender: string; count: number };
 export type CountryBreakdownRow = { country: string; count: number };
+export type MonthlyRegistrationsRow = { month: string; players: number; admins: number };
+export type TopClubRow = { id_club: string; name: string; member_count: number };
 
 export class SuperadminRepository {
   private pool: Pool;
@@ -168,6 +170,50 @@ export class SuperadminRepository {
        WHERE is_team = false AND country IS NOT NULL AND country <> ''
        GROUP BY country
        ORDER BY count DESC
+       LIMIT $1`,
+      [limit]
+    );
+    return res.rows;
+  }
+
+  // Mismo criterio anti-huecos que getRegistrationsByDay pero agrupado por
+  // mes, separando jugadores de admins (dos series para un gráfico
+  // apilado) — sirve para ver de un vistazo si el crecimiento reciente es
+  // sobre todo jugadores nuevos o admins abriendo cuenta para organizar.
+  async getMonthlyRegistrationsByRole(months: number): Promise<MonthlyRegistrationsRow[]> {
+    const res = await this.pool.query<MonthlyRegistrationsRow>(
+      `WITH bounds AS (
+         SELECT generate_series(
+           date_trunc('month', CURRENT_DATE) - ($1::int - 1) * INTERVAL '1 month',
+           date_trunc('month', CURRENT_DATE),
+           INTERVAL '1 month'
+         )::date AS month
+       )
+       SELECT to_char(b.month, 'YYYY-MM') AS month,
+              COUNT(u.id_user) FILTER (WHERE r.name = 'player')::int AS players,
+              COUNT(u.id_user) FILTER (WHERE r.name = 'admin')::int AS admins
+       FROM bounds b
+       LEFT JOIN users u ON date_trunc('month', u.created_at) = b.month AND u.is_team = false
+       LEFT JOIN roles r ON r.id_role = u.id_role
+       GROUP BY b.month
+       ORDER BY b.month ASC`,
+      [months]
+    );
+    return res.rows;
+  }
+
+  // Clubes curados (con dueño) ordenados por cantidad de socios actuales —
+  // los "clubes" de texto libre de antes del sistema de solicitudes
+  // (created_by IS NULL) quedan afuera, no son un club real que alguien
+  // administre.
+  async getTopClubsByMembers(limit = 8): Promise<TopClubRow[]> {
+    const res = await this.pool.query<TopClubRow>(
+      `SELECT c.id_club, c.name, COUNT(u.id_user)::int AS member_count
+       FROM clubs c
+       LEFT JOIN users u ON u.id_club = c.id_club
+       WHERE c.created_by IS NOT NULL
+       GROUP BY c.id_club, c.name
+       ORDER BY member_count DESC, c.name ASC
        LIMIT $1`,
       [limit]
     );

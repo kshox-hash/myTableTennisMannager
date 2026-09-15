@@ -65,6 +65,26 @@ router.get(
   })
 );
 
+// GET /api/v1/superadmin/stats/monthly-registrations?months=12
+router.get(
+  "/stats/monthly-registrations",
+  asyncHandler(async (req, res) => {
+    const monthsRaw = Number(req.query.months ?? 12);
+    const months = Number.isInteger(monthsRaw) ? Math.min(36, Math.max(3, monthsRaw)) : 12;
+    const rows = await repo.getMonthlyRegistrationsByRole(months);
+    return res.json({ ok: true, data: rows });
+  })
+);
+
+// GET /api/v1/superadmin/stats/top-clubs
+router.get(
+  "/stats/top-clubs",
+  asyncHandler(async (_req, res) => {
+    const rows = await repo.getTopClubsByMembers();
+    return res.json({ ok: true, data: rows });
+  })
+);
+
 // GET /api/v1/superadmin/users/search?q=
 router.get(
   "/users/search",
