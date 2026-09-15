@@ -375,6 +375,68 @@ export class BracketsRepository {
     }
   }
 
+  // Revierte en player_stats TODO lo que este torneo acreditó — se llama
+  // desde AdminTournamentRepository.deleteTournament justo antes del DELETE
+  // en cascada. player_stats es la única tabla que NO cuelga del torneo por
+  // FK (es un acumulado global de carrera por jugador), así que borrar el
+  // torneo sin esto dejaba matches_played/won/lost/sets/ranking_points de
+  // sus partidos para siempre, sin ningún rastro de dónde salieron. No hace
+  // falta caminar la cadena de avance de llave (a diferencia de
+  // undoBracketMatchResult): acá se borra el cuadro entero igual, así que
+  // no hay nada que "desenganchar" de un partido siguiente — solo revertir
+  // los números. Los BYE nunca acreditan stats (ver advanceBracketWinner),
+  // así que no hace falta tocarlos.
+  async reverseTournamentStats(client: PoolClient, tournamentId: string): Promise<void> {
+    const isRanked = await this.isTournamentRanked(client, tournamentId);
+    const pointsToRevert = GLOBAL_RANKING_ENABLED && isRanked ? RANKING_POINTS_PER_WIN : 0;
+
+    const groupRes = await client.query<{
+      winner_id: string; player1_id: string; player2_id: string; sets_player1: number; sets_player2: number;
+    }>(
+      `SELECT winner_id, player1_id, player2_id, sets_player1, sets_player2
+       FROM group_matches
+       WHERE id_tournament = $1 AND status IN ('played', 'walkover') AND winner_id IS NOT NULL`,
+      [tournamentId]
+    );
+    const bracketRes = await client.query<{
+      winner_id: string; player1_id: string; player2_id: string; sets_player1: number; sets_player2: number;
+    }>(
+      `SELECT winner_id, player1_id, player2_id, sets_player1, sets_player2
+       FROM bracket_matches
+       WHERE id_tournament = $1 AND status IN ('played', 'walkover') AND winner_id IS NOT NULL`,
+      [tournamentId]
+    );
+
+    for (const m of [...groupRes.rows, ...bracketRes.rows]) {
+      const winnerIsP1 = m.winner_id === m.player1_id;
+      const loserId = winnerIsP1 ? m.player2_id : m.player1_id;
+      const winnerSetsFor = winnerIsP1 ? m.sets_player1 : m.sets_player2;
+      const winnerSetsAgainst = winnerIsP1 ? m.sets_player2 : m.sets_player1;
+
+      for (const id of await this.statTargets(client, m.winner_id)) {
+        await client.query(
+          `UPDATE player_stats
+           SET matches_played = matches_played - 1, matches_won = matches_won - 1,
+               sets_won = sets_won - $1, sets_lost = sets_lost - $2,
+               ranking_points = ranking_points - $3, updated_at = NOW()
+           WHERE id_user = $4`,
+          [winnerSetsFor, winnerSetsAgainst, pointsToRevert, id]
+        );
+      }
+      if (loserId) {
+        for (const id of await this.statTargets(client, loserId)) {
+          await client.query(
+            `UPDATE player_stats
+             SET matches_played = matches_played - 1, matches_lost = matches_lost - 1,
+                 sets_won = sets_won - $1, sets_lost = sets_lost - $2, updated_at = NOW()
+             WHERE id_user = $3`,
+            [winnerSetsAgainst, winnerSetsFor, id]
+          );
+        }
+      }
+    }
+  }
+
   async recordMatchResult(params: {
     matchId: string;
     groupId: string;

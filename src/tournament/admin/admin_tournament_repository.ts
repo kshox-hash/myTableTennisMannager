@@ -2,6 +2,7 @@ import type { Pool, PoolClient, QueryResult } from "pg";
 import DB from "../../db/db_configuration";
 import { NotificationsRepository } from "../../notifications/notifications_repository";
 import { ActivityLogRepository, type ActivityLogRow } from "../../activity/activity_log_repository";
+import { BracketsRepository } from "../../brackets/brackets_repository";
 
 import type {
   TournamentCreateDTO,
@@ -85,6 +86,7 @@ export class AdminTournamentRepository {
   private pool: Pool;
   private notifications: NotificationsRepository;
   private activityLog: ActivityLogRepository;
+  private brackets: BracketsRepository;
 
   private tournamentsTable = "tournaments";
   private enrollmentsTable = "enrollments";
@@ -96,6 +98,7 @@ export class AdminTournamentRepository {
     this.pool = pool ?? DB.getPool();
     this.notifications = new NotificationsRepository(this.pool);
     this.activityLog = new ActivityLogRepository(this.pool);
+    this.brackets = new BracketsRepository(this.pool);
   }
 
   // -----------------------
@@ -1432,6 +1435,12 @@ export class AdminTournamentRepository {
         await client.query("ROLLBACK");
         return { deleted: false, error: "NOT_TOURNAMENT_OWNER" };
       }
+
+      // Antes de borrar en cascada — player_stats no cuelga del torneo por
+      // FK (es un acumulado global de carrera), así que sin esto los
+      // partidos de este torneo quedaban sumados ahí para siempre aunque
+      // el torneo ya no existiera.
+      await this.brackets.reverseTournamentStats(client, idTournament);
 
       await client.query(`DELETE FROM ${this.tournamentsTable} WHERE id_tournament = $1`, [idTournament]);
 
