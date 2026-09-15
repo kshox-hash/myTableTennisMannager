@@ -27,6 +27,44 @@ router.get(
   })
 );
 
+// GET /api/v1/superadmin/stats — KPIs generales de la plataforma
+router.get(
+  "/stats",
+  asyncHandler(async (_req, res) => {
+    const data = await repo.getPlatformStats();
+    return res.json({ ok: true, data });
+  })
+);
+
+// GET /api/v1/superadmin/stats/registrations?days=30
+router.get(
+  "/stats/registrations",
+  asyncHandler(async (req, res) => {
+    const daysRaw = Number(req.query.days ?? 30);
+    const days = Number.isInteger(daysRaw) ? Math.min(365, Math.max(7, daysRaw)) : 30;
+    const rows = await repo.getRegistrationsByDay(days);
+    return res.json({ ok: true, data: rows });
+  })
+);
+
+// GET /api/v1/superadmin/stats/gender
+router.get(
+  "/stats/gender",
+  asyncHandler(async (_req, res) => {
+    const rows = await repo.getGenderBreakdown();
+    return res.json({ ok: true, data: rows });
+  })
+);
+
+// GET /api/v1/superadmin/stats/countries
+router.get(
+  "/stats/countries",
+  asyncHandler(async (_req, res) => {
+    const rows = await repo.getCountryBreakdown();
+    return res.json({ ok: true, data: rows });
+  })
+);
+
 // GET /api/v1/superadmin/users/search?q=
 router.get(
   "/users/search",

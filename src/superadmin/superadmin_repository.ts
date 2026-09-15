@@ -22,6 +22,24 @@ export type UserSearchRow = {
   created_at: string;
 };
 
+export type PlatformStatsRow = {
+  total_users: number;
+  total_players: number;
+  total_admins: number;
+  active_users: number;
+  currently_enrolled_users: number;
+  total_clubs: number;
+  total_tournaments: number;
+  active_tournaments: number;
+  new_users_today: number;
+  new_users_week: number;
+  new_users_month: number;
+};
+
+export type RegistrationsByDayRow = { day: string; count: number };
+export type GenderBreakdownRow = { gender: string; count: number };
+export type CountryBreakdownRow = { country: string; count: number };
+
 export class SuperadminRepository {
   private pool: Pool;
   constructor(pool?: Pool) {
@@ -70,6 +88,88 @@ export class SuperadminRepository {
        ORDER BY u.last_name NULLS LAST, u.first_name NULLS LAST, u.email ASC
        LIMIT $2`,
       [`%${q}%`, limit]
+    );
+    return res.rows;
+  }
+
+  // Panel de estadísticas de la plataforma — todo en una sola consulta
+  // (subconsultas escalares en paralelo dentro del mismo SELECT) para no
+  // hacer 10 round-trips separados. `is_team = false` en todos lados:
+  // los usuarios "equipo" sintéticos de dobles (ver migración 044) no son
+  // personas reales, no deben contar en ninguna métrica.
+  //
+  // "Activos" = jugaron al menos un partido de verdad (player_stats.
+  // matches_played > 0) — no hay tracking de último login en el sistema,
+  // así que "activo" no puede significar "entró hace poco"; esto mide
+  // compromiso real con la plataforma en vez de solo tener una cuenta.
+  //
+  // "Actualmente inscritos" = inscripción activa en un torneo que sigue
+  // activo (no cancelado) — un torneo cancelado o ya terminado no cuenta
+  // como "ahora mismo compitiendo".
+  async getPlatformStats(): Promise<PlatformStatsRow> {
+    const res = await this.pool.query<PlatformStatsRow>(
+      `SELECT
+         (SELECT COUNT(*) FROM users WHERE is_team = false)::int AS total_users,
+         (SELECT COUNT(*) FROM users u JOIN roles r ON r.id_role = u.id_role
+            WHERE r.name = 'player' AND u.is_team = false)::int AS total_players,
+         (SELECT COUNT(*) FROM users u JOIN roles r ON r.id_role = u.id_role
+            WHERE r.name = 'admin' AND u.is_team = false)::int AS total_admins,
+         (SELECT COUNT(*) FROM player_stats WHERE matches_played > 0)::int AS active_users,
+         (SELECT COUNT(DISTINCT e.id_user) FROM enrollments e
+            JOIN tournaments t ON t.id_tournament = e.id_tournament
+            WHERE e.status = 'active' AND t.status = 'active')::int AS currently_enrolled_users,
+         (SELECT COUNT(*) FROM clubs WHERE created_by IS NOT NULL)::int AS total_clubs,
+         (SELECT COUNT(*) FROM tournaments)::int AS total_tournaments,
+         (SELECT COUNT(*) FROM tournaments WHERE status = 'active')::int AS active_tournaments,
+         (SELECT COUNT(*) FROM users WHERE is_team = false AND created_at >= CURRENT_DATE)::int AS new_users_today,
+         (SELECT COUNT(*) FROM users WHERE is_team = false AND created_at >= CURRENT_DATE - INTERVAL '7 days')::int AS new_users_week,
+         (SELECT COUNT(*) FROM users WHERE is_team = false AND created_at >= CURRENT_DATE - INTERVAL '30 days')::int AS new_users_month`
+    );
+    return res.rows[0];
+  }
+
+  // Serie diaria de registros para el gráfico — generate_series rellena
+  // los días sin ningún registro con 0 en vez de saltárselos, así el
+  // gráfico no tiene huecos silenciosos que se puedan confundir con "no
+  // se cargó el dato".
+  async getRegistrationsByDay(days: number): Promise<RegistrationsByDayRow[]> {
+    const res = await this.pool.query<RegistrationsByDayRow>(
+      `WITH bounds AS (
+         SELECT generate_series(
+           CURRENT_DATE - ($1::int - 1) * INTERVAL '1 day',
+           CURRENT_DATE,
+           INTERVAL '1 day'
+         )::date AS day
+       )
+       SELECT to_char(b.day, 'YYYY-MM-DD') AS day, COUNT(u.id_user)::int AS count
+       FROM bounds b
+       LEFT JOIN users u ON DATE(u.created_at) = b.day AND u.is_team = false
+       GROUP BY b.day
+       ORDER BY b.day ASC`,
+      [days]
+    );
+    return res.rows;
+  }
+
+  async getGenderBreakdown(): Promise<GenderBreakdownRow[]> {
+    const res = await this.pool.query<GenderBreakdownRow>(
+      `SELECT COALESCE(NULLIF(gender, ''), 'unknown') AS gender, COUNT(*)::int AS count
+       FROM users WHERE is_team = false
+       GROUP BY 1
+       ORDER BY count DESC`
+    );
+    return res.rows;
+  }
+
+  async getCountryBreakdown(limit = 8): Promise<CountryBreakdownRow[]> {
+    const res = await this.pool.query<CountryBreakdownRow>(
+      `SELECT country, COUNT(*)::int AS count
+       FROM users
+       WHERE is_team = false AND country IS NOT NULL AND country <> ''
+       GROUP BY country
+       ORDER BY count DESC
+       LIMIT $1`,
+      [limit]
     );
     return res.rows;
   }
