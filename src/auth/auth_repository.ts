@@ -20,9 +20,16 @@ export class AuthRepository {
     this.pool = pool ?? DB.getPool();
   }
 
+  // Solo empareja/crea clubes SIN dueño (texto libre de antes del sistema
+  // de solicitudes — ver clubs_repository.ts). Antes buscaba por nombre
+  // contra CUALQUIER club, incluidos los que un admin ya creó y cura con
+  // aprobación manual — un jugador podía escribir el nombre exacto de un
+  // club real y quedar adentro directo, sin pasar por la solicitud que el
+  // dueño tiene que aceptar. Un club con dueño solo se entra vía
+  // ClubsRepository.decide() (solicitud aprobada).
   private async findOrCreateClub(clubName: string): Promise<string> {
     const existing = await this.pool.query<{ id_club: string }>(
-      `SELECT id_club FROM clubs WHERE LOWER(name) = LOWER($1) LIMIT 1`,
+      `SELECT id_club FROM clubs WHERE LOWER(name) = LOWER($1) AND created_by IS NULL LIMIT 1`,
       [clubName]
     );
     if (existing.rows[0]) return existing.rows[0].id_club;
