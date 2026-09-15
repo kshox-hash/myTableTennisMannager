@@ -22,3 +22,14 @@ const SUPERADMIN_EMAILS = new Set(
 export function resolveEffectiveRole(email: string, dbRole: DbRole): EffectiveRole {
   return SUPERADMIN_EMAILS.has(email.trim().toLowerCase()) ? "superadmin" : dbRole;
 }
+
+export function isSuperadminEmail(email: string): boolean {
+  return SUPERADMIN_EMAILS.has(email.trim().toLowerCase());
+}
+
+// Para filtrar estas cuentas fuera de listados/conteos de "admin" (panel de
+// Súper usuario) — su rol efectivo es "superadmin", no deberían aparecer
+// mezcladas con los admins comunes ni sumar al conteo de admins.
+export function getSuperadminEmails(): string[] {
+  return [...SUPERADMIN_EMAILS];
+}

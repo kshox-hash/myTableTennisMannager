@@ -1,6 +1,6 @@
 import type { Pool } from "pg";
 import DB from "../db/db_configuration";
-import { ROLE_IDS, type DbRole } from "../core/constants/roles";
+import { ROLE_IDS, type DbRole, getSuperadminEmails } from "../core/constants/roles";
 
 export type AdminSummaryRow = {
   id_user: string;
@@ -52,7 +52,13 @@ export class SuperadminRepository {
   // distintos les tocó jugar en esos torneos, y cuándo fue la última vez
   // que quedó algo registrado en activity_log para alguno de ellos —
   // reusa tablas que ya existen, sin migración nueva.
+  //
+  // Excluye las cuentas de superadmin (su rol efectivo es "superadmin", no
+  // "admin" — aunque en la base sigan guardadas con id_role = admin, no
+  // corresponde que aparezcan mezcladas en el listado de admins comunes,
+  // ni que "Quitar rol admin" tenga sentido para ellas).
   async listAdmins(): Promise<AdminSummaryRow[]> {
+    const superadminEmails = getSuperadminEmails();
     const res = await this.pool.query<AdminSummaryRow>(
       `SELECT
          u.id_user, u.email, u.first_name, u.last_name, u.created_at,
@@ -64,9 +70,9 @@ export class SuperadminRepository {
             JOIN tournaments t ON t.id_tournament = al.id_tournament
             WHERE t.created_by = u.id_user) AS last_activity_at
        FROM users u
-       WHERE u.id_role = $1
+       WHERE u.id_role = $1 AND NOT (LOWER(u.email) = ANY($2::text[]))
        ORDER BY u.created_at DESC`,
-      [ROLE_IDS.admin]
+      [ROLE_IDS.admin, superadminEmails]
     );
     return res.rows;
   }
@@ -109,13 +115,14 @@ export class SuperadminRepository {
   // activo (no cancelado) — un torneo cancelado o ya terminado no cuenta
   // como "ahora mismo compitiendo".
   async getPlatformStats(): Promise<PlatformStatsRow> {
+    const superadminEmails = getSuperadminEmails();
     const res = await this.pool.query<PlatformStatsRow>(
       `SELECT
          (SELECT COUNT(*) FROM users WHERE is_team = false)::int AS total_users,
          (SELECT COUNT(*) FROM users u JOIN roles r ON r.id_role = u.id_role
             WHERE r.name = 'player' AND u.is_team = false)::int AS total_players,
          (SELECT COUNT(*) FROM users u JOIN roles r ON r.id_role = u.id_role
-            WHERE r.name = 'admin' AND u.is_team = false)::int AS total_admins,
+            WHERE r.name = 'admin' AND u.is_team = false AND NOT (LOWER(u.email) = ANY($1::text[])))::int AS total_admins,
          (SELECT COUNT(*) FROM player_stats WHERE matches_played > 0)::int AS active_users,
          (SELECT COUNT(DISTINCT e.id_user) FROM enrollments e
             JOIN tournaments t ON t.id_tournament = e.id_tournament
@@ -125,7 +132,8 @@ export class SuperadminRepository {
          (SELECT COUNT(*) FROM tournaments WHERE status = 'active')::int AS active_tournaments,
          (SELECT COUNT(*) FROM users WHERE is_team = false AND created_at >= CURRENT_DATE)::int AS new_users_today,
          (SELECT COUNT(*) FROM users WHERE is_team = false AND created_at >= CURRENT_DATE - INTERVAL '7 days')::int AS new_users_week,
-         (SELECT COUNT(*) FROM users WHERE is_team = false AND created_at >= CURRENT_DATE - INTERVAL '30 days')::int AS new_users_month`
+         (SELECT COUNT(*) FROM users WHERE is_team = false AND created_at >= CURRENT_DATE - INTERVAL '30 days')::int AS new_users_month`,
+      [superadminEmails]
     );
     return res.rows[0];
   }
@@ -181,6 +189,7 @@ export class SuperadminRepository {
   // apilado) — sirve para ver de un vistazo si el crecimiento reciente es
   // sobre todo jugadores nuevos o admins abriendo cuenta para organizar.
   async getMonthlyRegistrationsByRole(months: number): Promise<MonthlyRegistrationsRow[]> {
+    const superadminEmails = getSuperadminEmails();
     const res = await this.pool.query<MonthlyRegistrationsRow>(
       `WITH bounds AS (
          SELECT generate_series(
@@ -191,13 +200,15 @@ export class SuperadminRepository {
        )
        SELECT to_char(b.month, 'YYYY-MM') AS month,
               COUNT(u.id_user) FILTER (WHERE r.name = 'player')::int AS players,
-              COUNT(u.id_user) FILTER (WHERE r.name = 'admin')::int AS admins
+              COUNT(u.id_user) FILTER (
+                WHERE r.name = 'admin' AND NOT (LOWER(u.email) = ANY($2::text[]))
+              )::int AS admins
        FROM bounds b
        LEFT JOIN users u ON date_trunc('month', u.created_at) = b.month AND u.is_team = false
        LEFT JOIN roles r ON r.id_role = u.id_role
        GROUP BY b.month
        ORDER BY b.month ASC`,
-      [months]
+      [months, superadminEmails]
     );
     return res.rows;
   }
