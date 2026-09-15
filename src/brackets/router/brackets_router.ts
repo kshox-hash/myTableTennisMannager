@@ -256,4 +256,15 @@ router.patch(
   asyncHandler(controller.setBracketMatchReferee)
 );
 
+// Deshacer un resultado de partido de LLAVE ya cargado (ej: error de
+// digitación) — mismo espíritu que el undo de grupos, ver undoBracketMatchResult.
+// POST /api/v1/bracket/bracket-matches/:id_match/undo
+router.post(
+  "/bracket-matches/:id_match/undo",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(resolveTournamentFromBracketMatch),
+  asyncHandler(controller.undoBracketResult)
+);
+
 export default router;

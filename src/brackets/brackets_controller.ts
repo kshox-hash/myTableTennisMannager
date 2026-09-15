@@ -295,6 +295,29 @@ export class BracketsController {
     return res.json({ ok: true, data: result.data });
   };
 
+  // POST /api/v1/bracket/bracket-matches/:id_match/undo
+  undoBracketResult = async (req: Request, res: Response) => {
+    const matchId = req.params.id_match?.trim();
+    const result = await this.service.undoBracketMatchResult(matchId, req.user!.id_user);
+
+    if (!result.ok) {
+      const status =
+        result.error === BRACKETS_ERRORS.MATCH_NOT_FOUND ? 404 :
+        409;
+
+      const messages: Record<string, string> = {
+        [BRACKETS_ERRORS.MATCH_NOT_FOUND]: "Partido no encontrado",
+        [BRACKETS_ERRORS.MATCH_NOT_PLAYED]: "Este partido todavía no tiene resultado cargado",
+        [BRACKETS_ERRORS.BRACKET_RESULT_ALREADY_ADVANCED]:
+          "El ganador de este partido ya avanzó a un partido que ya se jugó — deshaz primero ese resultado más adelante en el cuadro",
+      };
+
+      return res.status(status).json({ ok: false, message: messages[result.error] ?? result.error });
+    }
+
+    return res.json({ ok: true, data: result.data });
+  };
+
   // ─── CUADRO ELIMINATORIO ─────────────────────────────────
 
   // POST /api/v1/bracket/tournaments/:id_tournament/categories/:id_category/generate-bracket

@@ -607,6 +607,121 @@ export class BracketsRepository {
     });
   }
 
+  // Deshace un resultado de partido de LLAVE ya cargado (ej: error de
+  // digitación) — hasta ahora esto solo existía para grupos. A diferencia
+  // de grupos, acá el resultado puede haber disparado una cadena de BYEs
+  // automáticos (ver advanceBracketWinner: si el otro cupo del siguiente
+  // partido está muerto, se resuelve solo y el ganador sigue avanzando,
+  // puede repetirse varias rondas). Por eso primero se camina esa misma
+  // cadena hacia adelante (con FOR UPDATE en cada partido, para no pisarse
+  // con un recordBracketResult concurrente) y si CUALQUIER partido de la
+  // cadena ya tiene un resultado real (jugado o walkover) se aborta todo
+  // sin escribir nada — esa consecuencia ya se consumió más adelante y hay
+  // que deshacerla primero ahí. Si la cadena está libre, se revierte el
+  // partido original y cada eslabón de la cadena (un BYE se vuelve a
+  // 'pending' vacío; el partido "ready" en el que había quedado esperando
+  // el ganador también vuelve a 'pending' con ese cupo vacío de nuevo).
+  async undoBracketMatchResult(params: {
+    matchId: string;
+    winnerId: string;
+    loserId: string;
+    winnerSetsFor: number;
+    winnerSetsAgainst: number;
+    tournamentId: string;
+    categoryId: string;
+    requestedBy: string;
+  }): Promise<{ undone: true } | { undone: false; error: "BRACKET_RESULT_ALREADY_ADVANCED" }> {
+    const { matchId, winnerId, loserId, winnerSetsFor, winnerSetsAgainst, tournamentId, categoryId, requestedBy } = params;
+
+    return this.withTransaction(async (client) => {
+      const isRanked = await this.isTournamentRanked(client, tournamentId);
+      const pointsToRevert = GLOBAL_RANKING_ENABLED && isRanked ? RANKING_POINTS_PER_WIN : 0;
+
+      const startRes = await client.query<{
+        next_round: number | null; next_match_number: number | null; next_match_slot: 1 | 2 | null;
+      }>(
+        `SELECT next_round, next_match_number, next_match_slot FROM bracket_matches WHERE id_match = $1 FOR UPDATE`,
+        [matchId]
+      );
+      let round = startRes.rows[0]?.next_round ?? null;
+      let matchNumber = startRes.rows[0]?.next_match_number ?? null;
+      let slot = startRes.rows[0]?.next_match_slot ?? null;
+
+      const chain: string[] = [];
+      while (round && matchNumber && slot) {
+        const nextRes = await client.query<{
+          id_match: string; status: string;
+          next_round: number | null; next_match_number: number | null; next_match_slot: 1 | 2 | null;
+        }>(
+          `SELECT id_match, status, next_round, next_match_number, next_match_slot
+           FROM bracket_matches
+           WHERE id_tournament = $1 AND id_category = $2 AND round = $3 AND match_number = $4
+           FOR UPDATE`,
+          [tournamentId, categoryId, round, matchNumber]
+        );
+        const next = nextRes.rows[0];
+        if (!next) break;
+        if (next.status === "played" || next.status === "walkover") {
+          return { undone: false, error: "BRACKET_RESULT_ALREADY_ADVANCED" };
+        }
+        chain.push(next.id_match);
+        if (next.status !== "bye") break; // no se encadenó más allá de acá
+        round = next.next_round;
+        matchNumber = next.next_match_number;
+        slot = next.next_match_slot;
+      }
+
+      await client.query(
+        `UPDATE bracket_matches
+         SET winner_id = NULL, sets_player1 = 0, sets_player2 = 0,
+             status = 'ready', played_at = NULL, set_scores = NULL,
+             table_number = played_table_number, played_table_number = NULL
+         WHERE id_match = $1`,
+        [matchId]
+      );
+
+      for (const id of chain) {
+        await client.query(
+          `UPDATE bracket_matches
+           SET player1_id = CASE WHEN player1_id = $1 THEN NULL ELSE player1_id END,
+               player2_id = CASE WHEN player2_id = $1 THEN NULL ELSE player2_id END,
+               winner_id  = CASE WHEN status = 'bye' THEN NULL ELSE winner_id END,
+               is_bye     = CASE WHEN status = 'bye' THEN FALSE ELSE is_bye END,
+               played_at  = CASE WHEN status = 'bye' THEN NULL ELSE played_at END,
+               status     = CASE WHEN status IN ('bye', 'ready') THEN 'pending' ELSE status END
+           WHERE id_match = $2`,
+          [winnerId, id]
+        );
+      }
+
+      // Mismas cantidades que se acreditaron en recordBracketResult, en
+      // dobles a los dos jugadores de la pareja (ver statTargets).
+      for (const id of await this.statTargets(client, winnerId)) {
+        await client.query(
+          `UPDATE player_stats
+           SET matches_played = matches_played - 1, matches_won = matches_won - 1,
+               sets_won = sets_won - $1, sets_lost = sets_lost - $2,
+               ranking_points = ranking_points - $3, updated_at = NOW()
+           WHERE id_user = $4`,
+          [winnerSetsFor, winnerSetsAgainst, pointsToRevert, id]
+        );
+      }
+      for (const id of await this.statTargets(client, loserId)) {
+        await client.query(
+          `UPDATE player_stats
+           SET matches_played = matches_played - 1, matches_lost = matches_lost - 1,
+               sets_won = sets_won - $1, sets_lost = sets_lost - $2, updated_at = NOW()
+           WHERE id_user = $3`,
+          [winnerSetsAgainst, winnerSetsFor, id]
+        );
+      }
+
+      await this.activityLog.record(tournamentId, requestedBy, "bracket_result_undone", null, client);
+
+      return { undone: true };
+    });
+  }
+
   // ─── CUADRO ELIMINATORIO ─────────────────────────────────
 
   async bracketExists(tournamentId: string, categoryId: string): Promise<boolean> {

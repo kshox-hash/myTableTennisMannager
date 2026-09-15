@@ -817,4 +817,41 @@ export class BracketsService {
 
     return ok({ recorded: true, tournamentId: match.id_tournament, categoryId: match.id_category });
   }
+
+  // Deshace un resultado de partido de LLAVE ya cargado (ej: error de
+  // digitación) — mismo espíritu que undoGroupMatchResult, pero acá no
+  // hay guard de fase (la fase "bracket" dura toda la eliminatoria, a
+  // diferencia de "groups"): el guard real vive en el repo, que aborta si
+  // el resultado ya avanzó a un partido más adelante que a su vez ya se
+  // jugó de verdad.
+  async undoBracketMatchResult(
+    matchId: string,
+    requestedBy: string
+  ): Promise<Result<{ undone: true; tournamentId: string; categoryId: string }, BracketsError>> {
+    const match = await this.repo.findBracketMatch(matchId);
+    if (!match) return fail(BRACKETS_ERRORS.MATCH_NOT_FOUND);
+    if (match.status !== "played" && match.status !== "walkover") return fail(BRACKETS_ERRORS.MATCH_NOT_PLAYED);
+    if (!match.winner_id) return fail(BRACKETS_ERRORS.MATCH_NOT_PLAYED);
+
+    const winnerIsPlayer1 = match.winner_id === match.player1_id;
+    const loserId = winnerIsPlayer1 ? match.player2_id : match.player1_id;
+    if (!loserId) return fail(BRACKETS_ERRORS.MATCH_NOT_PLAYED);
+
+    const winnerSetsFor     = winnerIsPlayer1 ? match.sets_player1 : match.sets_player2;
+    const winnerSetsAgainst = winnerIsPlayer1 ? match.sets_player2 : match.sets_player1;
+
+    const result = await this.repo.undoBracketMatchResult({
+      matchId,
+      winnerId: match.winner_id,
+      loserId,
+      winnerSetsFor,
+      winnerSetsAgainst,
+      tournamentId: match.id_tournament,
+      categoryId: match.id_category,
+      requestedBy,
+    });
+    if (!result.undone) return fail(BRACKETS_ERRORS.BRACKET_RESULT_ALREADY_ADVANCED);
+
+    return ok({ undone: true, tournamentId: match.id_tournament, categoryId: match.id_category });
+  }
 }

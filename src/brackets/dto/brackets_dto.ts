@@ -48,6 +48,11 @@ export const BRACKETS_ERRORS = {
   // El id_match indicado no es una pre-llave manual con un cupo libre
   // (o ya se llenó, o no existe, o no es de esta categoría).
   PRE_ROUND_SLOT_NOT_FOUND: "PRE_ROUND_SLOT_NOT_FOUND",
+  // El ganador de este partido ya avanzó a un partido más adelante en el
+  // cuadro que a su vez ya tiene un resultado real cargado (jugado o por
+  // walkover) — esa consecuencia ya se consumió, hay que deshacer primero
+  // el/los resultado(s) de más adelante en el cuadro.
+  BRACKET_RESULT_ALREADY_ADVANCED: "BRACKET_RESULT_ALREADY_ADVANCED",
 } as const;
 
 export type BracketsError = (typeof BRACKETS_ERRORS)[keyof typeof BRACKETS_ERRORS];

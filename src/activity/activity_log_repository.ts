@@ -7,6 +7,7 @@ export type ActivityAction =
   | "table_assigned"
   | "table_released"
   | "match_result_undone"
+  | "bracket_result_undone"
   | "bracket_generated";
 
 export type ActivityLogRow = {
