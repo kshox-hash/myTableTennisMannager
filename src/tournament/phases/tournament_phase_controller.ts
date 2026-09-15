@@ -38,6 +38,15 @@ function parseGroupOrder(value: unknown): GroupOrderInput | undefined {
   return parsed.length > 0 ? parsed : undefined;
 }
 
+// Mismo shape que parseGroupOrder (array de strings no vacíos) — acá son
+// los id_user que el admin vio en la previsualización de Sembrado, para
+// poder detectar si el roster cambió entre previsualizar y confirmar (ver
+// GROUPS_OUT_OF_DATE en el service, que ahora compara esto en vez de solo
+// los nombres de grupo resultantes).
+function parsePlayerIds(value: unknown): string[] | undefined {
+  return parseGroupOrder(value);
+}
+
 export class TournamentPhaseController {
   constructor(private service: TournamentPhaseService) {}
 
@@ -73,8 +82,9 @@ export class TournamentPhaseController {
     const { id_tournament, id_category } = req.params;
     const bestOfSets = parseBestOfSets(req.body.best_of_sets, 5);
     const groupOrder = parseGroupOrder(req.body.group_order);
+    const playerIds = parsePlayerIds(req.body.player_ids);
 
-    const result = await this.service.advanceToGroups(id_category, id_tournament, bestOfSets, groupOrder);
+    const result = await this.service.advanceToGroups(id_category, id_tournament, bestOfSets, groupOrder, playerIds);
 
     if (!result.ok) {
       if (result.error === PHASE_ERRORS.CATEGORY_NOT_FOUND)

@@ -130,7 +130,8 @@ export class BracketsService {
     tournamentId: string,
     categoryId: string,
     input: GenerateGroupsInput,
-    groupOrder?: GroupOrderInput
+    groupOrder?: GroupOrderInput,
+    expectedPlayerIds?: string[]
   ): Promise<Result<CategoryGroupsView, BracketsError>> {
     const alreadyExist = await this.repo.groupsExist(tournamentId, categoryId);
     if (alreadyExist) return fail(BRACKETS_ERRORS.GROUPS_ALREADY_EXIST);
@@ -138,15 +139,31 @@ export class BracketsService {
     const players = await this.repo.loadPlayersForCategory(tournamentId, categoryId);
     if (players.length < 2) return fail(BRACKETS_ERRORS.NOT_ENOUGH_PLAYERS);
 
+    if (expectedPlayerIds) {
+      // Confirmando un fixture ya previsualizado: los inscritos activos
+      // ahora mismo tienen que ser EXACTAMENTE los mismos que vio el admin
+      // al previsualizar — antes esto solo comparaba los NOMBRES de grupo
+      // resultantes (GR-1, GR-2...), que podían coincidir por pura
+      // casualidad (mismo total de grupos) aunque la composición real
+      // hubiera cambiado — p.ej. alguien se autoinscribió mientras el
+      // admin miraba Sembrado (las inscripciones se mantienen abiertas
+      // durante todo el sembrado, a propósito). Mismo criterio que ya usa
+      // generateBracket para SEEDING_OUT_OF_DATE.
+      const currentIds = new Set(players.map((p) => p.id_user));
+      const expectedIds = new Set(expectedPlayerIds);
+      const sameRoster =
+        currentIds.size === expectedIds.size && [...currentIds].every((id) => expectedIds.has(id));
+      if (!sameRoster) return fail(BRACKETS_ERRORS.GROUPS_OUT_OF_DATE);
+    }
+
     const generated = generateGroupsFromPlayers(players, {
       bestOfGroups: input.best_of_sets ?? 3,
     });
 
     if (groupOrder) {
-      // Confirmando un fixture ya previsualizado: el orden elegido debe
-      // cubrir exactamente los mismos grupos que arma el algoritmo ahora
-      // mismo — si no, algo cambió entre previsualizar y confirmar (p.ej.
-      // se agregó/sacó un inscrito) y hay que volver a previsualizar.
+      // Orden de juego elegido por el admin — ya se validó arriba que el
+      // roster no cambió, así que los nombres de grupo que arma el
+      // algoritmo ahora mismo necesariamente son los mismos que vio.
       const currentNames = new Set(generated.groups.map((g) => g.group_name));
       const givenNames = new Set(groupOrder);
       const sameSet = currentNames.size === givenNames.size && [...currentNames].every((n) => givenNames.has(n));

@@ -35,7 +35,8 @@ export class TournamentPhaseService {
     id_category: string,
     id_tournament: string,
     bestOfSets: 3 | 5 | 7 = 3,
-    groupOrder?: GroupOrderInput
+    groupOrder?: GroupOrderInput,
+    expectedPlayerIds?: string[]
   ) {
     const cat = await this.repo.getCategoryPhase(id_category);
     if (!cat) return { ok: false as const, error: PHASE_ERRORS.CATEGORY_NOT_FOUND };
@@ -45,7 +46,8 @@ export class TournamentPhaseService {
       id_tournament,
       id_category,
       { best_of_sets: bestOfSets },
-      groupOrder
+      groupOrder,
+      expectedPlayerIds
     );
     if (!result.ok) return result;
 
