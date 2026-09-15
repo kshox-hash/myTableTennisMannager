@@ -329,8 +329,13 @@ export class ClubsRepository {
   // (ej. una cuota rebajada puntual), por eso `amount` vive en la fila
   // y no se recalcula desde clubs en cada lectura.
   async getDues(idClub: string, period: string): Promise<ClubDueRow[]> {
-    const res = await this.pool.query<{ id_user: string; name: string; email: string; amount: string | null; paid: boolean | null; paid_at: string | null }>(
-      `SELECT u.id_user, ${NAME_SQL} AS name, u.email,
+    // Alias distinto de "name" a propósito: clubs también tiene una columna
+    // "name" (el nombre del club) y con JOIN clubs de por medio, Postgres
+    // resuelve un ORDER BY/GROUP BY "name" ambiguo a favor de la columna de
+    // tabla, no del alias — el ORDER BY quedaba ordenando por el nombre del
+    // club (constante, un solo club) en vez del jugador, en silencio.
+    const res = await this.pool.query<{ id_user: string; player_name: string; email: string; amount: string | null; paid: boolean | null; paid_at: string | null }>(
+      `SELECT u.id_user, ${NAME_SQL} AS player_name, u.email,
               COALESCE(d.amount, c.monthly_fee) AS amount,
               COALESCE(d.paid, FALSE) AS paid,
               d.paid_at
@@ -338,11 +343,11 @@ export class ClubsRepository {
        JOIN clubs c ON c.id_club = u.id_club
        LEFT JOIN club_dues d ON d.id_club = u.id_club AND d.id_user = u.id_user AND d.period = $2
        WHERE u.id_club = $1
-       ORDER BY name ASC`,
+       ORDER BY player_name ASC`,
       [idClub, period]
     );
     return res.rows.map((r) => ({
-      id_user: r.id_user, name: r.name, email: r.email,
+      id_user: r.id_user, name: r.player_name, email: r.email,
       amount: r.amount === null ? 0 : Number(r.amount),
       paid: r.paid ?? false,
       paid_at: r.paid_at,
@@ -367,8 +372,15 @@ export class ClubsRepository {
   // muy antiguos. Sin cuota mensual configurada no hay nada que deber,
   // así que el router no llama esto si clubs.monthly_fee es NULL.
   async getArrears(idClub: string): Promise<ClubArrearsRow[]> {
+    // Mismo cuidado que getDues con el alias "name" — acá además el GROUP
+    // BY usa las columnas reales (u.first_name/u.last_name/u.email), no el
+    // alias, porque el JOIN clubs vuelve a meter una columna "name" de por
+    // medio y un `GROUP BY name` ambiguo agrupaba por el nombre del CLUB
+    // (constante) en vez del jugador — Postgres tiraba "u.first_name must
+    // appear in the GROUP BY clause" porque en la práctica nunca agrupaba
+    // por la expresión real del nombre.
     const res = await this.pool.query<{
-      id_user: string; name: string; email: string;
+      id_user: string; player_name: string; email: string;
       total_periods: string; paid_periods: string; owed_amount: string;
     }>(
       `WITH member_start AS (
@@ -391,7 +403,7 @@ export class ClubsRepository {
            INTERVAL '1 month'
          ) AS gs
        )
-       SELECT p.id_user, ${NAME_SQL} AS name, u.email,
+       SELECT p.id_user, ${NAME_SQL} AS player_name, u.email,
               COUNT(*)::int AS total_periods,
               COUNT(*) FILTER (WHERE d.paid IS TRUE)::int AS paid_periods,
               COALESCE(SUM(CASE WHEN d.paid IS NOT TRUE THEN COALESCE(d.amount, c.monthly_fee, 0) ELSE 0 END), 0) AS owed_amount
@@ -399,15 +411,15 @@ export class ClubsRepository {
        JOIN users u ON u.id_user = p.id_user
        JOIN clubs c ON c.id_club = $1
        LEFT JOIN club_dues d ON d.id_club = $1 AND d.id_user = p.id_user AND d.period = p.period
-       GROUP BY p.id_user, name, u.email
-       ORDER BY (COUNT(*) - COUNT(*) FILTER (WHERE d.paid IS TRUE)) DESC, name ASC`,
+       GROUP BY p.id_user, u.first_name, u.last_name, u.email
+       ORDER BY (COUNT(*) - COUNT(*) FILTER (WHERE d.paid IS TRUE)) DESC, player_name ASC`,
       [idClub]
     );
     return res.rows.map((r) => {
       const totalPeriods = Number(r.total_periods);
       const paidPeriods = Number(r.paid_periods);
       return {
-        id_user: r.id_user, name: r.name, email: r.email,
+        id_user: r.id_user, name: r.player_name, email: r.email,
         totalPeriods, paidPeriods,
         owedPeriods: totalPeriods - paidPeriods,
         owedAmount: Number(r.owed_amount),
