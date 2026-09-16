@@ -67,8 +67,8 @@ export interface PublicTournamentDetailRow {
   organizer_avatar_url: string | null;
 }
 
-// "Comunidad" — directorio público de organizadores (admins con al menos
-// un torneo público) y el perfil público de cada uno. Sin concepto de
+// "Comunidad" — directorio público de TODOS los admins (su perfil no es
+// información privada) y la ficha pública de cada uno. Sin concepto de
 // "miembros"/jugadores: solo organizadores + sus torneos + (opcional) su
 // ranking, ver public_ranking_enabled en users.
 export interface PublicOrganizerRow {
@@ -253,10 +253,14 @@ export class PublicTournamentRepository {
     return res.rows[0] ?? null;
   }
 
-  // "Comunidad": directorio público de organizadores — cualquier admin con
-  // al menos un torneo público (no cancelado) entra acá, sin acción extra
-  // de su parte (ver la pregunta del usuario: "automática + listado
-  // público"). Ordenado por cantidad de torneos, no por fecha de alta —
+  // "Comunidad": directorio público de organizadores — TODO admin
+  // registrado entra acá (su perfil público -nombre, club, avatar- no es
+  // información privada), tenga o no torneos con visibilidad pública. El
+  // conteo de torneos públicos se muestra igual (0 para quien todavía no
+  // publicó ninguno), pero ya no decide si aparece o no en el listado —
+  // antes el filtro dejaba la Comunidad vacía apenas no había ningún
+  // torneo público en la plataforma, lo cual no tiene que ver con
+  // privacidad. Ordenado por cantidad de torneos, no por fecha de alta —
   // el que más organiza aparece primero.
   async listOrganizers(): Promise<PublicOrganizerRow[]> {
     const res = await this.pool.query<PublicOrganizerRow>(
@@ -265,13 +269,16 @@ export class PublicTournamentRepository {
          ${ORGANIZER_NAME_SQL} AS organizer_name,
          cl.name AS club_name,
          u.avatar_url,
-         COUNT(*)::int AS public_tournament_count
-       FROM tournaments t
-       JOIN users u ON u.id_user = t.created_by
+         COUNT(t.id_tournament) FILTER (
+           WHERE t.visibility = 'public' AND t.status <> 'cancelled' AND t.kind = 'tournament'
+         )::int AS public_tournament_count
+       FROM users u
        LEFT JOIN clubs cl ON cl.id_club = u.id_club
-       WHERE t.visibility = 'public' AND t.status <> 'cancelled' AND t.kind = 'tournament'
+       LEFT JOIN tournaments t ON t.created_by = u.id_user
+       WHERE u.id_role = $1
        GROUP BY u.id_user, organizer_name, cl.name, u.avatar_url
-       ORDER BY public_tournament_count DESC, organizer_name ASC NULLS LAST`
+       ORDER BY public_tournament_count DESC, organizer_name ASC NULLS LAST`,
+      [ROLE_IDS.admin]
     );
     return res.rows.map((r) => ({ ...r, public_tournament_count: Number(r.public_tournament_count) }));
   }
