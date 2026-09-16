@@ -102,6 +102,8 @@ export class UserRepository {
         r.name AS role,
         u.id_club,
         cl.name AS club_name,
+        owned.id_club AS owned_club_id,
+        owned.name AS owned_club_name,
         u.birth_date::text,
         u.country,
         u.id_document,
@@ -113,6 +115,7 @@ export class UserRepository {
       FROM users u
       JOIN roles r ON r.id_role = u.id_role
       LEFT JOIN clubs cl ON cl.id_club = u.id_club
+      LEFT JOIN clubs owned ON owned.created_by = u.id_user
       WHERE u.id_user = $1
       LIMIT 1;
     `;

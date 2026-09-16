@@ -249,13 +249,20 @@ export class PublicTournamentRepository {
   async getById(id_tournament: string): Promise<PublicTournamentDetailRow | null> {
     const res = await this.pool.query<PublicTournamentDetailRow>(
       `SELECT t.id_tournament, t.tournament_name, t.description, t.address, t.region,
-              t.event_date, t.event_time, t.status, c.name AS organizer_club_name,
+              t.event_date, t.event_time, t.status,
+              -- Preferir el club "real" (el que el admin arma en Clubes, con
+              -- escudo/fundación) por sobre el campo de texto suelto de su
+              -- perfil (legacy_club, id_club) — antes solo se leía este
+              -- último, así que un admin con club real pero sin ese texto
+              -- suelto no mostraba "presenta" en su propio torneo.
+              COALESCE(real_club.name, legacy_club.name) AS organizer_club_name,
               NULLIF(TRIM(CONCAT(u.first_name, ' ', u.last_name)), '') AS organizer_user_name,
               t.created_by AS organizer_id,
               u.avatar_url AS organizer_avatar_url
        FROM tournaments t
        LEFT JOIN users u ON u.id_user = t.created_by
-       LEFT JOIN clubs c ON c.id_club = u.id_club
+       LEFT JOIN clubs real_club ON real_club.created_by = u.id_user
+       LEFT JOIN clubs legacy_club ON legacy_club.id_club = u.id_club
        WHERE t.id_tournament = $1 AND t.kind = 'tournament'`,
       [id_tournament]
     );

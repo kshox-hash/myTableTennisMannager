@@ -7,6 +7,13 @@ export type UserProfileDB = {
   role: string;
   id_club: string | null;
   club_name: string | null;
+  // Club "real" que este admin administra (el de Clubes, con escudo) —
+  // distinto de club_name/id_club, que es el texto suelto de este mismo
+  // perfil. null para jugadores y para admins que no crearon un club.
+  // Ver AdminProfilePage.tsx: cuando existe, gana sobre club_name en todo
+  // lo público (organizer_club_name en tournament detail).
+  owned_club_id: string | null;
+  owned_club_name: string | null;
   birth_date: string | null;
   country: string | null;
   id_document: string | null;
