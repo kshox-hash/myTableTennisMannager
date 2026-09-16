@@ -230,6 +230,16 @@ router.get(
         organizer_name: organizer.organizer_name,
         club_name: organizer.club_name,
         avatar_url: organizer.avatar_url,
+        club: organizer.id_club
+          ? {
+              id_club: organizer.id_club,
+              name: organizer.club_name,
+              description: organizer.club_description,
+              crest_image_url: organizer.club_crest_image_url,
+              header_image_url: organizer.club_header_image_url,
+              founded_date: formatDate(organizer.club_founded_date),
+            }
+          : null,
         tournaments: tournaments.map((t) => ({
           id_tournament: t.id_tournament,
           tournament_name: t.tournament_name,

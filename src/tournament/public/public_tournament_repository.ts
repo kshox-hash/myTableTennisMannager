@@ -85,6 +85,15 @@ export interface PublicOrganizerProfileRow {
   club_name: string | null;
   avatar_url: string | null;
   public_ranking_enabled: boolean;
+  // Ficha del club del organizador, para la pestaña/sección "Club" de su
+  // perfil público — solo datos de identidad (nombre, escudo, portada,
+  // reseña, fecha de fundación), nunca lo administrativo del club (cuotas,
+  // caja, solicitudes de ingreso) que sigue siendo solo para el propio admin.
+  id_club: string | null;
+  club_description: string | null;
+  club_crest_image_url: string | null;
+  club_header_image_url: string | null;
+  club_founded_date: string | Date | null;
 }
 
 export class PublicTournamentRepository {
@@ -293,7 +302,12 @@ export class PublicTournamentRepository {
          ${ORGANIZER_NAME_SQL} AS organizer_name,
          cl.name AS club_name,
          u.avatar_url,
-         u.public_ranking_enabled
+         u.public_ranking_enabled,
+         cl.id_club,
+         cl.description AS club_description,
+         cl.crest_image_url AS club_crest_image_url,
+         cl.header_image_url AS club_header_image_url,
+         cl.founded_date AS club_founded_date
        FROM users u
        LEFT JOIN clubs cl ON cl.id_club = u.id_club
        WHERE u.id_user = $1 AND u.id_role = $2`,
