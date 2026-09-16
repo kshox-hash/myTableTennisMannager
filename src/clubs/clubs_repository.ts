@@ -134,25 +134,34 @@ export class ClubsRepository {
     return (res.rowCount ?? 0) > 0;
   }
 
+  // El admin que crea el club queda como su MIEMBRO también (id_club),
+  // no solo su dueño (created_by) — mismo UPDATE que dispara decide() al
+  // aprobar una solicitud. Sin esto, el propio creador aparecía en su
+  // perfil de jugador como si no perteneciera a ningún club, invitado a
+  // "solicitar unirse" — incluso al club que él mismo creó.
   async create(input: {
     created_by: string;
     name: string;
     description: string | null;
     founded_date: string | null;
   }): Promise<string> {
-    const res = await this.pool.query<{ id_club: string }>(
-      `INSERT INTO clubs (name, description, founded_date, created_by)
-       VALUES ($1, $2, $3, $4)
-       RETURNING id_club`,
-      [input.name.trim(), input.description, input.founded_date, input.created_by]
-    );
-    return res.rows[0].id_club;
+    return this.withTx(async (c) => {
+      const res = await c.query<{ id_club: string }>(
+        `INSERT INTO clubs (name, description, founded_date, created_by)
+         VALUES ($1, $2, $3, $4)
+         RETURNING id_club`,
+        [input.name.trim(), input.description, input.founded_date, input.created_by]
+      );
+      const idClub = res.rows[0].id_club;
+      await c.query(`UPDATE users SET id_club = $2 WHERE id_user = $1`, [input.created_by, idClub]);
+      return idClub;
+    });
   }
 
   async listMine(idAdmin: string): Promise<ClubListRow[]> {
     const res = await this.pool.query<ClubListRow>(
       `SELECT
-         c.id_club, c.name, c.description, c.founded_date, c.header_image_url, c.crest_image_url, c.created_at,
+         c.id_club, c.name, c.description, c.founded_date::text, c.header_image_url, c.crest_image_url, c.created_at,
          (SELECT COUNT(*) FROM users u WHERE u.id_club = c.id_club)::int AS member_count,
          (SELECT COUNT(*) FROM club_join_requests r WHERE r.id_club = c.id_club AND r.status = 'pending')::int AS pending_count
        FROM clubs c
@@ -195,7 +204,7 @@ export class ClubsRepository {
       header_image_url: string | null; crest_image_url: string | null; monthly_fee: string | null;
       fee_frequency: FeeFrequency; created_at: string; created_by: string | null;
     }>(
-      `SELECT id_club, name, description, founded_date, header_image_url, crest_image_url, monthly_fee, fee_frequency, created_at, created_by
+      `SELECT id_club, name, description, founded_date::text, header_image_url, crest_image_url, monthly_fee, fee_frequency, created_at, created_by
        FROM clubs WHERE id_club = $1`,
       [idClub]
     );
