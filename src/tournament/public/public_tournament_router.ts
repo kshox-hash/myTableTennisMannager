@@ -238,6 +238,7 @@ router.get(
               crest_image_url: organizer.club_crest_image_url,
               header_image_url: organizer.club_header_image_url,
               founded_date: formatDate(organizer.club_founded_date),
+              member_count: organizer.club_member_count,
             }
           : null,
         tournaments: tournaments.map((t) => ({

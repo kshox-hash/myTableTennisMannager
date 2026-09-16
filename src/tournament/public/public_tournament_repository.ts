@@ -94,6 +94,7 @@ export interface PublicOrganizerProfileRow {
   club_crest_image_url: string | null;
   club_header_image_url: string | null;
   club_founded_date: string | Date | null;
+  club_member_count: number;
 }
 
 export class PublicTournamentRepository {
@@ -314,7 +315,8 @@ export class PublicTournamentRepository {
          cl.description AS club_description,
          cl.crest_image_url AS club_crest_image_url,
          cl.header_image_url AS club_header_image_url,
-         cl.founded_date AS club_founded_date
+         cl.founded_date AS club_founded_date,
+         COALESCE((SELECT COUNT(*) FROM users m WHERE m.id_club = cl.id_club), 0)::int AS club_member_count
        FROM users u
        LEFT JOIN clubs cl ON cl.created_by = u.id_user
        WHERE u.id_user = $1 AND u.id_role = $2`,
