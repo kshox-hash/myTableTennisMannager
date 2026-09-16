@@ -282,7 +282,7 @@ export class PublicTournamentRepository {
            WHERE t.visibility = 'public' AND t.status <> 'cancelled' AND t.kind = 'tournament'
          )::int AS public_tournament_count
        FROM users u
-       LEFT JOIN clubs cl ON cl.id_club = u.id_club
+       LEFT JOIN clubs cl ON cl.created_by = u.id_user
        LEFT JOIN tournaments t ON t.created_by = u.id_user
        WHERE u.id_role = $1
        GROUP BY u.id_user, organizer_name, cl.name, u.avatar_url
@@ -309,7 +309,7 @@ export class PublicTournamentRepository {
          cl.header_image_url AS club_header_image_url,
          cl.founded_date AS club_founded_date
        FROM users u
-       LEFT JOIN clubs cl ON cl.id_club = u.id_club
+       LEFT JOIN clubs cl ON cl.created_by = u.id_user
        WHERE u.id_user = $1 AND u.id_role = $2`,
       [id_user, ROLE_IDS.admin]
     );
