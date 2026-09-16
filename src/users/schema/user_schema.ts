@@ -4,6 +4,12 @@ export const updateProfileSchema = z
   .object({
     first_name: z.string().trim().min(1).max(100).optional(),
     last_name: z.string().trim().min(1).max(100).optional(),
+    // Nombre público del ORGANIZADOR — separado de first_name/last_name
+    // (el nombre del jugador) para que un admin que también juega pueda
+    // cambiar uno sin que el otro se mueva. null = "usar mi nombre de
+    // jugador" (ver ORGANIZER_NAME_SQL, cae a first_name/last_name).
+    organizer_first_name: z.string().trim().max(100).nullable().optional(),
+    organizer_last_name: z.string().trim().max(100).nullable().optional(),
     gender: z.enum(["male", "female", "other"]).optional(),
     club_name: z.string().trim().max(150).nullable().optional(),
     birth_date: z.string().trim().min(1).max(10).nullable().optional(),

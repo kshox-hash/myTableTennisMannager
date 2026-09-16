@@ -2,10 +2,19 @@ import type { Pool } from "pg";
 import DB from "../../db/db_configuration";
 import { ROLE_IDS } from "../../core/constants/roles";
 
-// Nombre público de un organizador — sin exponer el email (a diferencia de
-// PublicTournamentDetailRow.organizer_user_name, que ya seguía este mismo
-// criterio: null si no tiene nombre cargado, nunca el email como fallback).
-const ORGANIZER_NAME_SQL = `NULLIF(TRIM(CONCAT(u.first_name, ' ', u.last_name)), '')`;
+// Nombre público de un organizador — sin exponer el email (null si no tiene
+// nombre cargado, nunca el email como fallback). Prefiere el nombre de
+// ORGANIZADOR (organizer_first_name/last_name, editable en AdminProfilePage)
+// sobre el nombre de JUGADOR (first_name/last_name) — una cuenta admin
+// también navega el área de jugador con el mismo id_user (ver
+// ROLE_RANK/availableViews), así que antes cambiar el nombre para
+// inscribirse en un torneo cambiaba también el nombre público del
+// organizador. NULL en organizer_first_name/last_name (nunca lo tocó) cae
+// al nombre de jugador, para no dejar en blanco a ningún admin existente.
+const ORGANIZER_NAME_SQL = `COALESCE(
+  NULLIF(TRIM(CONCAT(u.organizer_first_name, ' ', u.organizer_last_name)), ''),
+  NULLIF(TRIM(CONCAT(u.first_name, ' ', u.last_name)), '')
+)`;
 
 export interface PublicTournamentRow {
   id_tournament: string;
@@ -257,7 +266,7 @@ export class PublicTournamentRepository {
               -- último, así que un admin con club real pero sin ese texto
               -- suelto no mostraba "presenta" en su propio torneo.
               COALESCE(real_club.name, legacy_club.name) AS organizer_club_name,
-              NULLIF(TRIM(CONCAT(u.first_name, ' ', u.last_name)), '') AS organizer_user_name,
+              ${ORGANIZER_NAME_SQL} AS organizer_user_name,
               t.created_by AS organizer_id,
               u.avatar_url AS organizer_avatar_url
        FROM tournaments t

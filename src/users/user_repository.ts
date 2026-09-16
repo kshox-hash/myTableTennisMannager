@@ -55,7 +55,9 @@ export class UserRepository {
          id_document            = COALESCE($8, id_document),
          category               = COALESCE($9, category),
          dominant_hand          = COALESCE($10, dominant_hand),
-         public_ranking_enabled = COALESCE($11, public_ranking_enabled)
+         public_ranking_enabled = COALESCE($11, public_ranking_enabled),
+         organizer_first_name   = CASE WHEN $13 THEN $14 ELSE organizer_first_name END,
+         organizer_last_name    = CASE WHEN $15 THEN $16 ELSE organizer_last_name END
        WHERE id_user = $12`,
       [
         input.first_name ?? null,
@@ -70,6 +72,8 @@ export class UserRepository {
         input.dominant_hand ?? null,
         input.public_ranking_enabled ?? null,
         id_user,
+        input.organizer_first_name !== undefined, input.organizer_first_name ?? null,
+        input.organizer_last_name !== undefined, input.organizer_last_name ?? null,
       ]
     );
 
@@ -98,6 +102,8 @@ export class UserRepository {
         u.email,
         u.first_name,
         u.last_name,
+        u.organizer_first_name,
+        u.organizer_last_name,
         u.gender,
         r.name AS role,
         u.id_club,

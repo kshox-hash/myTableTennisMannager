@@ -5,6 +5,11 @@ export type UserProfileDB = {
   last_name: string | null;
   gender: string | null;
   role: string;
+  // Nombre público del organizador — separado del nombre de jugador
+  // (first_name/last_name) — ver ORGANIZER_NAME_SQL en
+  // public_tournament_repository.ts. null = sigue usando el de jugador.
+  organizer_first_name: string | null;
+  organizer_last_name: string | null;
   id_club: string | null;
   club_name: string | null;
   // Club "real" que este admin administra (el de Clubes, con escudo) —
