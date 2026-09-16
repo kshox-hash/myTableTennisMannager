@@ -20,6 +20,9 @@ const MAX_AVATAR_BYTES = 500 * 1024;
 // acumular basura en el bucket. La extensión .webp calza con lo que manda
 // el navegador (canvas.toBlob a webp).
 const avatarKey = (id_user: string) => `avatars/${id_user}.webp`;
+// Key propio para la foto de organizador — mismo bucket, prefijo distinto,
+// así subir una no pisa la otra.
+const organizerAvatarKey = (id_user: string) => `avatars/${id_user}-organizer.webp`;
 
 function computeAge(birthDate: string | null): number | null {
   if (!birthDate) return null;
@@ -183,6 +186,66 @@ export class UserService {
       }
     }
     const user = await this.repo.setAvatarUrl(id_user, null);
+    if (!user) return fail("USER_NOT_FOUND");
+    return ok(user);
+  }
+
+  // --- Foto de organizador — mismo flujo presigned que el avatar de
+  // jugador de arriba, columna y key de R2 separados (organizer_avatar_url,
+  // avatars/<id>-organizer.webp). Ver 055_organizer_avatar.sql: antes
+  // AdminProfilePage.tsx subía/mostraba avatar_url, el mismo campo que
+  // Mi perfil (jugador) — cambiar la foto en uno cambiaba el otro.
+
+  async getOrganizerAvatarUploadUrl(
+    id_user: string,
+    contentType: string,
+  ): Promise<Result<
+    { uploadUrl: string; key: string; publicUrl: string },
+    "R2_NOT_CONFIGURED" | "BAD_CONTENT_TYPE"
+  >> {
+    if (!r2Configured) return fail("R2_NOT_CONFIGURED");
+    if (!AVATAR_CONTENT_TYPES.includes(contentType)) return fail("BAD_CONTENT_TYPE");
+
+    const key = organizerAvatarKey(id_user);
+    const uploadUrl = await presignPutUrl(key, contentType);
+    return ok({ uploadUrl, key, publicUrl: publicUrlFor(key) });
+  }
+
+  async confirmOrganizerAvatar(
+    id_user: string,
+    key: string,
+  ): Promise<Result<UserProfileDB, "R2_NOT_CONFIGURED" | "BAD_KEY" | "UPLOAD_NOT_FOUND" | "BAD_FILE" | "USER_NOT_FOUND">> {
+    if (!r2Configured) return fail("R2_NOT_CONFIGURED");
+    if (key !== organizerAvatarKey(id_user)) return fail("BAD_KEY");
+
+    const meta = await headObject(key);
+    if (!meta) return fail("UPLOAD_NOT_FOUND");
+    if (meta.size > MAX_AVATAR_BYTES || !meta.contentType.startsWith("image/")) {
+      await deleteObject(key).catch(() => {});
+      return fail("BAD_FILE");
+    }
+
+    await setCacheControl(key, meta.contentType).catch(() => {});
+
+    const url = `${publicUrlFor(key)}?v=${Date.now()}`;
+    const user = await this.repo.setOrganizerAvatarUrl(id_user, url);
+    if (!user) return fail("USER_NOT_FOUND");
+    return ok(user);
+  }
+
+  async removeOrganizerAvatar(
+    id_user: string,
+  ): Promise<Result<UserProfileDB, "R2_NOT_CONFIGURED" | "USER_NOT_FOUND">> {
+    if (!r2Configured) return fail("R2_NOT_CONFIGURED");
+    const current = await this.repo.getOrganizerAvatarUrl(id_user);
+    if (current) {
+      try {
+        await deleteObject(organizerAvatarKey(id_user));
+      } catch {
+        // el archivo pudo haberse borrado ya; igual limpiamos la columna
+      }
+    }
+    const user = await this.repo.setOrganizerAvatarUrl(id_user, null);
     if (!user) return fail("USER_NOT_FOUND");
     return ok(user);
   }

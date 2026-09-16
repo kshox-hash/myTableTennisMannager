@@ -16,6 +16,11 @@ const ORGANIZER_NAME_SQL = `COALESCE(
   NULLIF(TRIM(CONCAT(u.first_name, ' ', u.last_name)), '')
 )`;
 
+// Mismo criterio que ORGANIZER_NAME_SQL pero para la foto — organizer_avatar_url
+// (separada de avatar_url, la del jugador) gana si existe. `alias` es el
+// alias de `users` en cada query (u/ou según el FROM/JOIN).
+const organizerAvatarSql = (alias: string) => `COALESCE(${alias}.organizer_avatar_url, ${alias}.avatar_url)`;
+
 export interface PublicTournamentRow {
   id_tournament: string;
   tournament_name: string;
@@ -233,7 +238,7 @@ export class PublicTournamentRepository {
          t.id_tournament, t.tournament_name, t.description, t.address, t.region,
          t.event_date, t.event_time, t.status,
          t.created_by AS organizer_id,
-         ou.avatar_url AS organizer_avatar_url,
+         ${organizerAvatarSql("ou")} AS organizer_avatar_url,
          ${statusCase} AS computed_status,
          (SELECT COUNT(*) FROM tournament_categories tc WHERE tc.id_tournament = t.id_tournament)::int AS category_count,
          (SELECT COUNT(*) FROM enrollments e WHERE e.id_tournament = t.id_tournament AND e.status = 'active')::int AS enrolled_count
@@ -268,7 +273,7 @@ export class PublicTournamentRepository {
               COALESCE(real_club.name, legacy_club.name) AS organizer_club_name,
               ${ORGANIZER_NAME_SQL} AS organizer_user_name,
               t.created_by AS organizer_id,
-              u.avatar_url AS organizer_avatar_url
+              ${organizerAvatarSql("u")} AS organizer_avatar_url
        FROM tournaments t
        LEFT JOIN users u ON u.id_user = t.created_by
        LEFT JOIN clubs real_club ON real_club.created_by = u.id_user
@@ -294,7 +299,7 @@ export class PublicTournamentRepository {
          u.id_user,
          ${ORGANIZER_NAME_SQL} AS organizer_name,
          cl.name AS club_name,
-         u.avatar_url,
+         ${organizerAvatarSql("u")} AS avatar_url,
          COUNT(t.id_tournament) FILTER (
            WHERE t.visibility = 'public' AND t.status <> 'cancelled' AND t.kind = 'tournament'
          )::int AS public_tournament_count
@@ -302,7 +307,7 @@ export class PublicTournamentRepository {
        LEFT JOIN clubs cl ON cl.created_by = u.id_user
        LEFT JOIN tournaments t ON t.created_by = u.id_user
        WHERE u.id_role = $1
-       GROUP BY u.id_user, organizer_name, cl.name, u.avatar_url
+       GROUP BY u.id_user, organizer_name, cl.name, u.avatar_url, u.organizer_avatar_url
        ORDER BY public_tournament_count DESC, organizer_name ASC NULLS LAST`,
       [ROLE_IDS.admin]
     );
@@ -318,7 +323,7 @@ export class PublicTournamentRepository {
          u.id_user,
          ${ORGANIZER_NAME_SQL} AS organizer_name,
          cl.name AS club_name,
-         u.avatar_url,
+         ${organizerAvatarSql("u")} AS avatar_url,
          u.public_ranking_enabled,
          cl.id_club,
          cl.description AS club_description,
@@ -344,7 +349,7 @@ export class PublicTournamentRepository {
          t.id_tournament, t.tournament_name, t.description, t.address, t.region,
          t.event_date, t.event_time, t.status,
          t.created_by AS organizer_id,
-         ou.avatar_url AS organizer_avatar_url,
+         ${organizerAvatarSql("ou")} AS organizer_avatar_url,
          ${statusCase} AS computed_status,
          (SELECT COUNT(*) FROM tournament_categories tc WHERE tc.id_tournament = t.id_tournament)::int AS category_count,
          (SELECT COUNT(*) FROM enrollments e WHERE e.id_tournament = t.id_tournament AND e.status = 'active')::int AS enrolled_count

@@ -95,6 +95,20 @@ export class UserRepository {
     return res.rows[0]?.avatar_url ?? null;
   }
 
+  // Foto pública de ORGANIZADOR — separada de la de jugador (ver 055_organizer_avatar.sql).
+  async setOrganizerAvatarUrl(id_user: string, url: string | null): Promise<UserProfileDB | null> {
+    await this.pool.query(`UPDATE users SET organizer_avatar_url = $1 WHERE id_user = $2`, [url, id_user]);
+    return this.findById(id_user);
+  }
+
+  async getOrganizerAvatarUrl(id_user: string): Promise<string | null> {
+    const res = await this.pool.query<{ organizer_avatar_url: string | null }>(
+      `SELECT organizer_avatar_url FROM users WHERE id_user = $1`,
+      [id_user]
+    );
+    return res.rows[0]?.organizer_avatar_url ?? null;
+  }
+
   async findById(id_user: string): Promise<UserProfileDB | null> {
     const query = `
       SELECT
@@ -117,6 +131,7 @@ export class UserRepository {
         u.dominant_hand,
         u.created_at::text,
         u.avatar_url,
+        u.organizer_avatar_url,
         u.public_ranking_enabled
       FROM users u
       JOIN roles r ON r.id_role = u.id_role

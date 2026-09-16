@@ -111,4 +111,48 @@ export class UserController {
     }
     return res.json({ ok: true, data: result.data });
   };
+
+  // --- Foto de organizador — mismas 3 rutas que la de jugador de arriba,
+  // separadas (ver AdminProfilePage.tsx). ---
+
+  organizerAvatarUploadUrl = async (req: Request, res: Response) => {
+    const contentType = typeof req.body?.contentType === "string" ? req.body.contentType : "";
+    const result = await this.service.getOrganizerAvatarUploadUrl(req.user!.id_user, contentType);
+    if (!result.ok) {
+      if (result.error === "R2_NOT_CONFIGURED") {
+        return res.status(503).json({ ok: false, message: "El almacenamiento de imágenes no está configurado." });
+      }
+      return res.status(400).json({ ok: false, message: "Formato de imagen no permitido (usa JPG, PNG o WEBP)." });
+    }
+    return res.json({ ok: true, data: result.data });
+  };
+
+  organizerAvatarConfirm = async (req: Request, res: Response) => {
+    const key = typeof req.body?.key === "string" ? req.body.key : "";
+    const result = await this.service.confirmOrganizerAvatar(req.user!.id_user, key);
+    if (!result.ok) {
+      if (result.error === "R2_NOT_CONFIGURED") {
+        return res.status(503).json({ ok: false, message: "El almacenamiento de imágenes no está configurado." });
+      }
+      if (result.error === "UPLOAD_NOT_FOUND") {
+        return res.status(404).json({ ok: false, message: "No se encontró la imagen subida. Inténtalo de nuevo." });
+      }
+      if (result.error === "BAD_FILE") {
+        return res.status(400).json({ ok: false, message: "La imagen es inválida o muy pesada." });
+      }
+      return res.status(400).json({ ok: false, message: "Solicitud inválida." });
+    }
+    return res.json({ ok: true, data: result.data });
+  };
+
+  organizerAvatarRemove = async (req: Request, res: Response) => {
+    const result = await this.service.removeOrganizerAvatar(req.user!.id_user);
+    if (!result.ok) {
+      if (result.error === "R2_NOT_CONFIGURED") {
+        return res.status(503).json({ ok: false, message: "El almacenamiento de imágenes no está configurado." });
+      }
+      return res.status(404).json({ ok: false, message: "Usuario no encontrado" });
+    }
+    return res.json({ ok: true, data: result.data });
+  };
 }

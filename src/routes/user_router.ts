@@ -59,4 +59,10 @@ userRouter.post("/me/avatar", authRequired, asyncHandler(controller.avatarConfir
 // DELETE /api/v1/users/me/avatar
 userRouter.delete("/me/avatar", authRequired, asyncHandler(controller.avatarRemove));
 
+// --- Foto de organizador — separada de la de jugador de arriba (ver
+// AdminProfilePage.tsx / 055_organizer_avatar.sql) ---
+userRouter.post("/me/organizer-avatar/upload-url", authRequired, asyncHandler(controller.organizerAvatarUploadUrl));
+userRouter.post("/me/organizer-avatar", authRequired, asyncHandler(controller.organizerAvatarConfirm));
+userRouter.delete("/me/organizer-avatar", authRequired, asyncHandler(controller.organizerAvatarRemove));
+
 export default userRouter;
