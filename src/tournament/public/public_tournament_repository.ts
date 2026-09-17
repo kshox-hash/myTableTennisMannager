@@ -344,13 +344,17 @@ export class PublicTournamentRepository {
   // fallback: acá eso expondría el email de un jugador a cualquier
   // visitante sin login). "Jugador" es el mismo fallback que ya usa
   // organizerRankingRowFromJson en el frontend para un nombre vacío.
-  async listClubMembers(id_club: string): Promise<{ id_user: string; first_name: string | null; last_name: string | null; avatar_url: string | null }[]> {
+  // LIMIT fijo — un club real puede tener cientos/miles de socios y esto
+  // es solo una vitrina ("+N más" en el frontend), no un listado completo;
+  // el total real ya viaja aparte en club_member_count.
+  async listClubMembers(id_club: string, limit = 24): Promise<{ id_user: string; first_name: string | null; last_name: string | null; avatar_url: string | null }[]> {
     const res = await this.pool.query<{ id_user: string; first_name: string | null; last_name: string | null; avatar_url: string | null }>(
       `SELECT id_user, first_name, last_name, avatar_url
        FROM users
        WHERE id_club = $1
-       ORDER BY NULLIF(TRIM(CONCAT(first_name, ' ', last_name)), '') ASC NULLS LAST`,
-      [id_club]
+       ORDER BY NULLIF(TRIM(CONCAT(first_name, ' ', last_name)), '') ASC NULLS LAST
+       LIMIT $2`,
+      [id_club, limit]
     );
     return res.rows;
   }
