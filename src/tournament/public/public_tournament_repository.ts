@@ -339,6 +339,22 @@ export class PublicTournamentRepository {
     return res.rows[0] ?? null;
   }
 
+  // Plantel público de un club — solo nombre y foto (nunca el email, a
+  // diferencia de clubs_repository.NAME_SQL que cae al email como último
+  // fallback: acá eso expondría el email de un jugador a cualquier
+  // visitante sin login). "Jugador" es el mismo fallback que ya usa
+  // organizerRankingRowFromJson en el frontend para un nombre vacío.
+  async listClubMembers(id_club: string): Promise<{ id_user: string; first_name: string | null; last_name: string | null; avatar_url: string | null }[]> {
+    const res = await this.pool.query<{ id_user: string; first_name: string | null; last_name: string | null; avatar_url: string | null }>(
+      `SELECT id_user, first_name, last_name, avatar_url
+       FROM users
+       WHERE id_club = $1
+       ORDER BY NULLIF(TRIM(CONCAT(first_name, ' ', last_name)), '') ASC NULLS LAST`,
+      [id_club]
+    );
+    return res.rows;
+  }
+
   // Torneos públicos de UN organizador puntual — mismo statusCaseSql() que
   // list(), para que "En curso"/"Próximamente"/"Finalizado" se calculen
   // igual acá que en el listado general.

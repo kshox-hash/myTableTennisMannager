@@ -195,6 +195,7 @@ router.get(
     }
 
     const tournaments = await repo.listOrganizerTournaments(id_user);
+    const clubMembers = organizer.id_club ? await repo.listClubMembers(organizer.id_club) : [];
 
     let ranking: Array<{
       id_user: string;
@@ -239,6 +240,12 @@ router.get(
               header_image_url: organizer.club_header_image_url,
               founded_date: formatDate(organizer.club_founded_date),
               member_count: organizer.club_member_count,
+              members: clubMembers.map((m) => ({
+                id_user: m.id_user,
+                first_name: m.first_name,
+                last_name: m.last_name,
+                avatar_url: m.avatar_url,
+              })),
             }
           : null,
         tournaments: tournaments.map((t) => ({
