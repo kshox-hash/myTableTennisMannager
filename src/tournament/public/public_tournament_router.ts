@@ -262,6 +262,7 @@ router.get(
                 last_name: m.last_name,
                 avatar_url: m.avatar_url,
                 age: computeAge(m.birth_date),
+                dominant_hand: m.dominant_hand,
               })),
             }
           : null,
@@ -306,6 +307,7 @@ router.get(
           last_name: m.last_name,
           avatar_url: m.avatar_url,
           age: computeAge(m.birth_date),
+          dominant_hand: m.dominant_hand,
         })),
         total: organizer.club_member_count,
       },

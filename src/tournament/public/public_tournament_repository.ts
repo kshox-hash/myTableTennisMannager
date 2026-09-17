@@ -351,11 +351,15 @@ export class PublicTournamentRepository {
     id_club: string,
     limit = 30,
     offset = 0
-  ): Promise<{ id_user: string; first_name: string | null; last_name: string | null; avatar_url: string | null; birth_date: string | null }[]> {
+  ): Promise<{
+    id_user: string; first_name: string | null; last_name: string | null; avatar_url: string | null;
+    birth_date: string | null; dominant_hand: string | null;
+  }[]> {
     const res = await this.pool.query<{
-      id_user: string; first_name: string | null; last_name: string | null; avatar_url: string | null; birth_date: string | null;
+      id_user: string; first_name: string | null; last_name: string | null; avatar_url: string | null;
+      birth_date: string | null; dominant_hand: string | null;
     }>(
-      `SELECT id_user, first_name, last_name, avatar_url, birth_date::text
+      `SELECT id_user, first_name, last_name, avatar_url, birth_date::text, dominant_hand
        FROM users
        WHERE id_club = $1
        ORDER BY NULLIF(TRIM(CONCAT(first_name, ' ', last_name)), '') ASC NULLS LAST
