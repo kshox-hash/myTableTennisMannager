@@ -23,6 +23,22 @@ function formatTimestamp(value: string | Date | null): string | null {
   return new Date(value).toISOString();
 }
 
+// Mismo cálculo que UserService.computeAge (privado, sin exportar) — la
+// vitrina pública del plantel de un club muestra edad, nunca la fecha de
+// nacimiento completa (mismo criterio que getPublicCard, ver auditoría de
+// seguridad referenciada ahí).
+function computeAge(birthDate: string | null): number | null {
+  if (!birthDate) return null;
+  const d = new Date(birthDate);
+  if (Number.isNaN(d.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - d.getFullYear();
+  const hadBirthdayThisYear =
+    today.getMonth() > d.getMonth() || (today.getMonth() === d.getMonth() && today.getDate() >= d.getDate());
+  if (!hadBirthdayThisYear) age -= 1;
+  return age;
+}
+
 // "No ha empezado" / "En curso" / "Finalizado" / "Cancelado" — mismo
 // cálculo que `statusCase` en el repo (usado ahí para el listado, que trae
 // el estado ya resuelto por SQL); acá en JS porque el detalle de un torneo
@@ -245,6 +261,7 @@ router.get(
                 first_name: m.first_name,
                 last_name: m.last_name,
                 avatar_url: m.avatar_url,
+                age: computeAge(m.birth_date),
               })),
             }
           : null,
@@ -260,6 +277,37 @@ router.get(
           enrolled_count: t.enrolled_count,
         })),
         ranking,
+      },
+    });
+  })
+);
+
+// GET /api/v1/tournament/public/organizers/:id_user/club-members?offset=&limit=
+// Paginado aparte de la ficha del organizador — un club real puede tener
+// cientos de socios; la ficha solo trae la primera página (ver
+// listClubMembers), esto es lo que pide "Cargar más" en el frontend.
+router.get(
+  "/public/organizers/:id_user/club-members",
+  asyncHandler(async (req, res) => {
+    const { id_user } = req.params;
+    const organizer = await repo.getOrganizerProfile(id_user);
+    if (!organizer || !organizer.id_club) {
+      return res.status(404).json({ ok: false, message: "Club no encontrado" });
+    }
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 30));
+    const offset = Math.max(0, Number(req.query.offset) || 0);
+    const rows = await repo.listClubMembers(organizer.id_club, limit, offset);
+    return res.json({
+      ok: true,
+      data: {
+        members: rows.map((m) => ({
+          id_user: m.id_user,
+          first_name: m.first_name,
+          last_name: m.last_name,
+          avatar_url: m.avatar_url,
+          age: computeAge(m.birth_date),
+        })),
+        total: organizer.club_member_count,
       },
     });
   })

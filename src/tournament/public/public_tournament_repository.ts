@@ -347,14 +347,20 @@ export class PublicTournamentRepository {
   // LIMIT fijo — un club real puede tener cientos/miles de socios y esto
   // es solo una vitrina ("+N más" en el frontend), no un listado completo;
   // el total real ya viaja aparte en club_member_count.
-  async listClubMembers(id_club: string, limit = 24): Promise<{ id_user: string; first_name: string | null; last_name: string | null; avatar_url: string | null }[]> {
-    const res = await this.pool.query<{ id_user: string; first_name: string | null; last_name: string | null; avatar_url: string | null }>(
-      `SELECT id_user, first_name, last_name, avatar_url
+  async listClubMembers(
+    id_club: string,
+    limit = 30,
+    offset = 0
+  ): Promise<{ id_user: string; first_name: string | null; last_name: string | null; avatar_url: string | null; birth_date: string | null }[]> {
+    const res = await this.pool.query<{
+      id_user: string; first_name: string | null; last_name: string | null; avatar_url: string | null; birth_date: string | null;
+    }>(
+      `SELECT id_user, first_name, last_name, avatar_url, birth_date::text
        FROM users
        WHERE id_club = $1
        ORDER BY NULLIF(TRIM(CONCAT(first_name, ' ', last_name)), '') ASC NULLS LAST
-       LIMIT $2`,
-      [id_club, limit]
+       LIMIT $2 OFFSET $3`,
+      [id_club, limit, offset]
     );
     return res.rows;
   }
