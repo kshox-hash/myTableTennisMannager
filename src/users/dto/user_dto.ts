@@ -46,6 +46,15 @@ export type UserSearchRow = {
   club_name: string | null;
 };
 
+// Resultado de buscar un jugador por email exacto (buscador de la barra) —
+// sin el email: quien busca ya lo conoce, y así no se expone nada más.
+export type UserLookupRow = {
+  id_user: string;
+  first_name: string | null;
+  last_name: string | null;
+  avatar_url: string | null;
+};
+
 export type PlayerStatsDB = {
   id_user: string;
   matches_played: number;

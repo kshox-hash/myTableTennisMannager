@@ -28,6 +28,9 @@ userRouter.get(
   asyncHandler(controller.adminSearchPlayers)
 );
 
+// GET /api/v1/users/lookup?email= — buscador de la barra (jugador y admin), match exacto
+userRouter.get("/lookup", authRequired, asyncHandler(controller.lookupByEmail));
+
 // POST /api/v1/users/admin/quick-create — crea un jugador sin cuenta (walk-in) para inscribirlo
 userRouter.post(
   "/admin/quick-create",

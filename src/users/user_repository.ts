@@ -1,7 +1,7 @@
 import type { Pool } from "pg";
 import { randomUUID } from "crypto";
 import DB from "../db/db_configuration";
-import type { UserProfileDB, PlayerStatsDB, UserSearchRow } from "./dto/user_dto";
+import type { UserProfileDB, PlayerStatsDB, UserSearchRow, UserLookupRow } from "./dto/user_dto";
 import type { UpdateProfileDTO } from "./schema/user_schema";
 import { hashPassword } from "../bcrypt/bcrypt";
 import { ROLE_IDS } from "../core/constants/roles";
@@ -171,6 +171,21 @@ export class UserRepository {
 
     const res = await this.pool.query<UserSearchRow>(query, [`%${q}%`, limit]);
     return res.rows;
+  }
+
+  // Match EXACTO (sin distinguir mayúsculas) — lo usa cualquier jugador
+  // logueado, así que no puede ser ILIKE '%q%': eso permitiría listar los
+  // emails de todos los usuarios tecleando letras sueltas.
+  async findByEmail(email: string): Promise<UserLookupRow | null> {
+    const res = await this.pool.query<UserLookupRow>(
+      `SELECT id_user, first_name, last_name, avatar_url
+       FROM users
+       WHERE LOWER(email) = LOWER($1)
+         AND is_team = false
+       LIMIT 1`,
+      [email]
+    );
+    return res.rows[0] ?? null;
   }
 
   // Alta rápida de un jugador sin cuenta (walk-in): genera un email y password

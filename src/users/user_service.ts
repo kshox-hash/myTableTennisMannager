@@ -1,5 +1,5 @@
 import { UserRepository } from "./user_repository";
-import type { UserProfileDB, PlayerStatsDB, UserSearchRow } from "./dto/user_dto";
+import type { UserProfileDB, PlayerStatsDB, UserSearchRow, UserLookupRow } from "./dto/user_dto";
 import type { UpdateProfileDTO, QuickCreatePlayerDTO } from "./schema/user_schema";
 import { type Result, ok, fail } from "../core/constants/result";
 import {
@@ -111,6 +111,15 @@ export class UserService {
 
     const data = await this.repo.searchPlayers(trimmed);
     return ok(data);
+  }
+
+  async lookupByEmail(email: string): Promise<Result<UserLookupRow, "INVALID_EMAIL" | "NOT_FOUND">> {
+    const trimmed = email.trim();
+    if (!trimmed.includes("@") || trimmed.length > 254) return fail("INVALID_EMAIL");
+
+    const row = await this.repo.findByEmail(trimmed);
+    if (!row) return fail("NOT_FOUND");
+    return ok(row);
   }
 
   // Crea un jugador sin cuenta (walk-in) y lo devuelve listo para inscribir.

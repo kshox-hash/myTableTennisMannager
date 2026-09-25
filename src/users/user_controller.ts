@@ -52,6 +52,22 @@ export class UserController {
     return res.json({ ok: true, data: result.data });
   };
 
+  // GET /api/v1/users/lookup?email= — cualquier usuario logueado busca un
+  // jugador por su email exacto para abrir su ficha
+  lookupByEmail = async (req: Request, res: Response) => {
+    const email = typeof req.query.email === "string" ? req.query.email : "";
+    const result = await this.service.lookupByEmail(email);
+
+    if (!result.ok) {
+      if (result.error === "INVALID_EMAIL") {
+        return res.status(400).json({ ok: false, message: "Ingresa un correo válido" });
+      }
+      return res.status(404).json({ ok: false, message: "No hay ningún jugador con ese correo" });
+    }
+
+    return res.json({ ok: true, data: result.data });
+  };
+
   // POST /api/v1/users/admin/quick-create — crea un jugador sin cuenta (walk-in) para inscribirlo
   adminQuickCreatePlayer = async (req: Request, res: Response) => {
     const result = await this.service.createQuickPlayer(req.body);
