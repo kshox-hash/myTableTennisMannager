@@ -399,6 +399,8 @@ router.get(
         category_type: detail.category.category_type,
         category_range: detail.category.category_range,
         gender: detail.category.gender,
+        phase: detail.category.phase,
+        competition_format: detail.category.competition_format,
         players: detail.players.map((p) => ({
           id_user: p.id_user,
           first_name: p.first_name,
