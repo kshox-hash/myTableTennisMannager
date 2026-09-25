@@ -128,6 +128,19 @@ describe("generateGroupsFromPlayers", () => {
     expect(() => generateGroupsFromPlayers([player("a")])).toThrow();
   });
 
+  it("grupo único: todos en un grupo y todos contra todos", () => {
+    const players = Array.from({ length: 7 }, (_, i) => player(`p${i}`));
+    const result = generateGroupsFromPlayers(players, { singleGroup: true });
+
+    expect(result.groups).toHaveLength(1);
+    expect(result.groups[0].target_size).toBe(7);
+    expect(result.members).toHaveLength(7);
+    // 7 jugadores → 7·6/2 = 21 partidos, sin repetir cruces
+    expect(result.matches).toHaveLength(21);
+    const pairs = new Set(result.matches.map((m) => [m.player1_id, m.player2_id].sort().join("|")));
+    expect(pairs.size).toBe(21);
+  });
+
   it("arma grupos, standings en cero y partidos todos-contra-todos", () => {
     const players = Array.from({ length: 7 }, (_, i) =>
       player(`p${i}`, { ranking_points: 100 - i })

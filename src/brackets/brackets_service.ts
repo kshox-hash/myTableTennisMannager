@@ -91,7 +91,8 @@ export class BracketsService {
     const players = await this.repo.loadPlayersForCategory(tournamentId, categoryId);
     if (players.length < 2) return fail(BRACKETS_ERRORS.NOT_ENOUGH_PLAYERS);
 
-    const generated = generateGroupsFromPlayers(players, { bestOfGroups: 3 });
+    const singleGroup = await this.repo.isRoundRobinCategory(categoryId);
+    const generated = generateGroupsFromPlayers(players, { bestOfGroups: 3, singleGroup });
 
     const names = await this.repo.getUserNames(generated.members.map((m) => m.id_user));
     const nameFields = (idUser: string) => {
@@ -158,6 +159,7 @@ export class BracketsService {
 
     const generated = generateGroupsFromPlayers(players, {
       bestOfGroups: input.best_of_sets ?? 3,
+      singleGroup: await this.repo.isRoundRobinCategory(categoryId),
     });
 
     if (groupOrder) {
@@ -215,6 +217,7 @@ export class BracketsService {
 
     const generated = generateGroupsFromPlayers(players, {
       bestOfGroups: input.best_of_sets ?? 3,
+      singleGroup: await this.repo.isRoundRobinCategory(categoryId),
     });
 
     const qualifiersPerGroup = await this.repo.getCategoryQualifiersPerGroup(categoryId);
@@ -447,7 +450,11 @@ export class BracketsService {
     if (match.status === "scheduled") return fail(BRACKETS_ERRORS.MATCH_NOT_PLAYED);
 
     const phase = await this.repo.getCategoryPhase(match.id_category);
-    if (phase !== "groups") return fail(BRACKETS_ERRORS.CATEGORY_ALREADY_ADVANCED);
+    // Grupo único ya cerrado: se puede corregir un resultado (vuelve a
+    // "groups" abajo). En grupos + llave, con la llave armada no.
+    const reopenRoundRobin =
+      phase === "finished" && (await this.repo.isRoundRobinCategory(match.id_category));
+    if (phase !== "groups" && !reopenRoundRobin) return fail(BRACKETS_ERRORS.CATEGORY_ALREADY_ADVANCED);
 
     const winnerIsPlayer1 = match.winner_id === match.player1_id;
     const loserId = winnerIsPlayer1 ? match.player2_id : match.player1_id;
@@ -471,6 +478,8 @@ export class BracketsService {
       tournamentId: match.id_tournament,
       requestedBy,
     });
+
+    if (reopenRoundRobin) await this.repo.reopenRoundRobinCategory(match.id_category);
 
     return ok({ undone: true, tournamentId: match.id_tournament, categoryId: match.id_category });
   }

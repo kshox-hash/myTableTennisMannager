@@ -75,6 +75,9 @@ export class TournamentPhaseService {
     const cat = await this.repo.getCategoryPhase(id_category);
     if (!cat) return { ok: false as const, error: PHASE_ERRORS.CATEGORY_NOT_FOUND };
     if (cat.phase !== "groups") return { ok: false as const, error: PHASE_ERRORS.WRONG_PHASE };
+    if (cat.competition_format === "round_robin") {
+      return { ok: false as const, error: "Esta categoría es de grupo único: no tiene llave eliminatoria" };
+    }
 
     // Si no es force, verificar que todos los partidos de grupo tengan resultado
     if (!opts.force) {
@@ -125,6 +128,16 @@ export class TournamentPhaseService {
   async checkGroupAutoAdvance(id_category: string, id_tournament: string) {
     const cat = await this.repo.getCategoryPhase(id_category);
     if (!cat || cat.phase !== "groups") return;
+
+    // Grupo único: no hay llave — al jugarse el último partido la
+    // categoría termina y el podio sale de la tabla del grupo.
+    if (cat.competition_format === "round_robin") {
+      if (await this.repo.allGroupMatchesFinished(id_category)) {
+        await this.repo.setPhase(id_category, "finished");
+      }
+      return;
+    }
+
     if (cat.bracket_start_mode !== "auto") return;
 
     const done = await this.repo.allGroupMatchesFinished(id_category);

@@ -75,6 +75,8 @@ export const createTournamentSchema = z.object({
         category_range: z.string().min(1).max(100),
         gender: z.enum(["male", "female", "mixed"]),
         format: z.enum(["singles", "doubles"]).optional(),
+        // "round_robin" = grupo único (todos contra todos, podio por tabla).
+        competition_format: z.enum(["groups_bracket", "round_robin"]).optional(),
         inscription_price: z.number().min(0),
         quotas: z.number().int().positive().nullable(),
         status: z.string().optional(),

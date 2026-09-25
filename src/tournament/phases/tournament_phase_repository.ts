@@ -14,6 +14,7 @@ export type CategoryPhaseRow = {
   scheduled_groups_at:  string | null;
   bracket_start_mode:   StartMode;
   scheduled_bracket_at: string | null;
+  competition_format:   "groups_bracket" | "round_robin";
 };
 
 export type PhaseConfig = {
@@ -34,7 +35,7 @@ export class TournamentPhaseRepository {
     const res = await this.pool.query<CategoryPhaseRow>(
       `SELECT id_category, id_tournament, category_type, category_range,
               phase, groups_start_mode, scheduled_groups_at,
-              bracket_start_mode, scheduled_bracket_at
+              bracket_start_mode, scheduled_bracket_at, competition_format
        FROM tournament_categories
        WHERE id_category = $1`,
       [id_category]
@@ -46,7 +47,7 @@ export class TournamentPhaseRepository {
     const res = await this.pool.query<CategoryPhaseRow>(
       `SELECT id_category, id_tournament, category_type, category_range,
               phase, groups_start_mode, scheduled_groups_at,
-              bracket_start_mode, scheduled_bracket_at
+              bracket_start_mode, scheduled_bracket_at, competition_format
        FROM tournament_categories
        WHERE id_tournament = $1
        ORDER BY category_type, category_range`,
@@ -114,7 +115,7 @@ export class TournamentPhaseRepository {
     const res = await this.pool.query<CategoryPhaseRow>(
       `SELECT id_category, id_tournament, category_type, category_range,
               phase, groups_start_mode, scheduled_groups_at,
-              bracket_start_mode, scheduled_bracket_at
+              bracket_start_mode, scheduled_bracket_at, competition_format
        FROM tournament_categories
        WHERE
          (phase = 'enrollment' AND groups_start_mode  = 'scheduled' AND scheduled_groups_at  <= NOW())

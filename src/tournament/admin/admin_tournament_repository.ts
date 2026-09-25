@@ -49,6 +49,7 @@ type CategoryRow = {
   status: string;
   qualifiers_per_group: number | string;
   priority: number | string;
+  competition_format?: "groups_bracket" | "round_robin";
   created_at?: string | Date | null;
 };
 
@@ -206,6 +207,7 @@ export class AdminTournamentRepository {
       status: row.status,
       qualifiers_per_group: Number(row.qualifiers_per_group ?? 2),
       priority: Number(row.priority ?? 1),
+      competition_format: row.competition_format ?? "groups_bracket",
     };
   }
 
@@ -373,7 +375,7 @@ export class AdminTournamentRepository {
       const base = index * 10;
 
       placeholders.push(
-        `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10})`
+        `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10}, $${base + 11})`
       );
 
       values.push(
@@ -386,7 +388,8 @@ export class AdminTournamentRepository {
         cat.status ?? "active",
         cat.qualifiers_per_group ?? 2,
         cat.priority ?? 1,
-        cat.format === "doubles" ? "doubles" : "singles"
+        cat.format === "doubles" ? "doubles" : "singles",
+        cat.competition_format === "round_robin" ? "round_robin" : "groups_bracket"
       );
     });
 
@@ -402,7 +405,8 @@ export class AdminTournamentRepository {
           status,
           qualifiers_per_group,
           priority,
-          format
+          format,
+          competition_format
         )
       VALUES ${placeholders.join(",")}
       RETURNING *;
@@ -593,7 +597,7 @@ export class AdminTournamentRepository {
           `UPDATE ${this.tournamentCategoriesTable}
              SET category_type = $1, category_range = $2, gender = $3,
                  inscription_price = $4, quotas = $5, qualifiers_per_group = $6,
-                 priority = $7, format = $8
+                 priority = $7, format = $8, competition_format = $10
            WHERE id_category = $9`,
           [
             cat.category_type.trim(),
@@ -605,13 +609,14 @@ export class AdminTournamentRepository {
             cat.priority ?? 1,
             cat.format === "doubles" ? "doubles" : "singles",
             cat.id_category,
+            cat.competition_format === "round_robin" ? "round_robin" : "groups_bracket",
           ]
         );
       } else {
         await client.query(
           `INSERT INTO ${this.tournamentCategoriesTable}
-             (id_tournament, category_type, category_range, gender, inscription_price, quotas, status, qualifiers_per_group, priority, format)
-           VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, $8, $9)`,
+             (id_tournament, category_type, category_range, gender, inscription_price, quotas, status, qualifiers_per_group, priority, format, competition_format)
+           VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, $8, $9, $10)`,
           [
             tournamentId,
             cat.category_type.trim(),
@@ -622,6 +627,7 @@ export class AdminTournamentRepository {
             cat.qualifiers_per_group ?? 2,
             cat.priority ?? 1,
             cat.format === "doubles" ? "doubles" : "singles",
+            cat.competition_format === "round_robin" ? "round_robin" : "groups_bracket",
           ]
         );
       }
@@ -1039,6 +1045,7 @@ export class AdminTournamentRepository {
         c.quotas,
         c.status,
         c.format,
+        c.competition_format,
         c.qualifiers_per_group,
         c.priority,
         c.seeding_in_progress,

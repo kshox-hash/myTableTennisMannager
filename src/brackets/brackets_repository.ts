@@ -65,6 +65,23 @@ export class BracketsRepository {
   // Cantidad de clasificados por grupo configurada a nivel de categoría
   // (se usa como default al crear los grupos; cada grupo puede después
   // ajustarse manualmente sin afectar este valor).
+  async isRoundRobinCategory(categoryId: string): Promise<boolean> {
+    const res = await this.pool.query<{ competition_format: string }>(
+      `SELECT competition_format FROM tournament_categories WHERE id_category = $1`,
+      [categoryId]
+    );
+    return res.rows[0]?.competition_format === "round_robin";
+  }
+
+  // Deshacer un resultado de un grupo único ya cerrado lo vuelve a abrir.
+  async reopenRoundRobinCategory(categoryId: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE tournament_categories SET phase = 'groups'
+       WHERE id_category = $1 AND phase = 'finished' AND competition_format = 'round_robin'`,
+      [categoryId]
+    );
+  }
+
   async getCategoryQualifiersPerGroup(categoryId: string): Promise<number> {
     const res = await this.pool.query<{ qualifiers_per_group: number }>(
       `SELECT qualifiers_per_group FROM tournament_categories WHERE id_category = $1`,

@@ -86,6 +86,8 @@ type InternalGroupBucket = {
 
 type GenerateGroupsOptions = {
   bestOfGroups?: 3 | 5 | 7;
+  /** Grupo único: todos los jugadores en un solo grupo (todos contra todos). */
+  singleGroup?: boolean;
 };
 
 /**
@@ -449,7 +451,11 @@ export function generateGroupsFromPlayers(
   const bestOfSets = options?.bestOfGroups ?? 3;
 
   const sortedPlayers = sortPlayersForGrouping(rawPlayers);
-  const plan = calculateGroupPlan(sortedPlayers.length);
+  // Grupo único (competition_format = round_robin): todos en un grupo.
+  // target_size no tiene tope en la base (solo >= 0).
+  const plan = options?.singleGroup
+    ? ([sortedPlayers.length] as Array<2 | 3 | 4>)
+    : calculateGroupPlan(sortedPlayers.length);
   const buckets = assignPlayersToGroups(sortedPlayers, plan);
 
   const groups: GeneratedGroup[] = buckets.map((group) => ({

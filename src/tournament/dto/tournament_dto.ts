@@ -54,6 +54,8 @@ export type TournamentCategoryDTO = {
   // pareja (ver 044_doubles_categories.sql). gender = "mixed" + doubles =
   // dobles mixtos (regla 1 varón + 1 dama por pareja).
   format?: "singles" | "doubles";
+  // "round_robin" = grupo único (todos contra todos; podio por tabla, sin llave).
+  competition_format?: "groups_bracket" | "round_robin";
   qualifiers_per_group?: number;
   // Orden sugerido para jugarse (menor = antes); mismo número en dos
   // categorías = pensadas para simultáneo. Solo alimenta el punto de
