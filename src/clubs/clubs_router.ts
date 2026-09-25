@@ -41,7 +41,6 @@ const ERR: Record<string, [number, string]> = {
   ALREADY_HAS_CLUB: [409, "Ya tienes un club creado — cada cuenta puede tener uno solo"],
   ALREADY_MEMBER: [409, "Ya perteneces a ese club"],
   NO_CLUB: [404, "No perteneces a ningún club"],
-  IS_OWNER: [409, "Eres el dueño de este club — gestiónalo desde Clubes"],
 };
 
 const createSchema = z.object({

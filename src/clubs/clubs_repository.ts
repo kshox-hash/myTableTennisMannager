@@ -318,17 +318,15 @@ export class ClubsRepository {
     }
   }
 
-  // Salir del club actual. El dueño no puede salir del club que creó (su
-  // club se gestiona/borra desde Clubes) — ahí no se toca nada.
-  async leaveClub(idUser: string): Promise<Result<true, "NO_CLUB" | "IS_OWNER">> {
-    const cur = await this.pool.query<{ id_club: string | null; is_owner: boolean }>(
-      `SELECT u.id_club, EXISTS (SELECT 1 FROM clubs c WHERE c.id_club = u.id_club AND c.created_by = u.id_user) AS is_owner
-       FROM users u WHERE u.id_user = $1`,
+  // Salir del club actual como JUGADOR (users.id_club). Vale también para
+  // el dueño: la propiedad del club vive en clubs.created_by y no se toca —
+  // el rol Jugador es independiente del de Administrador.
+  async leaveClub(idUser: string): Promise<Result<true, "NO_CLUB">> {
+    const cur = await this.pool.query<{ id_club: string | null }>(
+      `SELECT id_club FROM users WHERE id_user = $1`,
       [idUser]
     );
-    const row = cur.rows[0];
-    if (!row?.id_club) return fail("NO_CLUB");
-    if (row.is_owner) return fail("IS_OWNER");
+    if (!cur.rows[0]?.id_club) return fail("NO_CLUB");
     await this.pool.query(`UPDATE users SET id_club = NULL WHERE id_user = $1`, [idUser]);
     return ok(true);
   }
