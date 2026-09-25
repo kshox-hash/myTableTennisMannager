@@ -21,6 +21,7 @@ export type UserProfileDB = {
   owned_club_name: string | null;
   birth_date: string | null;
   country: string | null;
+  region: string | null;
   id_document: string | null;
   category: string | null;
   dominant_hand: string | null;

@@ -57,7 +57,8 @@ export class UserRepository {
          dominant_hand          = COALESCE($10, dominant_hand),
          public_ranking_enabled = COALESCE($11, public_ranking_enabled),
          organizer_first_name   = CASE WHEN $13 THEN $14 ELSE organizer_first_name END,
-         organizer_last_name    = CASE WHEN $15 THEN $16 ELSE organizer_last_name END
+         organizer_last_name    = CASE WHEN $15 THEN $16 ELSE organizer_last_name END,
+         region                 = CASE WHEN $17 THEN $18 ELSE region END
        WHERE id_user = $12`,
       [
         input.first_name ?? null,
@@ -74,6 +75,7 @@ export class UserRepository {
         id_user,
         input.organizer_first_name !== undefined, input.organizer_first_name ?? null,
         input.organizer_last_name !== undefined, input.organizer_last_name ?? null,
+        input.region !== undefined, input.region ?? null,
       ]
     );
 
@@ -126,6 +128,7 @@ export class UserRepository {
         owned.name AS owned_club_name,
         u.birth_date::text,
         u.country,
+        u.region,
         u.id_document,
         u.category,
         u.dominant_hand,

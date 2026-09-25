@@ -14,6 +14,9 @@ export const updateProfileSchema = z
     club_name: z.string().trim().max(150).nullable().optional(),
     birth_date: z.string().trim().min(1).max(10).nullable().optional(),
     country: z.string().trim().max(100).nullable().optional(),
+    // Región de Chile (lista oficial, igual que tournaments.region) — filtra
+    // "Campeonatos nuevos" del Inicio. null = borrarla.
+    region: z.string().trim().max(40).nullable().optional(),
     id_document: z.string().trim().max(50).nullable().optional(),
     category: z.string().trim().max(50).nullable().optional(),
     dominant_hand: z.enum(["right-handed", "left-handed"]).nullable().optional(),

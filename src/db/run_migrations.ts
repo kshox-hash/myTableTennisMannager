@@ -63,6 +63,7 @@ const INCREMENTAL = [
   "055_organizer_avatar.sql",
   "056_owner_not_member.sql",
   "057_notification_match.sql",
+  "058_user_region.sql",
 ];
 
 export async function runMigrations(): Promise<void> {
