@@ -172,6 +172,7 @@ router.get(
           has_bracket: c.has_bracket,
           is_finished: c.is_finished,
           phase: c.phase,
+          competition_format: c.competition_format,
         })),
       },
     });
