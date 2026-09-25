@@ -293,9 +293,17 @@ export class ClubsRepository {
     return res.rows[0] ?? null;
   }
 
-  async requestJoin(idClub: string, idUser: string): Promise<Result<{ id_request: string }, "CLUB_NOT_FOUND" | "ALREADY_PENDING">> {
+  async requestJoin(
+    idClub: string,
+    idUser: string
+  ): Promise<Result<{ id_request: string }, "CLUB_NOT_FOUND" | "ALREADY_PENDING" | "ALREADY_MEMBER">> {
     const club = await this.pool.query(`SELECT 1 FROM clubs WHERE id_club = $1 AND created_by IS NOT NULL`, [idClub]);
     if (club.rowCount === 0) return fail("CLUB_NOT_FOUND");
+
+    // Pedir unirse a otro club estando ya en uno = cambio de club (al
+    // aprobarse se pisa users.id_club); al mismo club no tiene sentido.
+    const member = await this.pool.query(`SELECT 1 FROM users WHERE id_user = $1 AND id_club = $2`, [idUser, idClub]);
+    if ((member.rowCount ?? 0) > 0) return fail("ALREADY_MEMBER");
 
     try {
       const res = await this.pool.query<{ id_request: string }>(
@@ -308,6 +316,21 @@ export class ClubsRepository {
       if (e?.code === "23505") return fail("ALREADY_PENDING");
       throw e;
     }
+  }
+
+  // Salir del club actual. El dueño no puede salir del club que creó (su
+  // club se gestiona/borra desde Clubes) — ahí no se toca nada.
+  async leaveClub(idUser: string): Promise<Result<true, "NO_CLUB" | "IS_OWNER">> {
+    const cur = await this.pool.query<{ id_club: string | null; is_owner: boolean }>(
+      `SELECT u.id_club, EXISTS (SELECT 1 FROM clubs c WHERE c.id_club = u.id_club AND c.created_by = u.id_user) AS is_owner
+       FROM users u WHERE u.id_user = $1`,
+      [idUser]
+    );
+    const row = cur.rows[0];
+    if (!row?.id_club) return fail("NO_CLUB");
+    if (row.is_owner) return fail("IS_OWNER");
+    await this.pool.query(`UPDATE users SET id_club = NULL WHERE id_user = $1`, [idUser]);
+    return ok(true);
   }
 
   async cancelMyRequest(idUser: string): Promise<boolean> {

@@ -39,6 +39,9 @@ const ERR: Record<string, [number, string]> = {
   ALREADY_PENDING: [409, "Ya tienes una solicitud pendiente — espera la respuesta o cancélala"],
   REQUEST_NOT_FOUND: [404, "Solicitud no encontrada"],
   ALREADY_HAS_CLUB: [409, "Ya tienes un club creado — cada cuenta puede tener uno solo"],
+  ALREADY_MEMBER: [409, "Ya perteneces a ese club"],
+  NO_CLUB: [404, "No perteneces a ningún club"],
+  IS_OWNER: [409, "Eres el dueño de este club — gestiónalo desde Clubes"],
 };
 
 const createSchema = z.object({
@@ -151,6 +154,21 @@ router.delete(
   asyncHandler(async (req, res) => {
     const removed = await repo.cancelMyRequest(req.user!.id_user);
     if (!removed) return res.status(404).json({ ok: false, message: "No tienes una solicitud pendiente" });
+    return res.json({ ok: true });
+  })
+);
+
+// DELETE /api/v1/clubs/me/membership — salir de mi club actual
+router.delete(
+  "/me/membership",
+  authRequired,
+  requireRole(["admin", "player"]),
+  asyncHandler(async (req, res) => {
+    const r = await repo.leaveClub(req.user!.id_user);
+    if (!r.ok) {
+      const [code, msg] = ERR[r.error] ?? [400, r.error];
+      return res.status(code).json({ ok: false, message: msg });
+    }
     return res.json({ ok: true });
   })
 );
