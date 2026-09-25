@@ -152,9 +152,10 @@ export class ClubsRepository {
          RETURNING id_club`,
         [input.name.trim(), input.description, input.founded_date, input.created_by]
       );
-      const idClub = res.rows[0].id_club;
-      await c.query(`UPDATE users SET id_club = $2 WHERE id_user = $1`, [input.created_by, idClub]);
-      return idClub;
+      // Ser dueño NO te hace socio como jugador (users.id_club): si el
+      // organizador quiere jugar por su club, manda la solicitud como
+      // cualquiera y la acepta él mismo — regla explícita del producto.
+      return res.rows[0].id_club;
     });
   }
 
