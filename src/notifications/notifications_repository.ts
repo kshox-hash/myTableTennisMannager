@@ -85,7 +85,7 @@ export class NotificationsRepository {
     ids.forEach((idUser, i) => {
       const base = i * 8;
       placeholders.push(
-        `(${base + 1}, ${base + 2}, ${base + 3}, ${base + 4}, ${base + 5}, ${base + 6}, ${base + 7}, ${base + 8})`
+        `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8})`
       );
       values.push(
         idUser,
