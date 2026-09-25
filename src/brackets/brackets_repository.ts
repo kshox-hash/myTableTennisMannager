@@ -297,7 +297,7 @@ export class BracketsRepository {
         `SELECT gm.id_match, gm.id_group, gm.stage, gm.round_number, gm.match_number,
                 gm.best_of_sets, gm.player1_id, gm.player2_id, gm.winner_id,
                 gm.sets_player1, gm.sets_player2, gm.status, gm.source_note, gm.table_number,
-                gm.played_table_number, gm.set_scores, gm.referee_id
+                gm.played_table_number, gm.set_scores, gm.result_reason, gm.referee_id
          FROM group_matches gm
          JOIN category_groups cg ON cg.id_group = gm.id_group
          WHERE cg.id_tournament = $1 AND cg.id_category = $2
@@ -407,6 +407,13 @@ export class BracketsRepository {
   // no hay nada que "desenganchar" de un partido siguiente — solo revertir
   // los números. Los BYE nunca acreditan stats (ver advanceBracketWinner),
   // así que no hace falta tocarlos.
+  // Motivo de un resultado no jugado (ver 060). Se escribe después de
+  // recordMatchResult/recordBracketResult; null = partido jugado normal.
+  async setResultReason(kind: "group" | "bracket", matchId: string, reason: string | null): Promise<void> {
+    const table = kind === "group" ? "group_matches" : "bracket_matches";
+    await this.pool.query(`UPDATE ${table} SET result_reason = $1 WHERE id_match = $2`, [reason, matchId]);
+  }
+
   async reverseTournamentStats(client: PoolClient, tournamentId: string): Promise<void> {
     const isRanked = await this.isTournamentRanked(client, tournamentId);
     const pointsToRevert = GLOBAL_RANKING_ENABLED && isRanked ? RANKING_POINTS_PER_WIN : 0;
@@ -624,7 +631,7 @@ export class BracketsRepository {
       await client.query(
         `UPDATE group_matches
          SET winner_id = NULL, sets_player1 = 0, sets_player2 = 0,
-             status = 'scheduled', played_at = NULL, set_scores = NULL,
+             status = 'scheduled', played_at = NULL, set_scores = NULL, result_reason = NULL,
              table_number = played_table_number, played_table_number = NULL
          WHERE id_match = $1`,
         [matchId]
@@ -761,7 +768,7 @@ export class BracketsRepository {
       await client.query(
         `UPDATE bracket_matches
          SET winner_id = NULL, sets_player1 = 0, sets_player2 = 0,
-             status = 'ready', played_at = NULL, set_scores = NULL,
+             status = 'ready', played_at = NULL, set_scores = NULL, result_reason = NULL,
              table_number = played_table_number, played_table_number = NULL
          WHERE id_match = $1`,
         [matchId]

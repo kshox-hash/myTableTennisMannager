@@ -268,7 +268,7 @@ export class PlayerRepository {
       this.pool.query(
         `SELECT
            gm.id_match, gm.match_number, gm.status, gm.best_of_sets,
-           gm.sets_player1, gm.sets_player2, gm.winner_id, gm.set_scores,
+           gm.sets_player1, gm.sets_player2, gm.winner_id, gm.set_scores, gm.result_reason,
            gm.table_number, gm.played_table_number,
            gm.player1_id, gm.player2_id,
            opp.id_user AS opponent_id,
@@ -292,7 +292,7 @@ export class PlayerRepository {
       this.pool.query(
         `SELECT
            bm.id_match, bm.round, bm.match_number, bm.status, bm.best_of_sets,
-           bm.sets_player1, bm.sets_player2, bm.winner_id, bm.set_scores,
+           bm.sets_player1, bm.sets_player2, bm.winner_id, bm.set_scores, bm.result_reason,
            bm.table_number, bm.played_table_number,
            bm.player1_id, bm.player2_id,
            opp.id_user AS opponent_id,
@@ -521,7 +521,7 @@ export class PlayerRepository {
           gm.player2_id,
           COALESCE(NULLIF(TRIM(p2.last_name || ' ' || p2.first_name), ''), p2.email) AS player2_name,
           p2cl.name AS player2_club,
-          gm.status, gm.sets_player1, gm.sets_player2, gm.winner_id, gm.set_scores,
+          gm.status, gm.sets_player1, gm.sets_player2, gm.winner_id, gm.set_scores, gm.result_reason,
           gm.played_at::text, gm.table_number, gm.played_table_number,
           NULL::int AS next_round, NULL::int AS next_match_number, NULL::int AS next_match_slot
         FROM group_matches gm
@@ -547,7 +547,7 @@ export class PlayerRepository {
           bm.player2_id,
           COALESCE(NULLIF(TRIM(p2.last_name || ' ' || p2.first_name), ''), p2.email) AS player2_name,
           p2cl.name AS player2_club,
-          bm.status, bm.sets_player1, bm.sets_player2, bm.winner_id, bm.set_scores,
+          bm.status, bm.sets_player1, bm.sets_player2, bm.winner_id, bm.set_scores, bm.result_reason,
           bm.played_at::text, bm.table_number, bm.played_table_number,
           bm.next_round, bm.next_match_number, bm.next_match_slot
         FROM bracket_matches bm
@@ -610,7 +610,7 @@ export class PlayerRepository {
         gm.player2_id,
         COALESCE(NULLIF(TRIM(p2.last_name || ' ' || p2.first_name), ''), p2.email) AS player2_name,
         p2cl.name AS player2_club,
-        gm.winner_id, gm.sets_player1, gm.sets_player2, gm.set_scores,
+        gm.winner_id, gm.sets_player1, gm.sets_player2, gm.set_scores, gm.result_reason,
         gm.status, gm.played_at::text, gm.table_number, gm.played_table_number,
         gm.referee_id,
         COALESCE(NULLIF(TRIM(ref.last_name || ' ' || ref.first_name), ''), ref.email) AS referee_name,
@@ -640,7 +640,7 @@ export class PlayerRepository {
         bm.player2_id,
         COALESCE(NULLIF(TRIM(p2.last_name || ' ' || p2.first_name), ''), p2.email) AS player2_name,
         p2cl.name AS player2_club,
-        bm.winner_id, bm.sets_player1, bm.sets_player2, bm.set_scores,
+        bm.winner_id, bm.sets_player1, bm.sets_player2, bm.set_scores, bm.result_reason,
         bm.status, bm.played_at::text, bm.table_number, bm.played_table_number,
         bm.referee_id,
         COALESCE(NULLIF(TRIM(ref.last_name || ' ' || ref.first_name), ''), ref.email) AS referee_name,

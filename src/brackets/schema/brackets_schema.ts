@@ -18,6 +18,9 @@ export const matchResultSchema = z
     sets_player2: z.number().int().min(0).max(7),
     walkover: z.boolean().optional(),
     set_scores: z.array(setScoreSchema).max(7).optional(),
+    // Motivo de un resultado no jugado (lesión, abandono, no se presentó,
+    // descalificación) — ver 060_match_result_reason.sql. Implica walkover.
+    result_reason: z.enum(["no_show", "injury", "retired", "disqualified"]).optional(),
   })
   .strict();
 

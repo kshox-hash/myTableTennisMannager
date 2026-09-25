@@ -384,7 +384,10 @@ export class BracketsService {
     if (!match) return fail(BRACKETS_ERRORS.MATCH_NOT_FOUND);
     if (match.status !== "scheduled") return fail(BRACKETS_ERRORS.MATCH_ALREADY_PLAYED);
 
-    const { winner_id, sets_player1, sets_player2, walkover = false, set_scores } = input;
+    const { winner_id, sets_player1, sets_player2, set_scores, result_reason } = input;
+    // Un motivo (lesión, abandono, no se presentó, descalificación) siempre
+    // es un resultado no jugado: se guarda como walkover + el motivo.
+    const walkover = input.walkover === true || !!result_reason;
 
     if (winner_id !== match.player1_id && winner_id !== match.player2_id) {
       return fail(BRACKETS_ERRORS.INVALID_WINNER);
@@ -427,6 +430,7 @@ export class BracketsService {
       categoryId: match.id_category,
     });
 
+    await this.repo.setResultReason("group", matchId, walkover ? result_reason ?? null : null);
     return ok({ recorded: true, tournamentId: match.id_tournament, categoryId: match.id_category });
   }
 
@@ -794,7 +798,10 @@ export class BracketsService {
     if (!match) return fail(BRACKETS_ERRORS.MATCH_NOT_FOUND);
     if (match.status !== "ready")  return fail(BRACKETS_ERRORS.MATCH_NOT_READY);
 
-    const { winner_id, sets_player1, sets_player2, walkover = false, set_scores } = input;
+    const { winner_id, sets_player1, sets_player2, set_scores, result_reason } = input;
+    // Un motivo (lesión, abandono, no se presentó, descalificación) siempre
+    // es un resultado no jugado: se guarda como walkover + el motivo.
+    const walkover = input.walkover === true || !!result_reason;
 
     if (winner_id !== match.player1_id && winner_id !== match.player2_id) {
       return fail(BRACKETS_ERRORS.INVALID_WINNER);
@@ -833,6 +840,7 @@ export class BracketsService {
       categoryId: match.id_category,
     });
 
+    await this.repo.setResultReason("bracket", matchId, walkover ? result_reason ?? null : null);
     return ok({ recorded: true, tournamentId: match.id_tournament, categoryId: match.id_category });
   }
 

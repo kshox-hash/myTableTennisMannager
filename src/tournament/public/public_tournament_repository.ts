@@ -488,7 +488,7 @@ export class PublicTournamentRepository {
              NULL::int AS round,
              gm.player1_id, u1.first_name AS player1_first, u1.last_name AS player1_last, c1.name AS player1_club, u1.avatar_url AS player1_avatar_url,
              gm.player2_id, u2.first_name AS player2_first, u2.last_name AS player2_last, c2.name AS player2_club, u2.avatar_url AS player2_avatar_url,
-             gm.winner_id, gm.sets_player1, gm.sets_player2, gm.status, gm.best_of_sets, gm.played_at, gm.set_scores
+             gm.winner_id, gm.sets_player1, gm.sets_player2, gm.status, gm.best_of_sets, gm.played_at, gm.set_scores, gm.result_reason
       FROM group_matches gm
       JOIN tournament_categories tc ON tc.id_category = gm.id_category
       JOIN users u1 ON u1.id_user = gm.player1_id
@@ -503,7 +503,7 @@ export class PublicTournamentRepository {
              bm.round,
              bm.player1_id, u1.first_name AS player1_first, u1.last_name AS player1_last, c1.name AS player1_club, u1.avatar_url AS player1_avatar_url,
              bm.player2_id, u2.first_name AS player2_first, u2.last_name AS player2_last, c2.name AS player2_club, u2.avatar_url AS player2_avatar_url,
-             bm.winner_id, bm.sets_player1, bm.sets_player2, bm.status, bm.best_of_sets, bm.played_at, bm.set_scores
+             bm.winner_id, bm.sets_player1, bm.sets_player2, bm.status, bm.best_of_sets, bm.played_at, bm.set_scores, bm.result_reason
       FROM bracket_matches bm
       JOIN tournament_categories tc ON tc.id_category = bm.id_category
       LEFT JOIN users u1 ON u1.id_user = bm.player1_id
@@ -598,7 +598,7 @@ export class PublicTournamentRepository {
       this.pool.query(
         `SELECT gm.id_group, gm.id_match, gm.player1_id, u1.first_name AS p1_first, u1.last_name AS p1_last, u1.avatar_url AS p1_avatar,
                 gm.player2_id, u2.first_name AS p2_first, u2.last_name AS p2_last, u2.avatar_url AS p2_avatar,
-                gm.sets_player1, gm.sets_player2, gm.status, gm.best_of_sets, gm.set_scores
+                gm.sets_player1, gm.sets_player2, gm.status, gm.best_of_sets, gm.set_scores, gm.result_reason
          FROM group_matches gm
          JOIN users u1 ON u1.id_user = gm.player1_id
          JOIN users u2 ON u2.id_user = gm.player2_id
@@ -651,6 +651,7 @@ export class PublicTournamentRepository {
           status: r.status,
           best_of_sets: r.best_of_sets,
           set_scores: r.set_scores ?? null,
+          result_reason: r.result_reason ?? null,
         })),
       });
     }
@@ -658,7 +659,7 @@ export class PublicTournamentRepository {
     const bracketRes = await this.pool.query(
       `SELECT bm.id_match, bm.round, bm.match_number, bm.player1_id, u1.first_name AS p1_first, u1.last_name AS p1_last, u1.avatar_url AS p1_avatar,
               bm.player2_id, u2.first_name AS p2_first, u2.last_name AS p2_last, u2.avatar_url AS p2_avatar,
-              bm.winner_id, bm.sets_player1, bm.sets_player2, bm.status, bm.is_bye, bm.best_of_sets, bm.set_scores
+              bm.winner_id, bm.sets_player1, bm.sets_player2, bm.status, bm.is_bye, bm.best_of_sets, bm.set_scores, bm.result_reason
        FROM bracket_matches bm
        LEFT JOIN users u1 ON u1.id_user = bm.player1_id
        LEFT JOIN users u2 ON u2.id_user = bm.player2_id
@@ -713,7 +714,7 @@ export class PublicTournamentRepository {
         gm.player2_id,
         COALESCE(NULLIF(TRIM(p2.first_name || ' ' || p2.last_name), ''), 'Jugador sin nombre') AS player2_name,
         p2cl.name AS player2_club, p2.avatar_url AS player2_avatar_url,
-        gm.winner_id, gm.sets_player1, gm.sets_player2, gm.set_scores,
+        gm.winner_id, gm.sets_player1, gm.sets_player2, gm.set_scores, gm.result_reason,
         gm.status, gm.played_at::text, gm.table_number, gm.played_table_number,
         NULL::int AS seed1, NULL::int AS seed2
       FROM group_matches gm
@@ -740,7 +741,7 @@ export class PublicTournamentRepository {
         bm.player2_id,
         COALESCE(NULLIF(TRIM(p2.first_name || ' ' || p2.last_name), ''), 'Jugador sin nombre') AS player2_name,
         p2cl.name AS player2_club, p2.avatar_url AS player2_avatar_url,
-        bm.winner_id, bm.sets_player1, bm.sets_player2, bm.set_scores,
+        bm.winner_id, bm.sets_player1, bm.sets_player2, bm.set_scores, bm.result_reason,
         bm.status, bm.played_at::text, bm.table_number, bm.played_table_number,
         bm.seed1, bm.seed2
       FROM bracket_matches bm
