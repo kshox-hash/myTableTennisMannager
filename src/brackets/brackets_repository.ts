@@ -560,6 +560,8 @@ export class BracketsRepository {
           message: `Ganaste ${winnerSetsFor}-${winnerSetsAgainst} en la fase de grupos`,
           idTournament: tournamentId,
           idCategory: categoryId,
+          idMatch: matchId,
+          matchType: "group",
         },
         client
       );
@@ -573,6 +575,8 @@ export class BracketsRepository {
             : `Perdiste ${loserSetsFor}-${loserSetsAgainst} en la fase de grupos`,
           idTournament: tournamentId,
           idCategory: categoryId,
+          idMatch: matchId,
+          matchType: "group",
         },
         client
       );
@@ -1053,6 +1057,7 @@ export class BracketsRepository {
           categoryId,
           winnerId,
           waitingPlayerId: match.player1_id === winnerId ? match.player2_id : match.player1_id,
+          nextMatchId: match.id_match,
         });
         return;
       }
@@ -1078,9 +1083,15 @@ export class BracketsRepository {
 
   private async notifyWaitingOpponent(
     client: PoolClient,
-    params: { tournamentId: string; categoryId: string; winnerId: string; waitingPlayerId: string | null }
+    params: {
+      tournamentId: string;
+      categoryId: string;
+      winnerId: string;
+      waitingPlayerId: string | null;
+      nextMatchId: string;
+    }
   ): Promise<void> {
-    const { tournamentId, categoryId, winnerId, waitingPlayerId } = params;
+    const { tournamentId, categoryId, winnerId, waitingPlayerId, nextMatchId } = params;
     if (!waitingPlayerId) return;
 
     const winnerNameRes = await client.query<{
@@ -1099,6 +1110,8 @@ export class BracketsRepository {
         message: `Tu próximo partido en el cuadro ya está listo: juegas contra ${winnerName}.`,
         idTournament: tournamentId,
         idCategory: categoryId,
+        idMatch: nextMatchId,
+        matchType: "bracket",
       },
       client
     );
@@ -1166,9 +1179,11 @@ export class BracketsRepository {
           idUser: winnerId,
           type: "match_result",
           title: isFinal ? "¡Ganaste el torneo!" : "Ganaste tu partido de llave",
-          message: `Ganaste ${winnerSetsFor}-${winnerSetsAgainst}${isFinal ? " y te llevaste el título" : ", avanzás a la siguiente ronda"}`,
+          message: `Ganaste ${winnerSetsFor}-${winnerSetsAgainst}${isFinal ? " y te llevaste el título" : ", avanzas a la siguiente ronda"}`,
           idTournament: tournamentId,
           idCategory: categoryId,
+          idMatch: matchId,
+          matchType: "bracket",
         },
         client
       );
@@ -1183,6 +1198,8 @@ export class BracketsRepository {
               : `Perdiste ${winnerSetsAgainst}-${winnerSetsFor} en el cuadro eliminatorio`,
             idTournament: tournamentId,
             idCategory: categoryId,
+            idMatch: matchId,
+            matchType: "bracket",
           },
           client
         );

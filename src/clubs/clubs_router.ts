@@ -186,11 +186,15 @@ router.post(
 
     const owner = await repo.getOwner(req.params.id_club);
     if (owner) {
+      const [who, clubName] = await Promise.all([
+        repo.getUserDisplayName(req.user!.id_user),
+        repo.getClubName(req.params.id_club),
+      ]);
       await notifications.create({
         idUser: owner,
         type: "club_join_request",
         title: "Nueva solicitud de club",
-        message: "Un jugador quiere unirse a uno de tus clubes. Revísalo en Clubes.",
+        message: `${who ?? "Un jugador"} quiere unirse a ${clubName ?? "tu club"}. Tócala para aceptarla o rechazarla.`,
       });
     }
 
@@ -260,7 +264,7 @@ router.post(
       idUser: r.data.id_user,
       type: "club_join_approved",
       title: "Solicitud aceptada",
-      message: "Tu solicitud para unirte al club fue aceptada.",
+      message: `¡Ya eres parte de ${(await repo.getClubName(req.params.id_club)) ?? "el club"}!`,
     });
     return res.json({ ok: true });
   })
@@ -282,7 +286,7 @@ router.post(
       idUser: r.data.id_user,
       type: "club_join_rejected",
       title: "Solicitud rechazada",
-      message: "Tu solicitud para unirte al club fue rechazada.",
+      message: `${(await repo.getClubName(req.params.id_club)) ?? "El club"} rechazó tu solicitud. Puedes pedir unirte a otro club desde tu perfil.`,
     });
     return res.json({ ok: true });
   })

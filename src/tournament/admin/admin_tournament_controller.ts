@@ -117,6 +117,12 @@ export class AdminTournamentController {
   // GET /admin/get/tournaments/my?page=&limit=&q=&include_cancelled=
   // (usa id del token, no query param) — antes traía todos los campeonatos
   // del admin sin límite; paginado igual que el listado público.
+  // GET /admin/get/tournaments/my/stats — resumen del perfil de organizador
+  adminGetMyStats = async (req: Request, res: Response) => {
+    const data = await this.service.getCreatorStats(req.user!.id_user);
+    return res.json({ ok: true, data });
+  };
+
   adminGetMyTournaments = async (req: Request, res: Response) => {
     const page = Math.max(1, Number(req.query.page) || 1);
     const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 12));

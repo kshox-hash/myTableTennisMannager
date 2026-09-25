@@ -52,6 +52,14 @@ router.get(
   asyncHandler(controller.adminListTournaments)
 );
 
+// MY STATS (perfil de organizador) — antes de /my para que no lo tape ningún patrón
+router.get(
+  "/admin/get/tournaments/my/stats",
+  authRequired,
+  requireRole("admin"),
+  asyncHandler(controller.adminGetMyStats)
+);
+
 // MY TOURNAMENTS
 router.get(
   "/admin/get/tournaments/my",

@@ -61,9 +61,13 @@ export class UserService {
     const user = await this.repo.findById(id_user);
     if (!user) return fail("USER_NOT_FOUND" as const);
 
-    const stats = await this.repo.findStatsById(id_user);
+    const [stats, tournamentsCount] = await Promise.all([
+      this.repo.findStatsById(id_user),
+      this.repo.countTournaments(id_user),
+    ]);
     return ok({
       id_user: user.id_user,
+      tournaments_count: tournamentsCount,
       first_name: user.first_name,
       last_name: user.last_name,
       club_name: user.club_name,

@@ -90,6 +90,10 @@ export class AdminTournamentService {
   }
 
   // TOURNAMENTS BY CREATOR (id viene del token, nunca es undefined)
+  getCreatorStats(createdBy: string) {
+    return this.repo.getCreatorStats(createdBy);
+  }
+
   async listTournamentsByCreator(
     createdBy: string,
     filters: { q?: string; includeCancelled?: boolean },

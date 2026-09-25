@@ -191,6 +191,22 @@ export class ClubsRepository {
     return (res.rowCount ?? 0) > 0;
   }
 
+  // Nombres para armar textos de notificación ("Juan Pérez quiere unirse a X").
+  async getClubName(idClub: string): Promise<string | null> {
+    const r = await this.pool.query<{ name: string }>(`SELECT name FROM clubs WHERE id_club = $1`, [idClub]);
+    return r.rows[0]?.name ?? null;
+  }
+
+  async getUserDisplayName(idUser: string): Promise<string | null> {
+    const r = await this.pool.query<{ name: string | null; email: string }>(
+      `SELECT NULLIF(TRIM(COALESCE(first_name, '') || ' ' || COALESCE(last_name, '')), '') AS name, email
+       FROM users WHERE id_user = $1`,
+      [idUser]
+    );
+    const row = r.rows[0];
+    return row ? row.name ?? row.email : null;
+  }
+
   async getOwner(idClub: string): Promise<string | null> {
     const res = await this.pool.query<{ created_by: string | null }>(
       `SELECT created_by FROM clubs WHERE id_club = $1`,

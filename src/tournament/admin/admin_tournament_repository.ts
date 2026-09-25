@@ -94,6 +94,40 @@ export class AdminTournamentRepository {
   private tournamentCategoriesTable = "tournament_categories";
   private clubsTable = "clubs";
 
+  // Resumen para el perfil del organizador. "Finalizado" = tiene
+  // categorías y todas están en phase 'finished'.
+  async getCreatorStats(createdBy: string): Promise<{
+    created: number;
+    active: number;
+    finished: number;
+    cancelled: number;
+    enrolled: number;
+  }> {
+    const res = await this.pool.query(
+      `WITH mine AS (
+         SELECT t.id_tournament, t.status,
+                EXISTS (SELECT 1 FROM tournament_categories c WHERE c.id_tournament = t.id_tournament)
+                AND NOT EXISTS (
+                  SELECT 1 FROM tournament_categories c
+                  WHERE c.id_tournament = t.id_tournament AND c.phase <> 'finished'
+                ) AS is_finished
+         FROM tournaments t
+         WHERE t.created_by = $1
+       )
+       SELECT
+         COUNT(*) FILTER (WHERE status <> 'cancelled')::int AS created,
+         COUNT(*) FILTER (WHERE status <> 'cancelled' AND NOT is_finished)::int AS active,
+         COUNT(*) FILTER (WHERE status <> 'cancelled' AND is_finished)::int AS finished,
+         COUNT(*) FILTER (WHERE status = 'cancelled')::int AS cancelled,
+         (SELECT COUNT(*)::int FROM enrollments e
+          JOIN mine m ON m.id_tournament = e.id_tournament
+          WHERE e.status = 'active' AND m.status <> 'cancelled') AS enrolled
+       FROM mine`,
+      [createdBy]
+    );
+    return res.rows[0];
+  }
+
   constructor(pool?: Pool) {
     this.pool = pool ?? DB.getPool();
     this.notifications = new NotificationsRepository(this.pool);

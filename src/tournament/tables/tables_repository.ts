@@ -60,8 +60,10 @@ export class TablesRepository {
     idTournament: string;
     idCategory: string | null;
     categoryLabel: string;
+    idMatch: string;
+    matchType: "group" | "bracket";
   }): Promise<void> {
-    const { player1Id, player2Id, tableNumber, idTournament, idCategory, categoryLabel } = params;
+    const { player1Id, player2Id, tableNumber, idTournament, idCategory, categoryLabel, idMatch, matchType } = params;
     const userIds = [player1Id, player2Id].filter((id): id is string => !!id);
     if (userIds.length === 0) return;
 
@@ -71,6 +73,8 @@ export class TablesRepository {
       message: `Tu partido de ${categoryLabel} ya tiene mesa: Mesa ${tableNumber}. Ve para allá.`,
       idTournament,
       idCategory,
+      idMatch,
+      matchType,
     });
   }
 
@@ -447,6 +451,8 @@ export class TablesRepository {
       idTournament: match.id_tournament,
       idCategory: match.id_category,
       categoryLabel: `${match.category_type} ${match.category_range}`,
+      idMatch: id_match,
+      matchType: match_type,
     });
 
     await this.activityLog.record(

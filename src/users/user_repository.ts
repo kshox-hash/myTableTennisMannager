@@ -223,6 +223,19 @@ export class UserRepository {
     };
   }
 
+  // Torneos (no cancelados) en los que el jugador está inscrito — cuenta
+  // también los que aún no empiezan, a diferencia de contar partidos jugados.
+  async countTournaments(id_user: string): Promise<number> {
+    const res = await this.pool.query<{ n: number }>(
+      `SELECT COUNT(DISTINCT e.id_tournament)::int AS n
+       FROM enrollments e
+       JOIN tournaments t ON t.id_tournament = e.id_tournament
+       WHERE e.id_user = $1 AND e.status = 'active' AND t.status <> 'cancelled'`,
+      [id_user]
+    );
+    return res.rows[0]?.n ?? 0;
+  }
+
   async findStatsById(id_user: string): Promise<PlayerStatsDB | null> {
     const res = await this.pool.query<PlayerStatsDB>(
       `SELECT id_user, matches_played, matches_won, matches_lost,

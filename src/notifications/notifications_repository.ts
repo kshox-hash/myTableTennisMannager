@@ -25,6 +25,8 @@ export type NotificationRow = {
   message: string;
   id_tournament: string | null;
   id_category: string | null;
+  id_match: string | null;
+  match_type: "group" | "bracket" | null;
   is_read: boolean;
   created_at: string;
 };
@@ -36,6 +38,8 @@ type CreateInput = {
   message: string;
   idTournament?: string | null;
   idCategory?: string | null;
+  idMatch?: string | null;
+  matchType?: "group" | "bracket" | null;
 };
 
 export class NotificationsRepository {
@@ -51,8 +55,8 @@ export class NotificationsRepository {
 
   async create(input: CreateInput, client?: PoolClient): Promise<void> {
     await this.runner(client).query(
-      `INSERT INTO notifications (id_user, type, title, message, id_tournament, id_category)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
+      `INSERT INTO notifications (id_user, type, title, message, id_tournament, id_category, id_match, match_type)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
       [
         input.idUser,
         input.type,
@@ -60,6 +64,8 @@ export class NotificationsRepository {
         input.message,
         input.idTournament ?? null,
         input.idCategory ?? null,
+        input.idMatch ?? null,
+        input.matchType ?? null,
       ]
     );
   }
@@ -77,9 +83,9 @@ export class NotificationsRepository {
     const placeholders: string[] = [];
 
     ids.forEach((idUser, i) => {
-      const base = i * 6;
+      const base = i * 8;
       placeholders.push(
-        `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6})`
+        `(${base + 1}, ${base + 2}, ${base + 3}, ${base + 4}, ${base + 5}, ${base + 6}, ${base + 7}, ${base + 8})`
       );
       values.push(
         idUser,
@@ -87,12 +93,14 @@ export class NotificationsRepository {
         input.title,
         input.message,
         input.idTournament ?? null,
-        input.idCategory ?? null
+        input.idCategory ?? null,
+        input.idMatch ?? null,
+        input.matchType ?? null
       );
     });
 
     await runner.query(
-      `INSERT INTO notifications (id_user, type, title, message, id_tournament, id_category)
+      `INSERT INTO notifications (id_user, type, title, message, id_tournament, id_category, id_match, match_type)
        VALUES ${placeholders.join(",")}`,
       values
     );
@@ -100,7 +108,7 @@ export class NotificationsRepository {
 
   async listForUser(idUser: string, limit = 50): Promise<NotificationRow[]> {
     const res = await this.pool.query<NotificationRow>(
-      `SELECT id_notification, type, title, message, id_tournament, id_category, is_read, created_at
+      `SELECT id_notification, type, title, message, id_tournament, id_category, id_match, match_type, is_read, created_at
        FROM notifications
        WHERE id_user = $1
        ORDER BY created_at DESC
