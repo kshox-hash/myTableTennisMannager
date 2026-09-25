@@ -580,28 +580,49 @@ export class PublicTournamentRepository {
       [id_category]
     );
 
-    const groups = [];
-    for (const g of groupsRes.rows) {
-      const standingsRes = await this.pool.query(
-        `SELECT gs.id_user, u.first_name, u.last_name, u.avatar_url, gs.played, gs.won, gs.lost,
+    // Antes: 2 consultas POR GRUPO en serie (16 grupos = 33 consultas, en
+    // producción 300-600 ms solo de ida y vuelta a la base). Ahora 2
+    // consultas para todos los grupos y se reparten en memoria, con el
+    // mismo orden que antes dentro de cada grupo.
+    const groupIds = groupsRes.rows.map((g) => g.id_group);
+    const [allStandings, allMatches] = await Promise.all([
+      this.pool.query(
+        `SELECT gs.id_group, gs.id_user, u.first_name, u.last_name, u.avatar_url, gs.played, gs.won, gs.lost,
                 gs.sets_for, gs.sets_against, gs.position, gs.qualified_to_bracket
          FROM group_standings gs
          JOIN users u ON u.id_user = gs.id_user
-         WHERE gs.id_group = $1
-         ORDER BY gs.position ASC NULLS LAST, gs.won DESC`,
-        [g.id_group]
-      );
-      const matchesRes = await this.pool.query(
-        `SELECT gm.id_match, gm.player1_id, u1.first_name AS p1_first, u1.last_name AS p1_last, u1.avatar_url AS p1_avatar,
+         WHERE gs.id_group = ANY($1::uuid[])
+         ORDER BY gs.id_group, gs.position ASC NULLS LAST, gs.won DESC`,
+        [groupIds]
+      ),
+      this.pool.query(
+        `SELECT gm.id_group, gm.id_match, gm.player1_id, u1.first_name AS p1_first, u1.last_name AS p1_last, u1.avatar_url AS p1_avatar,
                 gm.player2_id, u2.first_name AS p2_first, u2.last_name AS p2_last, u2.avatar_url AS p2_avatar,
                 gm.sets_player1, gm.sets_player2, gm.status, gm.best_of_sets, gm.set_scores
          FROM group_matches gm
          JOIN users u1 ON u1.id_user = gm.player1_id
          JOIN users u2 ON u2.id_user = gm.player2_id
-         WHERE gm.id_group = $1
-         ORDER BY gm.match_number ASC`,
-        [g.id_group]
-      );
+         WHERE gm.id_group = ANY($1::uuid[])
+         ORDER BY gm.id_group, gm.match_number ASC`,
+        [groupIds]
+      ),
+    ]);
+    const byGroup = <T extends { id_group: string }>(rows: T[]) => {
+      const m = new Map<string, T[]>();
+      for (const r of rows) {
+        const list = m.get(r.id_group);
+        if (list) list.push(r);
+        else m.set(r.id_group, [r]);
+      }
+      return m;
+    };
+    const standingsByGroup = byGroup(allStandings.rows);
+    const matchesByGroup = byGroup(allMatches.rows);
+
+    const groups = [];
+    for (const g of groupsRes.rows) {
+      const standingsRes = { rows: standingsByGroup.get(g.id_group) ?? [] };
+      const matchesRes = { rows: matchesByGroup.get(g.id_group) ?? [] };
       groups.push({
         id_group: g.id_group,
         group_name: g.group_name,

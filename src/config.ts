@@ -1,6 +1,7 @@
 import express from "express";
 import helmet  from "helmet";
 import cors from "cors";
+import compression from "compression";
 
 export default (app : express.Express) => {
     app.disable("x-powered-by");
@@ -11,6 +12,11 @@ export default (app : express.Express) => {
     // tira ERR_ERL_UNEXPECTED_X_FORWARDED_FOR. `1` = confiar en 1 salto
     // (el load balancer de Render), no en toda la cadena.
     app.set("trust proxy", 1);
+
+    // gzip de las respuestas JSON: antes ninguna iba comprimida (ej. los
+    // partidos de un torneo, 85 KB → ~10 KB). Lo que más se nota en el
+    // celular con datos móviles. threshold: no vale la pena bajo 1 KB.
+    app.use(compression({ threshold: 1024 }));
 
     app.use(express.json());
     app.use(express.urlencoded({ extended : true}));
