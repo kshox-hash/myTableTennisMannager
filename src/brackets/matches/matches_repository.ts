@@ -94,7 +94,7 @@ export class MatchesRepository {
          u1.id_user  AS p1_id, u1.first_name AS p1_first, u1.last_name AS p1_last, u1.email AS p1_email,
          u2.id_user  AS p2_id, u2.first_name AS p2_first, u2.last_name AS p2_last, u2.email AS p2_email,
          bm.winner_id, bm.sets_player1, bm.sets_player2,
-         COALESCE(bm.walkover, false) AS walkover,
+         COALESCE(bm.status = 'walkover', false) AS walkover,
          COALESCE(bm.is_bye, false)   AS is_bye
        FROM bracket_matches bm
        LEFT JOIN users u1 ON u1.id_user = bm.player1_id
