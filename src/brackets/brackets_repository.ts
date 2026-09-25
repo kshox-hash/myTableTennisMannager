@@ -318,7 +318,7 @@ export class BracketsRepository {
     const res = await this.pool.query<GroupMatchRow>(
       `SELECT id_match, id_group, id_tournament, id_category, stage, round_number, match_number,
               best_of_sets, player1_id, player2_id, winner_id,
-              sets_player1, sets_player2, status, source_note, set_scores, played_table_number
+              sets_player1, sets_player2, status, source_note, set_scores, result_reason, played_table_number
        FROM group_matches WHERE id_match = $1`,
       [matchId]
     );
@@ -985,7 +985,7 @@ export class BracketsRepository {
       `SELECT id_match, id_tournament, id_category, round, match_number,
               player1_id, player2_id, next_round, next_match_number, next_match_slot,
               winner_id, sets_player1, sets_player2, best_of_sets,
-              is_bye, status, played_at::text, set_scores, table_number, played_table_number,
+              is_bye, status, played_at::text, set_scores, result_reason, table_number, played_table_number,
               referee_id, dead_slot, seed1, seed2
        FROM bracket_matches
        WHERE id_tournament = $1 AND id_category = $2
@@ -1000,7 +1000,7 @@ export class BracketsRepository {
       `SELECT id_match, id_tournament, id_category, round, match_number,
               player1_id, player2_id, next_round, next_match_number, next_match_slot,
               winner_id, sets_player1, sets_player2, best_of_sets,
-              is_bye, status, played_at::text, set_scores, dead_slot
+              is_bye, status, played_at::text, set_scores, result_reason, dead_slot
        FROM bracket_matches WHERE id_match = $1`,
       [matchId]
     );
