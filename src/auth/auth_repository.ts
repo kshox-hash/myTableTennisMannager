@@ -57,9 +57,10 @@ export class AuthRepository {
         country,
         id_document,
         category,
-        dominant_hand
+        dominant_hand,
+        region
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
       RETURNING id_user, email, created_at;
     `;
 
@@ -76,6 +77,7 @@ export class AuthRepository {
       params.id_document ?? null,
       params.category ?? null,
       params.dominant_hand ?? null,
+      params.region ?? null,
     ];
 
     const res = await this.pool.query<UserCreatedDB>(query, values);

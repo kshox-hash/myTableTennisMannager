@@ -26,6 +26,7 @@ export const signUpSchema = z.object({
   dominant_hand: z.enum(["right-handed", "left-handed"]).optional(),
   birth_date: z.string().trim().min(1).max(10).optional(),
   country: z.string().trim().max(100).optional(),
+  region: z.string().trim().max(40).optional(),
   id_document: z.string().trim().max(50).optional(),
   category: z.string().trim().max(50).optional(),
 });

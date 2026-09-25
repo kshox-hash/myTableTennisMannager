@@ -45,6 +45,7 @@ export type CreateUserInput = {
   dominant_hand?: "right-handed" | "left-handed";
   birth_date?: string;
   country?: string;
+  region?: string;
   id_document?: string;
   category?: string;
 };

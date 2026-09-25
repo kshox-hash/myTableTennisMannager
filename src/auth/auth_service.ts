@@ -46,6 +46,7 @@ export class AuthService {
       dominant_hand: input.dominant_hand,
       birth_date: input.birth_date,
       country: input.country,
+      region: input.region,
       id_document: input.id_document,
       category: input.category,
     });
