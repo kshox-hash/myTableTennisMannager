@@ -15,6 +15,21 @@ export function errorMiddleware(
     });
   }
 
+  // Errores del CLIENTE que antes caían como 500 "error interno" (y
+  // ensuciaban el log con stacks que no eran bugs): un id que no es UUID
+  // en la URL (Postgres 22P02 al castear, ej. /public/tournaments/abc) y un
+  // body que no es JSON válido (express.json → entity.parse.failed).
+  const e = err as { code?: string; type?: string; status?: number } | null;
+  if (e?.code === "22P02") {
+    return res.status(400).json({ ok: false, message: "Identificador inválido" });
+  }
+  if (e?.type === "entity.parse.failed") {
+    return res.status(400).json({ ok: false, message: "El cuerpo del pedido no es JSON válido" });
+  }
+  if (e?.type === "entity.too.large") {
+    return res.status(413).json({ ok: false, message: "El pedido es demasiado grande" });
+  }
+
   // Loguear siempre el error real del lado del servidor (con stack) para
   // poder diagnosticar — lo que cambia según entorno es solo qué tanto de
   // eso se le devuelve al cliente.
