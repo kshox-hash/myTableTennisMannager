@@ -40,7 +40,18 @@ export class EnrollmentsRepository {
   async subscribe(id_user: string, payload: EnrollmentDTO): Promise<EnrollmentRow> {
     try {
       return await this.withTransaction(async (client) => {
-        // Bloquea la fila de la categoría para serializar accesos concurrentes al cupo
+        // Bloquea la fila de la categoría para serializar accesos concurrentes
+        // al cupo — en una sentencia APARTE, antes de contar. Con el FOR UPDATE
+        // dentro de la misma consulta que el COUNT, Postgres (READ COMMITTED)
+        // toma la foto de datos ANTES de esperar el lock: el segundo en llegar
+        // contaba los inscritos sin el que acababa de entrar y se sobrevendía
+        // el último cupo (probado: 8 inscripciones simultáneas a 1 cupo libre
+        // dejaban 2 adentro). Una sentencia nueva después del lock ve lo ya
+        // confirmado.
+        await client.query(
+          `SELECT 1 FROM tournament_categories WHERE id_category = $1 AND id_tournament = $2 FOR UPDATE`,
+          [payload.id_category, payload.id_tournament]
+        );
         const quotaRes = await client.query<{
           quotas: number | null;
           enrolled_count: number;
@@ -83,8 +94,7 @@ export class EnrollmentsRepository {
            JOIN tournaments t ON t.id_tournament = tc.id_tournament
            JOIN users u ON u.id_user = $3
            WHERE tc.id_category   = $1
-             AND tc.id_tournament = $2
-           FOR UPDATE OF tc`,
+             AND tc.id_tournament = $2`,
           [payload.id_category, payload.id_tournament, id_user]
         );
 
