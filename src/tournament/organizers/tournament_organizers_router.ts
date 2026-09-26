@@ -2,6 +2,7 @@ import { Router } from "express";
 import { authRequired } from "../../middlewares/auth_required_middleware";
 import { requireRole } from "../../middlewares/require_role_middleware";
 import { asyncHandler } from "../../middlewares/wrap_async_middleware";
+import { requireTournamentOwnership } from "../../middlewares/require_tournament_ownership_middleware";
 import { TournamentOrganizersRepository } from "./tournament_organizers_repository";
 
 const router = Router();
@@ -25,6 +26,8 @@ router.get(
   "/admin/tournaments/:id_tournament/organizers",
   authRequired,
   requireRole("admin"),
+  // La lista trae emails de los coorganizadores — solo para el equipo del torneo.
+  requireTournamentOwnership(undefined, { allowViewer: true }),
   asyncHandler(async (req, res) => {
     const data = await repo.list(req.params.id_tournament);
     return res.json({ ok: true, data });

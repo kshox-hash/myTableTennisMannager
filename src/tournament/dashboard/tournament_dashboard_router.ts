@@ -13,6 +13,7 @@ router.get(
   "/:id_tournament/dashboard",
   authRequired,
   requireRole("admin"),
+  requireTournamentOwnership(undefined, { allowViewer: true }),
   asyncHandler(async (req, res) => {
     const data = await repo.getDashboard(req.params.id_tournament);
     if (!data) return res.status(404).json({ ok: false, message: "Torneo no encontrado" });

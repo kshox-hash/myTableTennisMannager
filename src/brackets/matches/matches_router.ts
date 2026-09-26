@@ -2,6 +2,7 @@ import { Router } from "express";
 import { asyncHandler } from "../../middlewares/wrap_async_middleware";
 import { authRequired } from "../../middlewares/auth_required_middleware";
 import { requireRole } from "../../middlewares/require_role_middleware";
+import { requireTournamentOwnership } from "../../middlewares/require_tournament_ownership_middleware";
 import { MatchesRepository } from "./matches_repository";
 
 const router      = Router();
@@ -12,6 +13,9 @@ router.get(
   "/tournaments/:id_tournament/categories/:id_category/all-matches",
   authRequired,
   requireRole("admin"),
+  // Solo el dueño (o un coorganizador/invitado de solo lectura) — antes
+  // cualquier admin veía los partidos de cualquier torneo, privados incluidos.
+  requireTournamentOwnership(undefined, { allowViewer: true }),
   asyncHandler(async (req, res) => {
     const data = await matchesRepo.getAllMatches(
       req.params.id_tournament,
