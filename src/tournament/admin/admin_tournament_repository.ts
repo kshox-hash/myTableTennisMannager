@@ -942,7 +942,19 @@ export class AdminTournamentRepository {
           t.event_date,
           t.event_time,
           t.created_at,
-          t.status
+          t.status,
+          -- Total de inscritos del torneo: el perfil del admin lo mostraba
+          -- sumando categories[].enrolled_count, pero este listado no trae
+          -- categorías (se sacaron por rendimiento) y siempre salía "0 inscritos".
+          (SELECT COUNT(*)::int
+             FROM ${this.enrollmentsTable} e
+             JOIN ${this.tournamentCategoriesTable} c ON c.id_category = e.id_category
+            WHERE c.id_tournament = t.id_tournament AND e.status = 'active') AS enrolled_count,
+          -- Mismo motivo: el chip "Finalizado" se calculaba con las categorías
+          -- que este listado no trae, así que un torneo terminado salía "Activo".
+          (EXISTS (SELECT 1 FROM ${this.tournamentCategoriesTable} c WHERE c.id_tournament = t.id_tournament)
+           AND NOT EXISTS (SELECT 1 FROM ${this.tournamentCategoriesTable} c
+                            WHERE c.id_tournament = t.id_tournament AND c.phase IS DISTINCT FROM 'finished')) AS all_finished
         FROM ${this.tournamentsTable} t
         ${where}
         ORDER BY t.created_at DESC, t.id_tournament DESC
@@ -955,7 +967,18 @@ export class AdminTournamentRepository {
         offset,
       ]);
 
-      return { rows: res.rows.map((row) => this.mapAdminTournamentRow(row)), total, cancelledCount };
+      return {
+        rows: res.rows.map((row) => {
+          const extra = row as TournamentRow & { enrolled_count?: number; all_finished?: boolean };
+          return {
+            ...this.mapAdminTournamentRow(row),
+            enrolled_count: Number(extra.enrolled_count ?? 0),
+            all_finished: Boolean(extra.all_finished),
+          };
+        }),
+        total,
+        cancelledCount,
+      };
     } finally {
       client.release();
     }

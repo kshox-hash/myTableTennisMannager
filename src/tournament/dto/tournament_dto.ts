@@ -165,6 +165,10 @@ export type AdminTournamentRow = {
   event_time: string | null;
   created_at: string;
   status: "active" | "cancelled";
+  /** Inscripciones activas de todo el torneo — solo lo llena findByCreator ("mis torneos"). */
+  enrolled_count?: number;
+  /** Todas sus categorías en fase 'finished' — solo lo llena findByCreator. */
+  all_finished?: boolean;
 };
 
 // Enrollments list row
