@@ -72,6 +72,9 @@ export class UserService {
       last_name: user.last_name,
       club_name: user.club_name,
       gender: user.gender,
+      // Ya es público (la ficha sin login también lo muestra) — para la
+      // bandera junto al nombre en la ficha del jugador.
+      country: user.country ?? null,
       avatar_url: user.avatar_url,
       stats: stats ?? {
         matches_played: 0,
