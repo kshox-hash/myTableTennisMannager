@@ -29,6 +29,11 @@ export function errorMiddleware(
   if (e?.type === "entity.too.large") {
     return res.status(413).json({ ok: false, message: "El pedido es demasiado grande" });
   }
+  // El callback de cors() en config.ts rechaza con este Error — es un
+  // origen no permitido, no una falla del servidor.
+  if (err instanceof Error && err.message === "Origen no permitido por CORS") {
+    return res.status(403).json({ ok: false, message: "Origen no permitido" });
+  }
 
   // Loguear siempre el error real del lado del servidor (con stack) para
   // poder diagnosticar — lo que cambia según entorno es solo qué tanto de
