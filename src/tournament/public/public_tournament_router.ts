@@ -363,6 +363,49 @@ router.get(
   })
 );
 
+// GET /api/v1/tournament/public/recent-matches?tournament=&for_user=&limit=
+// Franja de marcadores (en vivo + últimos resultados) de torneos públicos.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+router.get(
+  "/public/recent-matches",
+  asyncHandler(async (req, res) => {
+    const idTournament = typeof req.query.tournament === "string" && UUID_RE.test(req.query.tournament) ? req.query.tournament : undefined;
+    const forUser = typeof req.query.for_user === "string" && UUID_RE.test(req.query.for_user) ? req.query.for_user : undefined;
+    const limit = Math.min(30, Math.max(1, Number(req.query.limit) || 16));
+    const rows = await repo.getRecentMatches({ idTournament, forUser, limit });
+    const name = (f: string | null, l: string | null) => `${f ?? ""} ${l ?? ""}`.trim();
+    return res.json({
+      ok: true,
+      data: rows.map((m) => ({
+        id_match: m.id_match,
+        stage: m.stage,
+        id_tournament: m.id_tournament,
+        tournament_name: m.tournament_name,
+        category_type: m.category_type,
+        category_range: m.category_range,
+        round: m.round,
+        total_rounds: m.total_rounds,
+        group_name: m.group_name,
+        table_number: m.table_number,
+        is_live: m.is_live,
+        player1_id: m.player1_id,
+        player1_name: name(m.player1_first, m.player1_last),
+        player1_country: m.player1_country,
+        player2_id: m.player2_id,
+        player2_name: name(m.player2_first, m.player2_last),
+        player2_country: m.player2_country,
+        winner_id: m.winner_id,
+        sets_player1: m.sets_player1,
+        sets_player2: m.sets_player2,
+        status: m.status,
+        set_scores: m.set_scores ?? null,
+        result_reason: m.result_reason ?? null,
+        played_at: formatTimestamp(m.played_at),
+      })),
+    });
+  })
+);
+
 // GET /api/v1/tournament/public/matches/:match_type/:id_match
 // Ficha de un partido puntual — el drill-down "Ver juego" desde cualquier
 // lista/tarjeta de partido (Partidos, Grupos, Llaves).

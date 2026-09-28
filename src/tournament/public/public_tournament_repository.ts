@@ -530,6 +530,76 @@ export class PublicTournamentRepository {
     return { rows: rowsRes.rows, total };
   }
 
+  // Franja de resultados (estilo marcador de WTT): los partidos EN VIVO (con
+  // mesa asignada y sin resultado) primero, y después los últimos jugados.
+  // Solo torneos públicos y no cancelados — los privados/internos nunca
+  // aparecen acá. Filtros opcionales: un torneo puntual, o los torneos en los
+  // que está inscrito un jugador (su Inicio).
+  async getRecentMatches(filters: { idTournament?: string; forUser?: string; limit: number }): Promise<
+    Array<{
+      id_match: string; stage: "group" | "bracket"; id_tournament: string; tournament_name: string;
+      category_type: string; category_range: string; round: number | null; total_rounds: number | null;
+      group_name: string | null; table_number: number | null; is_live: boolean;
+      player1_id: string; player1_first: string | null; player1_last: string | null; player1_country: string | null;
+      player2_id: string; player2_first: string | null; player2_last: string | null; player2_country: string | null;
+      winner_id: string | null; sets_player1: number; sets_player2: number; status: string;
+      set_scores: unknown; result_reason: string | null; played_at: string | Date | null;
+    }>
+  > {
+    const values: unknown[] = [];
+    const tConds = ["t.visibility = 'public'", "t.status <> 'cancelled'", "t.kind = 'tournament'"];
+    if (filters.idTournament) {
+      values.push(filters.idTournament);
+      tConds.push(`t.id_tournament = $${values.length}`);
+    }
+    if (filters.forUser) {
+      values.push(filters.forUser);
+      tConds.push(`EXISTS (SELECT 1 FROM enrollments e WHERE e.id_tournament = t.id_tournament AND e.id_user = $${values.length} AND e.status = 'active')`);
+    }
+    const tWhere = tConds.join(" AND ");
+    // Solo lo reciente: en vivo, o jugado en los últimos 30 días.
+    const recent = (a: string) =>
+      `((${a}.table_number IS NOT NULL AND ${a}.status NOT IN ('played','walkover')) OR (${a}.status IN ('played','walkover') AND ${a}.played_at > NOW() - INTERVAL '30 days'))`;
+    values.push(filters.limit);
+    const res = await this.pool.query(
+      `SELECT * FROM (
+         SELECT gm.id_match, 'group' AS stage, t.id_tournament, t.tournament_name,
+                tc.category_type, tc.category_range, NULL::int AS round, NULL::int AS total_rounds,
+                cg.group_name, gm.table_number,
+                (gm.table_number IS NOT NULL AND gm.status NOT IN ('played','walkover')) AS is_live,
+                gm.player1_id, u1.first_name AS player1_first, u1.last_name AS player1_last, u1.country AS player1_country,
+                gm.player2_id, u2.first_name AS player2_first, u2.last_name AS player2_last, u2.country AS player2_country,
+                gm.winner_id, gm.sets_player1, gm.sets_player2, gm.status, gm.set_scores, gm.result_reason, gm.played_at
+         FROM group_matches gm
+         JOIN tournaments t ON t.id_tournament = gm.id_tournament
+         JOIN tournament_categories tc ON tc.id_category = gm.id_category
+         JOIN category_groups cg ON cg.id_group = gm.id_group
+         JOIN users u1 ON u1.id_user = gm.player1_id
+         JOIN users u2 ON u2.id_user = gm.player2_id
+         WHERE ${tWhere} AND ${recent("gm")}
+         UNION ALL
+         SELECT bm.id_match, 'bracket' AS stage, t.id_tournament, t.tournament_name,
+                tc.category_type, tc.category_range, bm.round,
+                (SELECT MAX(b2.round) FROM bracket_matches b2 WHERE b2.id_category = bm.id_category) AS total_rounds,
+                NULL AS group_name, bm.table_number,
+                (bm.table_number IS NOT NULL AND bm.status NOT IN ('played','walkover')) AS is_live,
+                bm.player1_id, u1.first_name, u1.last_name, u1.country,
+                bm.player2_id, u2.first_name, u2.last_name, u2.country,
+                bm.winner_id, bm.sets_player1, bm.sets_player2, bm.status, bm.set_scores, bm.result_reason, bm.played_at
+         FROM bracket_matches bm
+         JOIN tournaments t ON t.id_tournament = bm.id_tournament
+         JOIN tournament_categories tc ON tc.id_category = bm.id_category
+         JOIN users u1 ON u1.id_user = bm.player1_id
+         JOIN users u2 ON u2.id_user = bm.player2_id
+         WHERE ${tWhere} AND bm.is_bye = FALSE AND ${recent("bm")}
+       ) sub
+       ORDER BY is_live DESC, played_at DESC NULLS LAST
+       LIMIT $${values.length}`,
+      values
+    );
+    return res.rows;
+  }
+
   async getCategoryDetail(id_category: string): Promise<{
     category: { id_category: string; id_tournament: string; category_type: string; category_range: string; gender: string; phase: string; competition_format: string } | null;
     players: Array<{ id_user: string; first_name: string | null; last_name: string | null; club_name: string | null; avatar_url: string | null }>;
