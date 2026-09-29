@@ -3,6 +3,7 @@ import { z } from "zod";
 import { asyncHandler } from "../middlewares/wrap_async_middleware";
 import { authRequired } from "../middlewares/auth_required_middleware";
 import { requireRole } from "../middlewares/require_role_middleware";
+import DB from "../db/db_configuration";
 import { ClubsRepository } from "./clubs_repository";
 import { NotificationsRepository } from "../notifications/notifications_repository";
 import {
@@ -154,6 +155,36 @@ router.delete(
     const removed = await repo.cancelMyRequest(req.user!.id_user);
     if (!removed) return res.status(404).json({ ok: false, message: "No tienes una solicitud pendiente" });
     return res.json({ ok: true });
+  })
+);
+
+// GET /api/v1/clubs/me/dues — el propio jugador ve si está al día con su
+// club (mismo cálculo de morosidad que ve el dueño, solo su fila).
+router.get(
+  "/me/dues",
+  authRequired,
+  requireRole(["admin", "player"]),
+  asyncHandler(async (req, res) => {
+    const me = await DB.getPool().query<{ id_club: string | null; club_name: string | null; monthly_fee: number | null; fee_frequency: string | null }>(
+      `SELECT u.id_club, c.name AS club_name, c.monthly_fee, c.fee_frequency
+       FROM users u LEFT JOIN clubs c ON c.id_club = u.id_club WHERE u.id_user = $1`,
+      [req.user!.id_user]
+    );
+    const row = me.rows[0];
+    if (!row?.id_club) return res.json({ ok: true, data: null });
+    const arrears = await repo.getArrears(row.id_club);
+    const mine = arrears.find((a) => a.id_user === req.user!.id_user);
+    return res.json({
+      ok: true,
+      data: {
+        club_name: row.club_name,
+        fee: row.monthly_fee != null ? Number(row.monthly_fee) : null,
+        fee_frequency: row.fee_frequency ?? "monthly",
+        owed_periods: mine?.owedPeriods ?? 0,
+        owed_amount: mine?.owedAmount ?? 0,
+        paid_periods: mine?.paidPeriods ?? 0,
+      },
+    });
   })
 );
 
@@ -328,6 +359,15 @@ router.put(
     const result = await repo.setDuePaid(req.params.id_club, req.params.id_user, p.data.period_start, p.data.paid, p.data.amount);
     if (!result.ok) {
       return res.status(400).json({ ok: false, message: "Ese periodo es anterior a que este jugador fuera socio del club" });
+    }
+    // Aviso al socio cuando se registra su pago (no al desmarcarlo).
+    if (p.data.paid) {
+      await new NotificationsRepository().create({
+        idUser: req.params.id_user,
+        type: "club_payment",
+        title: "Se registró tu pago",
+        message: `Tu club registró el pago de la cuota del periodo que empieza el ${p.data.period_start.split("-").reverse().join("-")}.`,
+      });
     }
     const period = await repo.getDues(req.params.id_club, p.data.offset);
     return res.json({ ok: true, data: period });

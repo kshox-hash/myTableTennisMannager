@@ -1,3 +1,4 @@
+import { notifyFinalPositions } from "../../notifications/player_outcomes";
 import { TournamentPhaseRepository, type PhaseConfig } from "./tournament_phase_repository";
 import { BracketsService } from "../../brackets/brackets_service";
 import type { BracketSlotAssignmentInput, GroupOrderInput } from "../../brackets/dto/brackets_dto";
@@ -121,6 +122,7 @@ export class TournamentPhaseService {
     if (cat.phase !== "bracket") return { ok: false as const, error: PHASE_ERRORS.WRONG_PHASE };
 
     await this.repo.setPhase(id_category, "finished");
+    void notifyFinalPositions(id_category);
     return { ok: true as const };
   }
 
@@ -134,6 +136,7 @@ export class TournamentPhaseService {
     if (cat.competition_format === "round_robin") {
       if (await this.repo.allGroupMatchesFinished(id_category)) {
         await this.repo.setPhase(id_category, "finished");
+    void notifyFinalPositions(id_category);
       }
       return;
     }
@@ -155,6 +158,7 @@ export class TournamentPhaseService {
     if (!done) return;
 
     await this.repo.setPhase(id_category, "finished");
+    void notifyFinalPositions(id_category);
   }
 
   // Job: revisar categorías con inicio programado

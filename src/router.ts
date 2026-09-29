@@ -25,6 +25,7 @@ import superadminRouter      from "./superadmin/superadmin_router";
 import { errorMiddleware } from "./middlewares/error_middleware";
 import { startPhaseScheduler } from "./tournament/phases/phase_scheduler";
 import { startTableScheduleScheduler } from "./tournament/schedule/table_schedule_scheduler";
+import { startQueueNoticeScheduler } from "./tournament/schedule/queue_notice_scheduler";
 
 const path    = "api";
 const version = "v1";
@@ -57,6 +58,7 @@ export default function registerRoutes(app: Express) {
   // Scheduler: revisa cada 30s si hay partidos con horario confirmado
   // (SchedulePanel → "Confirmar y guardar") que ya deban activarse en mesa
   startTableScheduleScheduler();
+  startQueueNoticeScheduler();
 
   // Debe ir después de todas las rutas
   app.use(errorMiddleware);

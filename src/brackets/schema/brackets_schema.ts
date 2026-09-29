@@ -24,6 +24,14 @@ export const matchResultSchema = z
   })
   .strict();
 
+// Marcador parcial "en vivo": los sets jugados hasta ahora, sin cerrar el
+// partido (no hay ganador todavía). El último set puede ir a medias.
+export const liveScoreSchema = z
+  .object({
+    set_scores: z.array(setScoreSchema).max(7),
+  })
+  .strict();
+
 export const generateBracketSchema = z
   .object({
     best_of_sets: z.union([z.literal(3), z.literal(5), z.literal(7)]).optional(),

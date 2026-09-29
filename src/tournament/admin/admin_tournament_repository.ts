@@ -81,6 +81,7 @@ type TournamentWithCategoryRow = {
   priority?: number | string | null;
   enrolled_count?: number | string | null;
   is_enrolled?: boolean | null;
+  is_paid?: boolean | null;
 };
 
 export class AdminTournamentRepository {
@@ -458,8 +459,11 @@ export class AdminTournamentRepository {
     try {
       await client.query("BEGIN");
 
-      const tRes = await client.query<{ created_by: string; status: string }>(
-        `SELECT created_by, status FROM ${this.tournamentsTable} WHERE id_tournament = $1 FOR UPDATE`,
+      const tRes = await client.query<{
+        created_by: string; status: string; event_date: string | null; event_time: string | null; address: string | null;
+      }>(
+        `SELECT created_by, status, event_date::text, event_time::text, address
+         FROM ${this.tournamentsTable} WHERE id_tournament = $1 FOR UPDATE`,
         [tournamentId]
       );
       const t = tRes.rows[0];
@@ -546,6 +550,33 @@ export class AdminTournamentRepository {
       );
 
       await this.activityLog.record(tournamentId, requestedBy, "tournament_updated", null, client);
+
+      // Aviso a los inscritos si cambió algo que les importa para llegar:
+      // fecha, hora o lugar (antes quedaba solo en la bitácora del admin).
+      const after = tournamentRes.rows[0] as unknown as { event_date: unknown; event_time: unknown; address: string | null; tournament_name: string };
+      const norm = (v: unknown) => (v == null ? "" : v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10));
+      const normTime = (v: unknown) => (v == null ? "" : String(v).slice(0, 5));
+      const changes: string[] = [];
+      if (payload.event_date !== undefined && norm(t.event_date) !== norm(after.event_date)) changes.push("la fecha");
+      if (payload.event_time !== undefined && normTime(t.event_time) !== normTime(after.event_time)) changes.push("la hora");
+      if (payload.address !== undefined && (t.address ?? "") !== (after.address ?? "")) changes.push("el lugar");
+      if (changes.length > 0) {
+        const enrolled = await client.query<{ id_user: string }>(
+          `SELECT DISTINCT id_user FROM ${this.enrollmentsTable} WHERE id_tournament = $1 AND status = 'active'`,
+          [tournamentId]
+        );
+        const what = changes.length === 1 ? changes[0] : `${changes.slice(0, -1).join(", ")} y ${changes[changes.length - 1]}`;
+        await this.notifications.createForMany(
+          enrolled.rows.map((r) => r.id_user),
+          {
+            type: "tournament_updated",
+            title: "Cambió un dato de tu torneo",
+            message: `El organizador cambió ${what} de ${after.tournament_name}. Revisa los detalles para no perderte nada.`,
+            idTournament: tournamentId,
+          },
+          client
+        );
+      }
 
       await client.query("COMMIT");
 
@@ -699,11 +730,19 @@ export class AdminTournamentRepository {
       OR (
         t.visibility = 'internal'
         AND EXISTS (
-          SELECT 1 FROM users creator
-          JOIN users viewer ON viewer.id_club = creator.id_club
-          WHERE creator.id_user = t.created_by
-            AND viewer.id_user = $${visibilityUserParam}
-            AND creator.id_club IS NOT NULL
+          -- El club del organizador es el suyo como miembro (users.id_club)
+          -- o el que creó en Clubes (clubs.created_by): el dueño de un club
+          -- no queda como miembro, y antes sus torneos internos no le
+          -- aparecían a nadie.
+          SELECT 1 FROM users viewer
+          WHERE viewer.id_user = $${visibilityUserParam}
+            AND viewer.id_club IS NOT NULL
+            AND viewer.id_club IN (
+              SELECT creator.id_club FROM users creator
+              WHERE creator.id_user = t.created_by AND creator.id_club IS NOT NULL
+              UNION
+              SELECT c.id_club FROM clubs c WHERE c.created_by = t.created_by
+            )
         )
       )
     )`);
@@ -777,9 +816,19 @@ export class AdminTournamentRepository {
            EXISTS (
              SELECT 1 FROM ${this.enrollmentsTable} e
              WHERE e.id_category = c.id_category AND e.status = 'active' AND e.id_user = $2
-           ) AS is_enrolled
+           ) AS is_enrolled,
+           EXISTS (
+             SELECT 1 FROM ${this.enrollmentsTable} e
+             WHERE e.id_category = c.id_category AND e.status = 'active' AND e.id_user = $2 AND e.paid
+           ) AS is_paid,
+           -- Organizador para la tarjeta del listado (app): su nombre y foto
+           -- de organizador, con la de jugador como respaldo.
+           NULLIF(TRIM(COALESCE(org.organizer_first_name, org.first_name, '') || ' ' ||
+                       COALESCE(org.organizer_last_name, org.last_name, '')), '') AS organizer_name,
+           COALESCE(org.organizer_avatar_url, org.avatar_url) AS organizer_avatar_url
          FROM ${this.tournamentsTable} t
          LEFT JOIN ${this.tournamentCategoriesTable} c ON c.id_tournament = t.id_tournament
+         LEFT JOIN users org ON org.id_user = t.created_by
          WHERE t.id_tournament = ANY($1::uuid[])
          ORDER BY t.event_date DESC NULLS LAST, t.created_at DESC,
                   c.category_type ASC, c.category_range ASC, c.gender ASC`,
@@ -790,7 +839,13 @@ export class AdminTournamentRepository {
       const map = new Map<string, ITournament>();
       for (const id of ids) {
         const row = dataRes.rows.find((r) => r.id_tournament === id);
-        if (row) map.set(id, this.mapTournamentListBase(row));
+        if (row) {
+          const r = row as TournamentWithCategoryRow & { organizer_name?: string | null; organizer_avatar_url?: string | null };
+          map.set(id, Object.assign(this.mapTournamentListBase(row), {
+            organizer_name: r.organizer_name ?? null,
+            organizer_avatar_url: r.organizer_avatar_url ?? null,
+          }));
+        }
       }
       for (const row of dataRes.rows) {
         if (row.id_category) {
@@ -806,6 +861,7 @@ export class AdminTournamentRepository {
             priority: Number(row.priority ?? 1),
             enrolled_count: Number(row.enrolled_count ?? 0),
             is_enrolled: Boolean(row.is_enrolled),
+            is_paid: Boolean(row.is_paid),
           });
         }
       }
@@ -842,7 +898,11 @@ export class AdminTournamentRepository {
          EXISTS (
            SELECT 1 FROM ${this.enrollmentsTable} e
            WHERE e.id_category = c.id_category AND e.status = 'active' AND e.id_user = $2
-         ) AS is_enrolled
+         ) AS is_enrolled,
+           EXISTS (
+             SELECT 1 FROM ${this.enrollmentsTable} e
+             WHERE e.id_category = c.id_category AND e.status = 'active' AND e.id_user = $2 AND e.paid
+           ) AS is_paid
        FROM ${this.tournamentsTable} t
        LEFT JOIN ${this.tournamentCategoriesTable} c ON c.id_tournament = t.id_tournament
        WHERE t.id_tournament = $1
@@ -867,6 +927,7 @@ export class AdminTournamentRepository {
           priority: Number(row.priority ?? 1),
           enrolled_count: Number(row.enrolled_count ?? 0),
           is_enrolled: Boolean(row.is_enrolled),
+          is_paid: Boolean(row.is_paid),
         });
       }
     }
@@ -1020,6 +1081,7 @@ export class AdminTournamentRepository {
           e.status,
           e.enrolled_at,
           e.checked_in,
+          e.paid,
 
           u.email,
           u.first_name,

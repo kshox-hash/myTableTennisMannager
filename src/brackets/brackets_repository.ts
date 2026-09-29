@@ -715,6 +715,21 @@ export class BracketsRepository {
       );
 
       await this.activityLog.record(tournamentId, requestedBy, "match_result_undone", null, client);
+      // Aviso a los dos jugadores: su resultado se borró y el partido vuelve
+      // a quedar por jugar (antes solo quedaba en la bitácora del admin).
+      await this.notifications.createForMany(
+        [winnerId, loserId],
+        {
+          type: "match_result_corrected",
+          title: "Se corrigió el resultado de tu partido",
+          message: "El organizador borró el resultado cargado. El partido vuelve a quedar por jugar hasta que se registre el correcto.",
+          idTournament: tournamentId,
+          idMatch: matchId,
+          matchType: "group",
+        },
+        client
+      );
+
     });
   }
 
@@ -828,6 +843,21 @@ export class BracketsRepository {
       }
 
       await this.activityLog.record(tournamentId, requestedBy, "bracket_result_undone", null, client);
+      // Aviso a los dos jugadores: su resultado se borró y el partido vuelve
+      // a quedar por jugar (antes solo quedaba en la bitácora del admin).
+      await this.notifications.createForMany(
+        [winnerId, loserId],
+        {
+          type: "match_result_corrected",
+          title: "Se corrigió el resultado de tu partido",
+          message: "El organizador borró el resultado cargado. El partido vuelve a quedar por jugar hasta que se registre el correcto.",
+          idTournament: tournamentId,
+          idMatch: matchId,
+          matchType: "bracket",
+        },
+        client
+      );
+
 
       return { undone: true };
     });
@@ -1312,6 +1342,11 @@ export class BracketsRepository {
         `UPDATE category_groups SET target_size = $1, group_kind = $2 WHERE id_group = $3`,
         [newFromCount, fromIsManual ? "manual" : newFromCount === 2 ? "playoff_two" : "normal", from.id_group]
       );
+      // Si el grupo de origen quedó con un solo jugador, ese pasa como 1°
+      // (mismo criterio que addMemberToGroup para un grupo de uno).
+      if (newFromCount === 1) {
+        await client.query(`UPDATE group_standings SET position = 1 WHERE id_group = $1`, [from.id_group]);
+      }
 
       // Entra al grupo destino, conservando su semilla original.
       await this.addMemberToGroup(client, {
@@ -1389,6 +1424,27 @@ export class BracketsRepository {
        VALUES ($1, $2, 0, 0, 0, 0, 0, 0, 0, NULL, FALSE, NULL)`,
       [groupId, userId]
     );
+
+    // Solo en su grupo = 1° del grupo (no tiene contra quién jugar). Si
+    // después se suma alguien y todavía no hay resultados, esa posición
+    // vuelve a quedar pendiente hasta que jueguen.
+    const sizeRes = await client.query<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM group_members WHERE id_group = $1`,
+      [groupId]
+    );
+    if (Number(sizeRes.rows[0]?.n ?? 0) === 1) {
+      await client.query(`UPDATE group_standings SET position = 1 WHERE id_group = $1`, [groupId]);
+    } else {
+      await client.query(
+        `UPDATE group_standings SET position = NULL
+          WHERE id_group = $1 AND played = 0
+            AND NOT EXISTS (
+              SELECT 1 FROM group_matches
+               WHERE id_group = $1 AND status IN ('played', 'walkover')
+            )`,
+        [groupId]
+      );
+    }
 
     // Genera los partidos todos-contra-todos con quienes ya estaban en el grupo.
     const existingMembersRes = await client.query<{ id_user: string }>(

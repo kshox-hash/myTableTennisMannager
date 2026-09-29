@@ -12,6 +12,7 @@ export type CalendarEventRow = {
   category_range: string;
   gender: string;
   status: string;
+  phase: string;
 };
 
 export class CalendarRepository {
@@ -22,28 +23,44 @@ export class CalendarRepository {
   }
 
   async myEventsInRange(userId: string, from: string, to: string): Promise<CalendarEventRow[]> {
+    // Si la categoría ya terminó, el evento va en el día en que de verdad se
+    // jugó (último partido), no en la fecha agendada: un campeonato que se
+    // adelantó y ya se jugó no debe seguir apareciendo como "próximo".
     const q = `
-      SELECT
-        t.event_date::text AS date,
-        'tournament'       AS type,
-        t.id_tournament    AS tournament_id,
-        t.tournament_name,
-        t.address,
-
-        c.id_category      AS category_id,
-        c.category_type,
-        c.category_range,
-        c.gender,
-
-        e.status
-      FROM enrollments e
-      JOIN tournament_categories c ON c.id_category = e.id_category
-      JOIN tournaments t           ON t.id_tournament = e.id_tournament
-      WHERE e.id_user = $1
-        AND e.status = 'active'
-        AND t.event_date >= $2::date
-        AND t.event_date <= $3::date
-      ORDER BY t.event_date ASC, t.tournament_name ASC, c.category_type ASC, c.category_range ASC;
+      WITH ev AS (
+        SELECT
+          CASE
+            WHEN c.phase = 'finished' THEN COALESCE(
+              (SELECT MAX(x.played_at)::date FROM (
+                 SELECT gm.played_at FROM group_matches gm
+                   JOIN category_groups cg ON cg.id_group = gm.id_group
+                  WHERE cg.id_category = c.id_category
+                 UNION ALL
+                 SELECT bm.played_at FROM bracket_matches bm WHERE bm.id_category = c.id_category
+               ) x),
+              t.event_date)
+            ELSE t.event_date
+          END                AS day,
+          t.id_tournament    AS tournament_id,
+          t.tournament_name,
+          t.address,
+          c.id_category      AS category_id,
+          c.category_type,
+          c.category_range,
+          c.gender,
+          c.phase,
+          e.status
+        FROM enrollments e
+        JOIN tournament_categories c ON c.id_category = e.id_category
+        JOIN tournaments t           ON t.id_tournament = e.id_tournament
+        WHERE e.id_user = $1
+          AND e.status = 'active'
+      )
+      SELECT day::text AS date, 'tournament' AS type, tournament_id, tournament_name, address,
+             category_id, category_type, category_range, gender, phase, status
+        FROM ev
+       WHERE day >= $2::date AND day <= $3::date
+       ORDER BY day ASC, tournament_name ASC, category_type ASC, category_range ASC;
     `;
 
     const res = await this.pool.query(q, [userId, from, to]);

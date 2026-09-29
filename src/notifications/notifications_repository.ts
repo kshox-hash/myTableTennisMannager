@@ -1,5 +1,6 @@
 import type { Pool, PoolClient } from "pg";
 import DB from "../db/db_configuration";
+import { sendPush } from "./push";
 
 export type NotificationType =
   | "enrollment_created"
@@ -16,7 +17,16 @@ export type NotificationType =
   | "tournament_cancelled"
   | "club_join_request"
   | "club_join_approved"
-  | "club_join_rejected";
+  | "club_join_rejected"
+  | "group_outcome"
+  | "final_position"
+  | "tournament_updated"
+  | "match_result_corrected"
+  | "club_payment"
+  | "match_up_soon"
+  | "queue_skipped"
+  | "groups_ending"
+  | "player_unenrolled";
 
 export type NotificationRow = {
   id_notification: string;
@@ -68,6 +78,26 @@ export class NotificationsRepository {
         input.matchType ?? null,
       ]
     );
+    this.push([input.idUser], input);
+  }
+
+  // Además de guardarla, la notificación sale como push al celular (si
+  // Firebase está configurado — ver push.ts). Sin await: nunca demora ni
+  // rompe la acción que la originó. Si se llamó dentro de una transacción
+  // que después hace ROLLBACK el push igual ya salió; es un caso raro
+  // (la acción falla después de haber avisado) y se acepta.
+  private push(userIds: string[], input: Omit<CreateInput, "idUser">) {
+    void sendPush(userIds, {
+      title: input.title,
+      body: input.message,
+      data: {
+        type: input.type,
+        id_tournament: input.idTournament,
+        id_category: input.idCategory,
+        id_match: input.idMatch,
+        match_type: input.matchType,
+      },
+    });
   }
 
   async createForMany(
@@ -104,14 +134,36 @@ export class NotificationsRepository {
        VALUES ${placeholders.join(",")}`,
       values
     );
+    this.push(ids, input);
+  }
+
+  // Token del celular para push (la app lo registra al iniciar sesión).
+  async saveDeviceToken(idUser: string, token: string, platform: string): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO device_tokens (token, id_user, platform, updated_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (token) DO UPDATE SET id_user = EXCLUDED.id_user, platform = EXCLUDED.platform, updated_at = NOW()`,
+      [token, idUser, platform]
+    );
+  }
+
+  async deleteDeviceToken(idUser: string, token: string): Promise<void> {
+    await this.pool.query(`DELETE FROM device_tokens WHERE token = $1 AND id_user = $2`, [token, idUser]);
   }
 
   async listForUser(idUser: string, limit = 50): Promise<NotificationRow[]> {
     const res = await this.pool.query<NotificationRow>(
-      `SELECT id_notification, type, title, message, id_tournament, id_category, id_match, match_type, is_read, created_at
-       FROM notifications
-       WHERE id_user = $1
-       ORDER BY created_at DESC
+      // Nombres de torneo y categoría para que la app pueda abrir la pantalla
+      // correcta al tocar la notificación (antes solo la marcaba leída).
+      `SELECT n.id_notification, n.type, n.title, n.message, n.id_tournament, n.id_category, n.id_match, n.match_type,
+              n.is_read, n.created_at,
+              t.tournament_name,
+              NULLIF(TRIM(CONCAT_WS(' ', tc.category_type, NULLIF(tc.category_range, 'General'))), '') AS category_label
+       FROM notifications n
+       LEFT JOIN tournaments t ON t.id_tournament = n.id_tournament
+       LEFT JOIN tournament_categories tc ON tc.id_category = n.id_category
+       WHERE n.id_user = $1
+       ORDER BY n.created_at DESC
        LIMIT $2`,
       [idUser, limit]
     );

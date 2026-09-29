@@ -25,6 +25,7 @@ import {
   createManualGroupSchema,
   createBracketPreRoundMatchSchema,
   addPlayerToBracketMatchSchema,
+  liveScoreSchema,
 } from "../schema/brackets_schema";
 
 const repo         = new BracketsRepository();
@@ -265,6 +266,47 @@ router.post(
   requireRole("admin"),
   requireTournamentOwnership(resolveTournamentFromBracketMatch),
   asyncHandler(controller.undoBracketResult)
+);
+
+// ─── MARCADOR EN VIVO ────────────────────────────────────────────────────────
+// Guarda los sets jugados hasta ahora para que jugadores y público vean el
+// partido "en vivo". No cambia el estado ni el ganador: el resultado final
+// se sigue cargando con /result. Si el partido ya terminó, no se toca.
+function liveScoreHandler(table: "group_matches" | "bracket_matches") {
+  return asyncHandler(async (req, res) => {
+    const sets = (req.body.set_scores as Array<{ p1: number; p2: number }>).filter((x) => x.p1 !== 0 || x.p2 !== 0);
+    const updated = await DB.getPool().query(
+      `UPDATE ${table}
+          SET set_scores = $1::jsonb
+        WHERE id_match = $2 AND status NOT IN ('played', 'walkover', 'bye') AND player1_id IS NOT NULL AND player2_id IS NOT NULL
+        RETURNING id_match`,
+      [JSON.stringify(sets), req.params.id_match]
+    );
+    if ((updated.rowCount ?? 0) === 0) {
+      return res.status(409).json({ ok: false, message: "El partido ya tiene resultado final o no existe." });
+    }
+    return res.json({ ok: true, data: { set_scores: sets } });
+  });
+}
+
+// PATCH /api/v1/bracket/matches/:id_match/live-score
+router.patch(
+  "/matches/:id_match/live-score",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(resolveTournamentFromGroupMatch),
+  validateBody(liveScoreSchema),
+  liveScoreHandler("group_matches")
+);
+
+// PATCH /api/v1/bracket/bracket-matches/:id_match/live-score
+router.patch(
+  "/bracket-matches/:id_match/live-score",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(resolveTournamentFromBracketMatch),
+  validateBody(liveScoreSchema),
+  liveScoreHandler("bracket_matches")
 );
 
 export default router;

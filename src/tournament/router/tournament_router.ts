@@ -1,4 +1,5 @@
 import { Router } from "express";
+import DB from "../../db/db_configuration";
 import { AdminTournamentController } from "../admin/admin_tournament_controller";
 import { AdminTournamentService } from "../admin/admin_tournament_service";
 import { AdminTournamentRepository } from "../admin/admin_tournament_repository";
@@ -169,6 +170,29 @@ router.post(
   requireRole("admin"),
   requireTournamentOwnership(),
   asyncHandler(controller.adminRemoveEnrollment)
+);
+
+// MARCAR PAGO DE LA INSCRIPCIÓN (admin, en cualquier fase: se paga en la
+// mesa de control y puede ser con el torneo ya empezado)
+router.post(
+  "/admin/tournaments/:id_tournament/enrollments/paid",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(),
+  asyncHandler(async (req, res) => {
+    const { id_user, id_category, paid } = req.body ?? {};
+    if (typeof id_user !== "string" || typeof id_category !== "string" || typeof paid !== "boolean") {
+      return res.status(400).json({ ok: false, message: "Faltan campos: id_user, id_category, paid" });
+    }
+    const r = await DB.getPool().query(
+      `UPDATE enrollments SET paid = $4, paid_at = CASE WHEN $4 THEN now() ELSE NULL END
+        WHERE id_tournament = $1 AND id_user = $2 AND id_category = $3 AND status = 'active'
+        RETURNING id_enrollment`,
+      [req.params.id_tournament, id_user, id_category, paid]
+    );
+    if ((r.rowCount ?? 0) === 0) return res.status(404).json({ ok: false, message: "No se encontró inscripción activa" });
+    return res.json({ ok: true, data: { paid } });
+  })
 );
 
 // SET CHECK-IN (admin marca presente/ausente antes de generar grupos)

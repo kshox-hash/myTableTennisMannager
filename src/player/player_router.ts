@@ -122,7 +122,8 @@ router.get(
   requireRole(["admin", "player"]),
   asyncHandler(async (req, res) => {
     const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
-    const data = await repo.getPlayerMatchHistory(req.params.id_user, limit);
+    const offset = req.query.offset ? parseInt(req.query.offset as string, 10) || 0 : 0;
+    const data = await repo.getPlayerMatchHistory(req.params.id_user, limit, offset);
     return res.json({ ok: true, data });
   })
 );

@@ -67,6 +67,9 @@ const INCREMENTAL = [
   "059_performance_indexes.sql",
   "060_match_result_reason.sql",
   "061_category_competition_format.sql",
+  "062_device_tokens.sql",
+  "063_called_out_of_order.sql",
+  "064_enrollment_paid.sql",
 ];
 
 export async function runMigrations(): Promise<void> {

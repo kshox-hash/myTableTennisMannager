@@ -13,7 +13,8 @@ export const updateProfileSchema = z
     gender: z.enum(["male", "female", "other"]).optional(),
     club_name: z.string().trim().max(150).nullable().optional(),
     birth_date: z.string().trim().min(1).max(10).nullable().optional(),
-    country: z.string().trim().max(100).nullable().optional(),
+    // Obligatorio: si se envía, no puede quedar vacío ni en null.
+    country: z.string().trim().min(1, "El país es obligatorio").max(100).optional(),
     // Región de Chile (lista oficial, igual que tournaments.region) — filtra
     // "Campeonatos nuevos" del Inicio. null = borrarla.
     region: z.string().trim().max(40).nullable().optional(),

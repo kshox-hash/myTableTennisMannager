@@ -18,6 +18,7 @@ export type TableMatch = {
   player1_name:  string | null;
   player2_name:  string | null;
   table_number:  number;
+  called_out_of_order?: boolean;
 };
 
 export type TableStatus = {
@@ -106,6 +107,7 @@ export class TablesRepository {
            NULL::text AS round_label,
            gm.match_number,
            gm.table_number,
+           gm.called_out_of_order,
            gm.player1_id, gm.player2_id,
            COALESCE(NULLIF(TRIM(u1.last_name || ' ' || u1.first_name), ''), u1.email) AS player1_name,
            COALESCE(NULLIF(TRIM(u2.last_name || ' ' || u2.first_name), ''), u2.email) AS player2_name
@@ -127,6 +129,7 @@ export class TablesRepository {
            NULL::text AS round_label,
            bm.match_number,
            bm.table_number,
+           bm.called_out_of_order,
            bm.player1_id, bm.player2_id,
            COALESCE(NULLIF(TRIM(u1.last_name || ' ' || u1.first_name), ''), u1.email) AS player1_name,
            COALESCE(NULLIF(TRIM(u2.last_name || ' ' || u2.first_name), ''), u2.email) AS player2_name
@@ -340,7 +343,8 @@ export class TablesRepository {
     id_match: string,
     match_type: "group" | "bracket",
     table_number: number,
-    requestedBy: string
+    requestedBy: string,
+    opts: { scheduled?: boolean } = {}
   ): Promise<void> {
     // Nadie puede jugar dos partidos a la vez: si alguno de los dos jugadores
     // ya está en otra mesa del torneo, no se permite esta asignación.
@@ -365,6 +369,9 @@ export class TablesRepository {
     // todas las asignaciones de ESE torneo entre sí — se libera solo al
     // terminar la transacción (COMMIT o ROLLBACK), no hace falta soltarlo
     // a mano.
+    let queueBefore: ReadyMatch[] = [];
+    let outOfOrder = false;
+    let skipped: ReadyMatch[] = [];
     const client = await this.pool.connect();
     let match: MatchRow;
     try {
@@ -425,11 +432,18 @@ export class TablesRepository {
         throw new Error("PLAYER_ALREADY_PLAYING");
       }
 
+      // ¿Se está llamando fuera del orden de la cola? (el despacho por
+      // horario confirmado no cuenta: ese orden ya lo fijó el organizador).
+      queueBefore = opts.scheduled ? [] : await this.getDispatchQueue(match.id_tournament);
+      const position = queueBefore.findIndex((q) => q.id_match === id_match);
+      outOfOrder = !opts.scheduled && queueBefore.length > 0 && position !== 0;
+      skipped = outOfOrder ? queueBefore.slice(0, Math.min(position < 0 ? 2 : position, 2)) : [];
+
       await client.query(
         `UPDATE ${table}
-         SET table_number = $1
+         SET table_number = $1, called_out_of_order = $3
          WHERE id_match = $2`,
-        [table_number, id_match]
+        [table_number, id_match, outOfOrder]
       );
 
       await client.query("COMMIT");
@@ -454,6 +468,31 @@ export class TablesRepository {
       idMatch: id_match,
       matchType: match_type,
     });
+
+    if (outOfOrder) {
+      const called = [match.player1_id, match.player2_id];
+      const names = await this.pool.query<{ id_user: string; name: string }>(
+        `SELECT id_user, COALESCE(NULLIF(TRIM(first_name || ' ' || last_name), ''), email) AS name
+           FROM users WHERE id_user = ANY($1::uuid[])`,
+        [called.filter(Boolean)]
+      );
+      const label = names.rows.map((r) => r.name).join(" vs ") || "otro partido";
+      for (const q of skipped) {
+        for (const idUser of [q.player1_id, q.player2_id]) {
+          if (!idUser || called.includes(idUser)) continue;
+          await this.notifications.create({
+            idUser,
+            type: "queue_skipped",
+            title: "Se adelantó un partido",
+            message: `El organizador llamó ${label} a la mesa ${table_number} antes de su turno. Tu partido sigue en la cola, no pierdes tu lugar.`,
+            idTournament: match.id_tournament,
+            idCategory: q.id_category,
+            idMatch: q.id_match,
+            matchType: q.match_type,
+          });
+        }
+      }
+    }
 
     await this.activityLog.record(
       match.id_tournament,

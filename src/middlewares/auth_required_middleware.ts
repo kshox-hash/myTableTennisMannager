@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import type { EffectiveRole } from "../core/constants/roles";
+import DB from "../db/db_configuration";
 
 export interface AuthPayload {
   id_user: string;
@@ -43,11 +44,27 @@ export function authRequired(req: Request, res: Response, next: NextFunction) {
     // si en el futuro se agrega otro método de firma.
     const payload = jwt.verify(token, secret, { algorithms: ["HS256"] }) as AuthPayload;
     req.user = payload;
-    return next();
   } catch {
     return res.status(401).json({
       ok: false,
       message: "Token inválido",
     });
   }
+
+  // El token puede ser válido pero de un usuario que ya no existe (se borró
+  // la cuenta o la base): antes pasaba y cada escritura fallaba con errores
+  // raros ("IDs inválidos"). Ahora se corta acá y el cliente vuelve al login.
+  DB.getPool()
+    .query("SELECT 1 FROM users WHERE id_user = $1", [req.user!.id_user])
+    .then((r) => {
+      if ((r.rowCount ?? 0) === 0) {
+        return res.status(401).json({
+          ok: false,
+          code: "SESSION_INVALID",
+          message: "Tu sesión ya no es válida. Vuelve a iniciar sesión.",
+        });
+      }
+      return next();
+    })
+    .catch(next);
 }

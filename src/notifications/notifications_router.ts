@@ -19,6 +19,29 @@ router.get(
   })
 );
 
+// POST /api/v1/notifications/device-token  { token, platform }
+// DELETE /api/v1/notifications/device-token { token }  (al cerrar sesión)
+router.post(
+  "/device-token",
+  authRequired,
+  asyncHandler(async (req, res) => {
+    const token = typeof req.body?.token === "string" ? req.body.token.trim() : "";
+    const platform = ["android", "ios", "web"].includes(req.body?.platform) ? req.body.platform : "android";
+    if (!token || token.length > 4096) return res.status(400).json({ ok: false, message: "Token inválido" });
+    await repo.saveDeviceToken(req.user!.id_user, token, platform);
+    return res.json({ ok: true });
+  })
+);
+router.delete(
+  "/device-token",
+  authRequired,
+  asyncHandler(async (req, res) => {
+    const token = typeof req.body?.token === "string" ? req.body.token.trim() : "";
+    if (token) await repo.deleteDeviceToken(req.user!.id_user, token);
+    return res.json({ ok: true });
+  })
+);
+
 // GET /api/v1/notifications/unread-count
 router.get(
   "/unread-count",

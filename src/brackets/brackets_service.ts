@@ -8,6 +8,7 @@ import {
   type GroupSeededEntry,
 } from "../bracket_generation_logic";
 import { BracketsRepository } from "./brackets_repository";
+import { notifyGroupOutcome } from "../notifications/player_outcomes";
 import {
   BRACKETS_ERRORS,
   type BracketsError,
@@ -717,6 +718,10 @@ export class BracketsService {
     const names = await this.repo.getTournamentCategoryNames(tournamentId, categoryId);
     if (names) {
       const realPlayers = rankedRealPlayers.map((d) => d.player).filter((p): p is string => p !== null);
+      // Aviso aparte de clasificación (clasificaste / quedaste fuera) a
+      // todos los que jugaron los grupos — antes solo se enteraban los
+      // clasificados, y sin saber en qué puesto.
+      void notifyGroupOutcome(categoryId, realPlayers);
       await this.repo.notifications.createForMany(realPlayers, {
         type: "bracket_generated",
         title: "Se generó el cuadro eliminatorio",
@@ -734,7 +739,7 @@ export class BracketsService {
         await this.repo.notifications.createForMany(byeWinners, {
           type: "bracket_bye",
           title: "Avanzaste de ronda",
-          message: `Te tocó bye en la primera ronda de ${names.categoryType} ${names.categoryRange} (${names.tournamentName}): pasás directo a la siguiente ronda sin jugar.`,
+          message: `Te tocó bye en la primera ronda de ${names.categoryType} ${names.categoryRange} (${names.tournamentName}): pasas directo a la siguiente ronda sin jugar.`,
           idTournament: tournamentId,
           idCategory: categoryId,
         });

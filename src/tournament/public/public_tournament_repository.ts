@@ -557,10 +557,14 @@ export class PublicTournamentRepository {
       tConds.push(`EXISTS (SELECT 1 FROM enrollments e WHERE e.id_tournament = t.id_tournament AND e.id_user = $${values.length} AND e.status = 'active')`);
     }
     const tWhere = tConds.join(" AND ");
-    // Solo lo reciente: en vivo, o jugado en los últimos 30 días.
-    const recent = (a: string) =>
-      `((${a}.table_number IS NOT NULL AND ${a}.status NOT IN ('played','walkover')) OR (${a}.status IN ('played','walkover') AND ${a}.played_at > NOW() - INTERVAL '30 days'))`;
-    values.push(filters.limit);
+    // Dos pasadas: hasta 3 EN VIVO (mesa asignada, sin resultado) y después
+    // los jugados en los últimos 30 días. En una sola consulta ordenada por
+    // "en vivo primero", un torneo con muchas mesas ocupadas llenaba todo el
+    // límite con partidos 0-0 y los resultados reales no aparecían nunca.
+    const liveCond = (a: string) => `(${a}.table_number IS NOT NULL AND ${a}.status NOT IN ('played','walkover'))`;
+    const doneCond = (a: string) => `(${a}.status IN ('played','walkover') AND ${a}.played_at > NOW() - INTERVAL '30 days')`;
+    const run = async (recent: (a: string) => string, limit: number) => {
+    const vals = [...values, limit];
     const res = await this.pool.query(
       `SELECT * FROM (
          SELECT gm.id_match, 'group' AS stage, t.id_tournament, t.tournament_name,
@@ -594,10 +598,13 @@ export class PublicTournamentRepository {
          WHERE ${tWhere} AND bm.is_bye = FALSE AND ${recent("bm")}
        ) sub
        ORDER BY is_live DESC, played_at DESC NULLS LAST
-       LIMIT $${values.length}`,
-      values
+       LIMIT $${vals.length}`,
+      vals
     );
     return res.rows;
+    };
+    const [live, done] = await Promise.all([run(liveCond, Math.min(3, filters.limit)), run(doneCond, filters.limit)]);
+    return [...live, ...done].slice(0, filters.limit);
   }
 
   async getCategoryDetail(id_category: string): Promise<{

@@ -27,7 +27,8 @@ export function startTableScheduleScheduler(intervalMs = 30_000) {
             match.id_match,
             "group",
             match.scheduled_table_number,
-            match.created_by
+            match.created_by,
+            { scheduled: true }
           );
         } catch (err) {
           // Mesa ocupada o jugador ocupado — se reintenta solo en la

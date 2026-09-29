@@ -459,6 +459,7 @@ export class PlayerRepository {
          u.id_user,
          COALESCE(NULLIF(TRIM(u.first_name || ' ' || u.last_name), ''), u.email) AS player_name,
          cl.name AS club_name,
+         u.avatar_url,
          u.gender,
          tc.id_category,
          tc.category_type, tc.category_range,
@@ -570,14 +571,14 @@ export class PlayerRepository {
     // el frontend sepa cuántas páginas mostrar.
     const countQuery = `
       WITH matches AS (
-        SELECT gm.player1_id, gm.player2_id, gm.status
+        SELECT gm.player1_id, gm.player2_id, gm.status, gm.table_number
         FROM group_matches gm
         JOIN category_groups cg ON cg.id_group = gm.id_group
         WHERE cg.id_tournament = $1
 
         UNION ALL
 
-        SELECT bm.player1_id, bm.player2_id, bm.status
+        SELECT bm.player1_id, bm.player2_id, bm.status, bm.table_number
         FROM bracket_matches bm
         WHERE bm.id_tournament = $1
       )
@@ -662,7 +663,9 @@ export class PlayerRepository {
   // Historial de partidos jugados de UN jugador puntual, cruzando todos sus
   // torneos — es lo que alimenta la pestaña "Partidos" de la ficha pública
   // de cualquier jugador (no solo la propia).
-  async getPlayerMatchHistory(id_user: string, limit = 15) {
+  // offset: para paginar el historial (un jugador que juega todos los fines
+  // de semana junta cientos de partidos; antes solo se veían los últimos 50).
+  async getPlayerMatchHistory(id_user: string, limit = 15, offset = 0) {
     const query = `
       WITH matches AS (
         SELECT
@@ -712,10 +715,10 @@ export class PlayerRepository {
           AND bm.status IN ('played', 'walkover')
       )
       SELECT * FROM matches
-      ORDER BY played_at DESC NULLS LAST
-      LIMIT $2
+      ORDER BY played_at DESC NULLS LAST, id_match
+      LIMIT $2 OFFSET $3
     `;
-    const res = await this.pool.query(query, [id_user, Math.min(limit, 50)]);
+    const res = await this.pool.query(query, [id_user, Math.min(limit, 50), Math.max(offset, 0)]);
     return res.rows;
   }
 

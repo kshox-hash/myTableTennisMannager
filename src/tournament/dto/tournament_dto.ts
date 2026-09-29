@@ -64,6 +64,7 @@ export type TournamentCategoryDTO = {
   // Solo se completan en el listado para jugador (findAll con userId)
   enrolled_count?: number;
   is_enrolled?: boolean;
+  is_paid?: boolean;
 };
 
 export type TournamentCreateDTO = {
