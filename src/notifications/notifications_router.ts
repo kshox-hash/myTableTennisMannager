@@ -1,3 +1,4 @@
+import { pushSelfTest } from "./push";
 import { Router } from "express";
 import { asyncHandler } from "../middlewares/wrap_async_middleware";
 import { authRequired } from "../middlewares/auth_required_middleware";
@@ -39,6 +40,17 @@ router.delete(
     const token = typeof req.body?.token === "string" ? req.body.token.trim() : "";
     if (token) await repo.deleteDeviceToken(req.user!.id_user, token);
     return res.json({ ok: true });
+  })
+);
+
+// POST /api/v1/notifications/push-test — aviso de prueba a los celulares
+// del usuario + diagnóstico de cada paso (ver pushSelfTest).
+router.post(
+  "/push-test",
+  authRequired,
+  asyncHandler(async (req, res) => {
+    const result = await pushSelfTest(req.user!.id_user);
+    return res.json({ ok: true, data: result });
   })
 );
 

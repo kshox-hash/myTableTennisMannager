@@ -82,3 +82,38 @@ export async function sendPush(
     console.error("[push] error enviando:", err);
   }
 }
+
+// Diagnóstico ("Probar notificaciones" en la app): manda un aviso de prueba
+// a los celulares del usuario y devuelve qué pasó en cada paso, en vez de
+// fallar en silencio como sendPush.
+export async function pushSelfTest(idUser: string): Promise<{
+  enabled: boolean;
+  firebase: boolean;
+  tokens: number;
+  sent: number;
+  errors: string[];
+}> {
+  const result = { enabled: pushEnabled(), firebase: false, tokens: 0, sent: 0, errors: [] as string[] };
+  if (!result.enabled) return result;
+  const m = await getMessaging();
+  result.firebase = Boolean(m);
+  if (!m) return result;
+  const pool = DB.getPool();
+  const res = await pool.query<{ token: string }>(`SELECT token FROM device_tokens WHERE id_user = $1`, [idUser]);
+  const tokens = res.rows.map((r) => r.token);
+  result.tokens = tokens.length;
+  if (tokens.length === 0) return result;
+  try {
+    const out = await m.sendEachForMulticast({
+      tokens,
+      notification: { title: "Prueba de MyTTM", body: "Las notificaciones funcionan en este celular." },
+      data: { type: "push_test" },
+      android: { priority: "high", notification: { channelId: "myttm_partidos", sound: "default" } },
+    });
+    result.sent = out.responses.filter((r) => r.success).length;
+    result.errors = out.responses.filter((r) => !r.success).map((r) => r.error?.code ?? "desconocido");
+  } catch (err) {
+    result.errors.push(err instanceof Error ? err.message : String(err));
+  }
+  return result;
+}
