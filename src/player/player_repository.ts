@@ -12,6 +12,8 @@ export type NextMatch = {
   opponent_id:     string | null;
   opponent_name:   string | null;
   opponent_email:  string | null;
+  // Foto del rival (null = sin foto: la app muestra su identicon).
+  opponent_avatar_url: string | null;
   table_number:    number | null;
   status:          string;
   group_name:      string | null;
@@ -85,6 +87,7 @@ export class PlayerRepository {
              opp.email
            ) AS opponent_name,
            opp.email AS opponent_email,
+           opp.avatar_url AS opponent_avatar_url,
            gm.table_number,
            gm.status,
            cg.group_name,
@@ -117,6 +120,7 @@ export class PlayerRepository {
              opp.email
            ) AS opponent_name,
            opp.email AS opponent_email,
+           opp.avatar_url AS opponent_avatar_url,
            bm.table_number,
            bm.status,
            NULL::text AS group_name,
