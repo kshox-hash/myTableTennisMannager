@@ -723,6 +723,13 @@ export class AdminTournamentRepository {
     where.push(`(
       t.visibility = 'public'
       OR t.created_by = $${visibilityUserParam}
+      -- Privado pero el jugador ya está inscrito (entró por el link compartido):
+      -- tiene que poder volver a encontrarlo en su lista.
+      OR EXISTS (
+        SELECT 1 FROM enrollments e
+        JOIN tournament_categories ec ON ec.id_category = e.id_category
+        WHERE ec.id_tournament = t.id_tournament AND e.id_user = $${visibilityUserParam} AND e.status = 'active'
+      )
       OR EXISTS (
         SELECT 1 FROM tournament_organizers o
         WHERE o.id_tournament = t.id_tournament AND o.id_user = $${visibilityUserParam}
