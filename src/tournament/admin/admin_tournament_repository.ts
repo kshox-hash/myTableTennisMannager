@@ -1,5 +1,6 @@
 import type { Pool, PoolClient, QueryResult } from "pg";
 import DB from "../../db/db_configuration";
+import { categoryIneligibility } from "../../age_category_logic";
 import { NotificationsRepository } from "../../notifications/notifications_repository";
 import { ActivityLogRepository, type ActivityLogRow } from "../../activity/activity_log_repository";
 import { BracketsRepository } from "../../brackets/brackets_repository";
@@ -919,6 +920,19 @@ export class AdminTournamentRepository {
 
     if (dataRes.rows.length === 0) return null;
 
+    // Ficha del jugador (género y nacimiento) para marcar de antemano las
+    // categorías en que no puede inscribirse — la app y la web desactivan
+    // "Inscribirme" y muestran el motivo, en vez de dejarlo intentar.
+    const player = userId
+      ? (
+          await this.pool.query<{ gender: string | null; birth_date: string | null }>(
+            `SELECT gender, birth_date::text AS birth_date FROM users WHERE id_user = $1`,
+            [userId]
+          )
+        ).rows[0] ?? null
+      : null;
+    const eventDate = (dataRes.rows[0] as { event_date?: string | Date | null }).event_date ?? null;
+
     const tournament = this.mapTournamentListBase(dataRes.rows[0]);
     for (const row of dataRes.rows) {
       if (row.id_category) {
@@ -935,6 +949,13 @@ export class AdminTournamentRepository {
           enrolled_count: Number(row.enrolled_count ?? 0),
           is_enrolled: Boolean(row.is_enrolled),
           is_paid: Boolean(row.is_paid),
+          ineligible_reason: player
+            ? categoryIneligibility(
+                { gender: player.gender, birthDate: player.birth_date },
+                { categoryType: row.category_type ?? "", categoryRange: row.category_range ?? "", gender: row.gender ?? "mixed" },
+                eventDate
+              )
+            : null,
         });
       }
     }

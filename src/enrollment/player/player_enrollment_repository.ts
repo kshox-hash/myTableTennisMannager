@@ -2,7 +2,7 @@ import type { Pool, PoolClient } from "pg";
 import DB from "../../db/db_configuration";
 import type { EnrollmentDTO } from "../../enrollment/schema/enrollment_schema";
 import { NotificationsRepository } from "../../notifications/notifications_repository";
-import { getCategoryBirthYearRange, isBirthYearInRange } from "../../age_category_logic";
+import { categoryIneligibility } from "../../age_category_logic";
 
 type EnrollmentRow = {
   id_enrollment: string;
@@ -128,29 +128,15 @@ export class EnrollmentsRepository {
           throw new Error("CATEGORY_ALREADY_STARTED");
         }
 
-        if (category_gender !== "mixed") {
-          if (!user_gender) throw new Error("GENDER_REQUIRED");
-          if (user_gender !== category_gender) throw new Error("GENDER_MISMATCH");
-        }
-
-        // Elegibilidad por edad — mismos rangos que usa la Federación
-        // Chilena de Tenis de Mesa (FECHITEME), por año de nacimiento
-        // contra el año del torneo, no por edad exacta hoy (ver
-        // age_category_logic.ts). Categorías sin restricción de edad
-        // (Todo Competidor, Iniciación, etc.) o un rango de Máster que no
-        // se pudo interpretar (ej. "Personalizado" con texto libre)
-        // devuelven null acá y no bloquean nada.
-        const seasonYear = event_date ? new Date(event_date).getFullYear() : new Date().getFullYear();
-        const ageRange = getCategoryBirthYearRange(category_type, category_range, seasonYear);
-        if (ageRange) {
-          if (!user_birth_date) throw new Error("BIRTH_DATE_REQUIRED");
-          const birthYear = new Date(user_birth_date).getFullYear();
-          if (!isBirthYearInRange(birthYear, ageRange)) throw new Error("AGE_NOT_ELIGIBLE");
-        }
-
-        if (quotas !== null && enrolled_count >= Number(quotas)) {
-          throw new Error("QUOTA_EXCEEDED");
-        }
+        // Género y edad (FECHITEME, por año de nacimiento vs. año del
+        // torneo) — misma regla que muestra el detalle del campeonato, ver
+        // categoryIneligibility en age_category_logic.ts.
+        const ineligible = categoryIneligibility(
+          { gender: user_gender, birthDate: user_birth_date },
+          { categoryType: category_type, categoryRange: category_range, gender: category_gender },
+          event_date
+        );
+        if (ineligible) throw new Error(ineligible);
 
         // ON CONFLICT en vez de un INSERT liso: si el jugador ya había estado
         // inscripto antes y un admin lo sacó, su fila queda en la tabla con

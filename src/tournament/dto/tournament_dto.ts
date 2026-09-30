@@ -65,6 +65,8 @@ export type TournamentCategoryDTO = {
   enrolled_count?: number;
   is_enrolled?: boolean;
   is_paid?: boolean;
+  // Solo en el detalle para jugador: por qué no puede inscribirse (null = puede).
+  ineligible_reason?: "GENDER_REQUIRED" | "GENDER_MISMATCH" | "BIRTH_DATE_REQUIRED" | "AGE_NOT_ELIGIBLE" | null;
 };
 
 export type TournamentCreateDTO = {

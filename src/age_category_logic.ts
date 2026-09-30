@@ -90,3 +90,30 @@ export function isBirthYearInRange(birthYear: number, range: BirthYearRange): bo
   if (range.maxBirthYear !== null && birthYear > range.maxBirthYear) return false;
   return true;
 }
+
+export type IneligibleReason = "GENDER_REQUIRED" | "GENDER_MISMATCH" | "BIRTH_DATE_REQUIRED" | "AGE_NOT_ELIGIBLE";
+
+/**
+ * Por qué un jugador NO puede inscribirse en una categoría (género y edad),
+ * o null si puede. La usan tanto la inscripción (que la rechaza con este
+ * código) como el detalle del campeonato (que la muestra antes de intentar,
+ * para no ofrecer "Inscribirme" en una categoría que igual va a fallar).
+ * Edad: año de nacimiento contra el año del torneo (FECHITEME).
+ */
+export function categoryIneligibility(
+  player: { gender: string | null; birthDate: string | Date | null },
+  category: { categoryType: string; categoryRange: string; gender: string },
+  eventDate: string | Date | null
+): IneligibleReason | null {
+  if (category.gender !== "mixed") {
+    if (!player.gender) return "GENDER_REQUIRED";
+    if (player.gender !== category.gender) return "GENDER_MISMATCH";
+  }
+  const seasonYear = eventDate ? new Date(eventDate).getFullYear() : new Date().getFullYear();
+  const range = getCategoryBirthYearRange(category.categoryType, category.categoryRange, seasonYear);
+  if (range) {
+    if (!player.birthDate) return "BIRTH_DATE_REQUIRED";
+    if (!isBirthYearInRange(new Date(player.birthDate).getFullYear(), range)) return "AGE_NOT_ELIGIBLE";
+  }
+  return null;
+}
