@@ -49,7 +49,8 @@ router.post(
   "/push-test",
   authRequired,
   asyncHandler(async (req, res) => {
-    const result = await pushSelfTest(req.user!.id_user);
+    const delaySec = Math.min(15, Math.max(0, Number(req.query.delay) || 0));
+    const result = await pushSelfTest(req.user!.id_user, delaySec * 1000);
     return res.json({ ok: true, data: result });
   })
 );

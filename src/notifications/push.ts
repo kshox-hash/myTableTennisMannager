@@ -86,7 +86,7 @@ export async function sendPush(
 // Diagnóstico ("Probar notificaciones" en la app): manda un aviso de prueba
 // a los celulares del usuario y devuelve qué pasó en cada paso, en vez de
 // fallar en silencio como sendPush.
-export async function pushSelfTest(idUser: string): Promise<{
+export async function pushSelfTest(idUser: string, delayMs = 0): Promise<{
   enabled: boolean;
   firebase: boolean;
   tokens: number;
@@ -103,13 +103,25 @@ export async function pushSelfTest(idUser: string): Promise<{
   const tokens = res.rows.map((r) => r.token);
   result.tokens = tokens.length;
   if (tokens.length === 0) return result;
-  try {
-    const out = await m.sendEachForMulticast({
+  const send = () =>
+    m.sendEachForMulticast({
       tokens,
       notification: { title: "Prueba de MyTTM", body: "Las notificaciones funcionan en este celular." },
       data: { type: "push_test" },
       android: { priority: "high", notification: { channelId: "myttm_partidos", sound: "default" } },
     });
+  // Con demora (la app pide 5 s para que el jugador alcance a salir y vea el
+  // aviso en la barra, que Android no muestra con la app abierta): se
+  // responde de inmediato y el envío sale después; si falla, queda en el log.
+  if (delayMs > 0) {
+    setTimeout(() => {
+      send().catch((err) => console.error("[push] prueba demorada falló:", err));
+    }, delayMs);
+    result.sent = tokens.length;
+    return result;
+  }
+  try {
+    const out = await send();
     result.sent = out.responses.filter((r) => r.success).length;
     result.errors = out.responses.filter((r) => !r.success).map((r) => r.error?.code ?? "desconocido");
   } catch (err) {
