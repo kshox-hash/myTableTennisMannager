@@ -70,7 +70,7 @@ export class EnrollmentsController {
       if (error?.message === "AGE_NOT_ELIGIBLE") {
         return res.status(409).json({
           ok: false,
-          message: "No cumplís con el rango de edad de esta categoría",
+          message: "No cumples con el rango de edad de esta categoría",
         });
       }
 
