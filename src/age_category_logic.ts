@@ -37,21 +37,32 @@ const YOUTH_OFFSETS: Record<string, { minOffset: number; maxOffset: number | nul
   u23: { minOffset: 23, maxOffset: 20 },
 };
 
-// "30-34" / "30–34" (en dash) / "30 - 34" -> banda cerrada.
-// "80+" / "80 y más" / "80 y mas" -> banda abierta hacia arriba (sin techo de edad).
-// Cualquier otra cosa (ej. "Personalizado" con texto libre) -> no se pudo
-// interpretar, se devuelve null y NO se aplica ninguna restricción — mejor
-// no validar que bloquear mal a alguien por un formato que no reconocemos.
-function parseMasterRange(categoryRange: string): { minAge: number; maxAge: number | null } | null {
-  const cleaned = categoryRange.trim();
+// Edad escrita a mano (Máster "Personalizado" o tipo "Otro (escribir)").
+// Formatos reconocidos (mayúsculas/tildes da igual):
+//   "30-34" "30–34" "30 - 34" "30 a 34" "30 al 34" "30 hasta 34" "30-34 años" -> banda cerrada
+//   "80+" "80 y más" "80 o más" "+80" "mayores de 80" "más de 80"        -> sin techo
+//   "Sub 17" "Sub-17" "U17" "U-17" "menores de 17" "hasta 17"            -> hasta esa edad
+// Cualquier otra cosa -> null: NO se aplica restricción — mejor no validar
+// que bloquear mal a alguien por un formato que no reconocemos.
+function parseAgeText(text: string): { minAge: number; maxAge: number | null } | null {
+  const t = text.trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 
-  const openMatch = cleaned.match(/^(\d{2,3})\s*(\+|y\s*m[aá]s)/i);
-  if (openMatch) return { minAge: Number(openMatch[1]), maxAge: null };
-
-  const rangeMatch = cleaned.match(/^(\d{2,3})\s*[-–]\s*(\d{2,3})/);
-  if (rangeMatch) return { minAge: Number(rangeMatch[1]), maxAge: Number(rangeMatch[2]) };
-
+  const range = t.match(/(\d{1,3})\s*(?:-|–|—|al|a|hasta)\s*(\d{1,3})/);
+  if (range) {
+    const x = Number(range[1]), y = Number(range[2]);
+    return { minAge: Math.min(x, y), maxAge: Math.max(x, y) };
+  }
+  const openAfter = t.match(/(\d{1,3})\s*(?:\+|y\s*mas|o\s*mas)/);
+  if (openAfter) return { minAge: Number(openAfter[1]), maxAge: null };
+  const openBefore = t.match(/(?:\+|mayores\s+de|mas\s+de)\s*(\d{1,3})/);
+  if (openBefore) return { minAge: Number(openBefore[1]), maxAge: null };
+  const under = t.match(/(?:\bsub|\bu|menores\s+de|hasta)\s*-?\s*(\d{1,3})/);
+  if (under) return { minAge: 0, maxAge: Number(under[1]) };
   return null;
+}
+
+function parseMasterRange(categoryRange: string): { minAge: number; maxAge: number | null } | null {
+  return parseAgeText(categoryRange);
 }
 
 /**
@@ -77,7 +88,18 @@ export function getCategoryBirthYearRange(
   }
 
   const offsets = YOUTH_OFFSETS[key];
-  if (!offsets) return null;
+  if (!offsets) {
+    // Tipos sin edad por definición: no se interpreta nada.
+    if (["todo competidor", "iniciacion", "iniciación", "intermedio", "paralimpico", "paralímpico"].includes(key)) return null;
+    // "Otro (escribir)": la edad puede venir en el nombre ("Sub 17 Damas")
+    // o en el rango personalizado.
+    const parsed = parseAgeText(`${categoryType} ${categoryRange === "General" ? "" : categoryRange}`);
+    if (!parsed) return null;
+    return {
+      minBirthYear: parsed.maxAge === null ? null : seasonYear - parsed.maxAge,
+      maxBirthYear: parsed.minAge === 0 ? null : seasonYear - parsed.minAge,
+    };
+  }
 
   return {
     minBirthYear: seasonYear - offsets.minOffset,
