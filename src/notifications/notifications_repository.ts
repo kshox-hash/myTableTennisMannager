@@ -2,6 +2,27 @@ import type { Pool, PoolClient } from "pg";
 import DB from "../db/db_configuration";
 import { sendPush } from "./push";
 
+/** Tipos que se avisan al celular (push) y como aviso emergente en la app/web.
+ * Mismo listado en la app (notification_popups.dart) y en la web
+ * (NotificationPopups.tsx). */
+export const PUSH_TYPES: ReadonlySet<string> = new Set([
+  "groups_started",
+  "match_up_soon",
+  "match_on_table",
+  "groups_ending",
+  "group_outcome",
+  "final_position",
+  "tournament_cancelled",
+  "tournament_updated",
+  "enrollment_removed",
+  "match_result_corrected",
+  "group_changed",
+  "bracket_changed",
+  "club_join_request",
+  "club_join_approved",
+  "club_join_rejected",
+]);
+
 export type NotificationType =
   | "enrollment_created"
   | "enrollment_confirmed"
@@ -87,6 +108,9 @@ export class NotificationsRepository {
   // que después hace ROLLBACK el push igual ya salió; es un caso raro
   // (la acción falla después de haber avisado) y se acepta.
   private push(userIds: string[], input: Omit<CreateInput, "idUser">) {
+    // Solo lo importante sale como push (llegaban avisos por cada acción y
+    // saturaban); el resto queda igual guardado en la campana.
+    if (!PUSH_TYPES.has(input.type)) return;
     void sendPush(userIds, {
       title: input.title,
       body: input.message,
