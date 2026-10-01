@@ -3,6 +3,7 @@ import DB from "../db/db_configuration";
 
 export type ActivityAction =
   | "tournament_cancelled"
+  | "tournament_finished"
   | "tournament_updated"
   | "table_assigned"
   | "table_released"

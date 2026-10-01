@@ -8,6 +8,7 @@ import { authRequired } from "../../middlewares/auth_required_middleware";
 import { requireRole } from "../../middlewares/require_role_middleware";
 import { validateBody } from "../../middlewares/validate_body_middleware";
 import { asyncHandler } from "../../middlewares/wrap_async_middleware";
+import { finishTournament } from "../admin/finish_tournament";
 import { requireTournamentOwnership } from "../../middlewares/require_tournament_ownership_middleware";
 
 import {
@@ -77,6 +78,20 @@ router.patch(
   validateBody(updateTournamentSchema),
   requireTournamentOwnership(),
   asyncHandler(controller.adminUpdateTournament)
+);
+
+// FINALIZAR CAMPEONATO en cualquier momento (solo el organizador): cierra
+// las categorías abiertas (sin podio), borra los partidos pendientes y avisa.
+router.post(
+  "/admin/tournaments/:id_tournament/finish",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(),
+  asyncHandler(async (req, res) => {
+    const r = await finishTournament(String(req.params.id_tournament), req.user!.id_user);
+    if (!r.ok) return res.status(r.status).json({ ok: false, message: r.message });
+    return res.json({ ok: true, data: { categories: r.categories, cancelled_matches: r.cancelledMatches } });
+  })
 );
 
 // CANCEL TOURNAMENT (solo el organizador)

@@ -22,6 +22,7 @@ export const PUSH_TYPES: ReadonlySet<string> = new Set([
   "club_join_approved",
   "club_join_rejected",
   "referee_assigned",
+  "tournament_finished",
 ]);
 
 export type NotificationType =
@@ -49,7 +50,8 @@ export type NotificationType =
   | "queue_skipped"
   | "groups_ending"
   | "player_unenrolled"
-  | "referee_assigned";
+  | "referee_assigned"
+  | "tournament_finished";
 
 export type NotificationRow = {
   id_notification: string;

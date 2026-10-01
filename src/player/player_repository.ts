@@ -384,10 +384,12 @@ export class PlayerRepository {
     // Solo mostramos posiciones cuando la categoría ya está 100% terminada —
     // a mitad de torneo esto daría un podio incompleto/engañoso.
     const phaseRes = await this.pool.query(
-      `SELECT phase FROM tournament_categories WHERE id_category = $1`,
+      `SELECT phase, finished_early FROM tournament_categories WHERE id_category = $1`,
       [id_category]
     );
-    if (phaseRes.rows[0]?.phase !== "finished") {
+    // Finalizada antes de tiempo por el organizador: no se jugó completa,
+    // así que no hay podio (sería un "campeón" que no ganó la final).
+    if (phaseRes.rows[0]?.phase !== "finished" || phaseRes.rows[0]?.finished_early) {
       return { source: "none" as const, standings: [] };
     }
 
@@ -738,7 +740,7 @@ export class PlayerRepository {
         FROM enrollments e
         JOIN tournament_categories tc ON tc.id_category = e.id_category
         JOIN tournaments t ON t.id_tournament = tc.id_tournament
-        WHERE e.id_user = $1 AND tc.phase = 'finished'
+        WHERE e.id_user = $1 AND tc.phase = 'finished' AND NOT tc.finished_early
       ),
       bracket_totals AS (
         SELECT id_category, MAX(round) AS total_rounds
