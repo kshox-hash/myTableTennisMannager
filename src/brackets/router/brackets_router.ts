@@ -12,6 +12,7 @@ import type { Request } from "express";
 import { asyncHandler } from "../../middlewares/wrap_async_middleware";
 import { requireTournamentOwnership } from "../../middlewares/require_tournament_ownership_middleware";
 import DB from "../../db/db_configuration";
+import { claimRefereeToken, createRefereeToken, myRefereeMatches, requireMatchReferee } from "../referee";
 
 import {
   generateGroupsSchema,
@@ -307,6 +308,86 @@ router.patch(
   requireTournamentOwnership(resolveTournamentFromBracketMatch),
   validateBody(liveScoreSchema),
   liveScoreHandler("bracket_matches")
+);
+
+// ─── ÁRBITRO DESDE LA APP ────────────────────────────────────────────────────
+// Cualquier usuario con sesión, pero solo puede anotar el partido del que es
+// árbitro (referee_id): asignado por el organizador o por QR de un solo uso.
+// Reutiliza el marcador en vivo y la carga de resultado del panel.
+
+// GET /api/v1/bracket/referee/my-matches — partidos sin terminar que me toca arbitrar
+router.get(
+  "/referee/my-matches",
+  authRequired,
+  asyncHandler(async (req, res) => {
+    const data = await myRefereeMatches(req.user!.id_user);
+    return res.json({ ok: true, data });
+  })
+);
+
+// POST /api/v1/bracket/referee/claim { token } — escaneó el QR del organizador
+router.post(
+  "/referee/claim",
+  authRequired,
+  asyncHandler(async (req, res) => {
+    const token = typeof req.body?.token === "string" ? req.body.token : "";
+    const r = await claimRefereeToken(token, req.user!.id_user);
+    if (!r.ok) return res.status(r.status).json({ ok: false, message: r.message });
+    return res.json({ ok: true, data: { match_type: r.match_type, id_match: r.id_match } });
+  })
+);
+
+router.patch(
+  "/referee/matches/:id_match/live-score",
+  authRequired,
+  requireMatchReferee("group_matches"),
+  validateBody(liveScoreSchema),
+  liveScoreHandler("group_matches")
+);
+router.patch(
+  "/referee/bracket-matches/:id_match/live-score",
+  authRequired,
+  requireMatchReferee("bracket_matches"),
+  validateBody(liveScoreSchema),
+  liveScoreHandler("bracket_matches")
+);
+router.post(
+  "/referee/matches/:id_match/result",
+  authRequired,
+  requireMatchReferee("group_matches"),
+  validateBody(matchResultSchema),
+  asyncHandler(controller.recordResult)
+);
+router.post(
+  "/referee/bracket-matches/:id_match/result",
+  authRequired,
+  requireMatchReferee("bracket_matches"),
+  validateBody(matchResultSchema),
+  asyncHandler(controller.recordBracketResult)
+);
+
+// QR de árbitro (organizador): un solo uso, 2 minutos.
+// POST /api/v1/bracket/matches/:id_match/referee-token
+router.post(
+  "/matches/:id_match/referee-token",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(resolveTournamentFromGroupMatch),
+  asyncHandler(async (req, res) => {
+    const data = await createRefereeToken("group", String(req.params.id_match), req.user!.id_user);
+    return res.json({ ok: true, data });
+  })
+);
+// POST /api/v1/bracket/bracket-matches/:id_match/referee-token
+router.post(
+  "/bracket-matches/:id_match/referee-token",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(resolveTournamentFromBracketMatch),
+  asyncHandler(async (req, res) => {
+    const data = await createRefereeToken("bracket", String(req.params.id_match), req.user!.id_user);
+    return res.json({ ok: true, data });
+  })
 );
 
 export default router;

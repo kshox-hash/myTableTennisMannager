@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { currentReferee, notifyRefereeAssigned } from "./referee";
 import { BracketsService } from "./brackets_service";
 import { BRACKETS_ERRORS } from "./dto/brackets_dto";
 import type { TournamentPhaseService } from "../tournament/phases/tournament_phase_service";
@@ -135,6 +136,7 @@ export class BracketsController {
   // PATCH /api/v1/bracket/matches/:id_match/referee
   setGroupMatchReferee = async (req: Request, res: Response) => {
     const matchId = req.params.id_match?.trim();
+    const before = await currentReferee("group", matchId);
     const result = await this.service.setGroupMatchReferee(matchId, req.body.referee_id ?? null);
 
     if (!result.ok) {
@@ -143,6 +145,10 @@ export class BracketsController {
       }
       return res.status(400).json({ ok: false, message: result.error });
     }
+
+    // Árbitro nuevo: se le avisa (puede anotar el marcador desde la app).
+    const after = req.body.referee_id ?? null;
+    if (after && after !== before) void notifyRefereeAssigned("group", matchId, after);
 
     return res.json({ ok: true, data: result.data });
   };
@@ -232,6 +238,7 @@ export class BracketsController {
   // PATCH /api/v1/bracket/bracket-matches/:id_match/referee
   setBracketMatchReferee = async (req: Request, res: Response) => {
     const matchId = req.params.id_match?.trim();
+    const before = await currentReferee("bracket", matchId);
     const result = await this.service.setBracketMatchReferee(matchId, req.body.referee_id ?? null);
 
     if (!result.ok) {
@@ -240,6 +247,10 @@ export class BracketsController {
       }
       return res.status(400).json({ ok: false, message: result.error });
     }
+
+    // Árbitro nuevo: se le avisa (puede anotar el marcador desde la app).
+    const after = req.body.referee_id ?? null;
+    if (after && after !== before) void notifyRefereeAssigned("bracket", matchId, after);
 
     return res.json({ ok: true, data: result.data });
   };
