@@ -14,6 +14,7 @@ export type NextMatch = {
   opponent_email:  string | null;
   // Foto del rival (null = sin foto: la app muestra su identicon).
   opponent_avatar_url: string | null;
+  opponent_club: string | null;
   table_number:    number | null;
   status:          string;
   group_name:      string | null;
@@ -88,6 +89,7 @@ export class PlayerRepository {
            ) AS opponent_name,
            opp.email AS opponent_email,
            opp.avatar_url AS opponent_avatar_url,
+           oppcl.name AS opponent_club,
            gm.table_number,
            gm.status,
            cg.group_name,
@@ -103,6 +105,7 @@ export class PlayerRepository {
            WHEN gm.player1_id = $1 THEN gm.player2_id
            ELSE gm.player1_id
          END
+         LEFT JOIN clubs oppcl ON oppcl.id_club = opp.id_club
          WHERE (gm.player1_id = $1 OR gm.player2_id = $1)
            AND gm.winner_id IS NULL
            AND gm.player1_id IS NOT NULL AND gm.player2_id IS NOT NULL
@@ -121,6 +124,7 @@ export class PlayerRepository {
            ) AS opponent_name,
            opp.email AS opponent_email,
            opp.avatar_url AS opponent_avatar_url,
+           oppcl.name AS opponent_club,
            bm.table_number,
            bm.status,
            NULL::text AS group_name,
@@ -135,6 +139,7 @@ export class PlayerRepository {
            WHEN bm.player1_id = $1 THEN bm.player2_id
            ELSE bm.player1_id
          END
+         LEFT JOIN clubs oppcl ON oppcl.id_club = opp.id_club
          WHERE (bm.player1_id = $1 OR bm.player2_id = $1)
            AND bm.winner_id IS NULL
            AND bm.player1_id IS NOT NULL AND bm.player2_id IS NOT NULL
