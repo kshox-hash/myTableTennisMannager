@@ -26,6 +26,7 @@ import { errorMiddleware } from "./middlewares/error_middleware";
 import { startPhaseScheduler } from "./tournament/phases/phase_scheduler";
 import { startTableScheduleScheduler } from "./tournament/schedule/table_schedule_scheduler";
 import { startQueueNoticeScheduler } from "./tournament/schedule/queue_notice_scheduler";
+import { startTournamentReminderScheduler } from "./tournament/schedule/tournament_reminder_scheduler";
 
 const path    = "api";
 const version = "v1";
@@ -59,6 +60,7 @@ export default function registerRoutes(app: Express) {
   // (SchedulePanel → "Confirmar y guardar") que ya deban activarse en mesa
   startTableScheduleScheduler();
   startQueueNoticeScheduler();
+  startTournamentReminderScheduler();
 
   // Debe ir después de todas las rutas
   app.use(errorMiddleware);

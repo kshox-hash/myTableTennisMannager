@@ -6,6 +6,7 @@ import { sendPush } from "./push";
  * Mismo listado en la app (notification_popups.dart) y en la web
  * (NotificationPopups.tsx). */
 export const PUSH_TYPES: ReadonlySet<string> = new Set([
+  "tournament_reminder",
   "groups_started",
   "match_up_soon",
   "match_on_table",
@@ -51,7 +52,8 @@ export type NotificationType =
   | "groups_ending"
   | "player_unenrolled"
   | "referee_assigned"
-  | "tournament_finished";
+  | "tournament_finished"
+  | "tournament_reminder";
 
 export type NotificationRow = {
   id_notification: string;
