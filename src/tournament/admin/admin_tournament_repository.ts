@@ -527,7 +527,7 @@ export class AdminTournamentRepository {
         values.push(payload.description);
       }
       if (payload.contact_phone !== undefined) {
-        fields.push(`contact_phone = ${i++}`);
+        fields.push(`contact_phone = $${i++}`);
         values.push(payload.contact_phone?.trim() || null);
       }
       if (payload.address !== undefined) {
@@ -543,7 +543,7 @@ export class AdminTournamentRepository {
         values.push(payload.visibility);
       }
       if (payload.ranking_level !== undefined) {
-        fields.push(`ranking_level = ${i++}`);
+        fields.push(`ranking_level = $${i++}`);
         values.push(payload.ranking_level);
       }
       if (payload.is_ranked !== undefined) {
