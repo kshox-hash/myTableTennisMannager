@@ -9,6 +9,8 @@ import { requireRole } from "../../middlewares/require_role_middleware";
 import { validateBody } from "../../middlewares/validate_body_middleware";
 import { asyncHandler } from "../../middlewares/wrap_async_middleware";
 import { finishTournament } from "../admin/finish_tournament";
+import { saveTournamentSchedule } from "../admin/tournament_schedule";
+import { z } from "zod";
 import { requireTournamentOwnership } from "../../middlewares/require_tournament_ownership_middleware";
 
 import {
@@ -91,6 +93,34 @@ router.post(
     const r = await finishTournament(String(req.params.id_tournament), req.user!.id_user);
     if (!r.ok) return res.status(r.status).json({ ok: false, message: r.message });
     return res.json({ ok: true, data: { categories: r.categories, cancelled_matches: r.cancelledMatches } });
+  })
+);
+
+// DÍAS DEL CAMPEONATO: día y hora de cada categoría (+ horas por jornada).
+const scheduleSchema = z
+  .object({
+    day_hours: z.number().int().min(1).max(16).optional(),
+    categories: z
+      .array(
+        z.object({
+          id_category: z.string().uuid(),
+          play_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
+          start_time: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/).nullable(),
+        })
+      )
+      .max(100),
+  })
+  .strict();
+router.put(
+  "/admin/tournaments/:id_tournament/schedule",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(),
+  validateBody(scheduleSchema),
+  asyncHandler(async (req, res) => {
+    const r = await saveTournamentSchedule(String(req.params.id_tournament), req.body.day_hours, req.body.categories);
+    if (!r.ok) return res.status(r.status).json({ ok: false, message: r.message });
+    return res.json({ ok: true, data: { end_date: r.end_date } });
   })
 );
 

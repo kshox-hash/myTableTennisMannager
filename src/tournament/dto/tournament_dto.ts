@@ -57,6 +57,9 @@ export type TournamentCategoryDTO = {
   // "round_robin" = grupo único (todos contra todos; podio por tabla, sin llave).
   competition_format?: "groups_bracket" | "round_robin";
   qualifiers_per_group?: number;
+  // Día y hora de inicio de la categoría (campeonatos de varios días).
+  play_date?: string | null;
+  start_time?: string | null;
   // Orden sugerido para jugarse (menor = antes); mismo número en dos
   // categorías = pensadas para simultáneo. Solo alimenta el punto de
   // partida del panel de Programación, no bloquea nada por sí solo.
@@ -149,6 +152,9 @@ export interface ITournament {
 
   event_date: string;
   event_time: string | null;
+  // Último día del campeonato (null = un solo día) y horas por jornada.
+  end_date?: string | null;
+  day_hours?: number;
 
   categories: TournamentCategoryDTO[];
 }
@@ -174,6 +180,9 @@ export type AdminTournamentRow = {
 
   event_date: string | null;
   event_time: string | null;
+  // Último día del campeonato (null = un solo día) y horas por jornada.
+  end_date?: string | null;
+  day_hours?: number;
   created_at: string;
   status: "active" | "cancelled";
   /** Inscripciones activas de todo el torneo — solo lo llena findByCreator ("mis torneos"). */
@@ -214,6 +223,8 @@ export type PaginatedTournamentResult = {
 
 // Categories summary for admin tournament view
 export type AdminCategoryRow = {
+  play_date?: string | null;
+  start_time?: string | null;
   id_category: string;
   category_type: string;
   category_range: string;

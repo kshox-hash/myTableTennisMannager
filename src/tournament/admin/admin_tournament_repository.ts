@@ -37,6 +37,8 @@ type TournamentRow = {
   default_best_of_sets: number | string;
   event_date: string | Date | null;
   event_time: string | null;
+  end_date?: string | Date | null;
+  day_hours?: number | string | null;
   created_at?: string | Date | null;
   status?: "active" | "cancelled";
 };
@@ -53,6 +55,8 @@ type CategoryRow = {
   qualifiers_per_group: number | string;
   priority: number | string;
   competition_format?: "groups_bracket" | "round_robin";
+  play_date?: string | Date | null;
+  start_time?: string | null;
   created_at?: string | Date | null;
 };
 
@@ -73,6 +77,8 @@ type TournamentWithCategoryRow = {
   default_best_of_sets: number | string;
   event_date: string | Date | null;
   event_time: string | null;
+  end_date?: string | Date | null;
+  day_hours?: number | string | null;
   created_at?: string | Date | null;
 
   id_category: string | null;
@@ -87,6 +93,8 @@ type TournamentWithCategoryRow = {
   enrolled_count?: number | string | null;
   is_enrolled?: boolean | null;
   is_paid?: boolean | null;
+  play_date?: string | Date | null;
+  start_time?: string | null;
 };
 
 export class AdminTournamentRepository {
@@ -214,6 +222,8 @@ export class AdminTournamentRepository {
       qualifiers_per_group: Number(row.qualifiers_per_group ?? 2),
       priority: Number(row.priority ?? 1),
       competition_format: row.competition_format ?? "groups_bracket",
+      play_date: this.formatDate(row.play_date ?? null),
+      start_time: this.formatTime(row.start_time ?? null),
     };
   }
 
@@ -238,6 +248,8 @@ export class AdminTournamentRepository {
       default_best_of_sets: Number(tournamentRow.default_best_of_sets ?? 3),
       event_date: this.formatDate(tournamentRow.event_date),
       event_time: this.formatTime(tournamentRow.event_time),
+      end_date: this.formatDate(tournamentRow.end_date ?? null),
+      day_hours: Number(tournamentRow.day_hours ?? 9),
       categories: categoryRows.map((row) => this.mapCategoryRow(row)),
     };
   }
@@ -260,6 +272,8 @@ export class AdminTournamentRepository {
       default_best_of_sets: Number(row.default_best_of_sets ?? 3),
       event_date: this.formatDate(row.event_date),
       event_time: this.formatTime(row.event_time),
+      end_date: this.formatDate(row.end_date ?? null),
+      day_hours: Number(row.day_hours ?? 9),
       categories: [],
     };
   }
@@ -282,6 +296,8 @@ export class AdminTournamentRepository {
       default_best_of_sets: Number(row.default_best_of_sets ?? 3),
       event_date: row.event_date ? this.formatDate(row.event_date) : null,
       event_time: row.event_time ? this.formatTime(row.event_time) : null,
+      end_date: this.formatDate(row.end_date ?? null),
+      day_hours: Number(row.day_hours ?? 9),
       created_at: row.created_at ? row.created_at.toString() : "",
       status: row.status ?? "active",
     };
@@ -307,6 +323,8 @@ export class AdminTournamentRepository {
       enrolled_count: Number(row.enrolled_count),
       qualifiers_per_group: Number(row.qualifiers_per_group ?? 2),
       priority: Number(row.priority ?? 1),
+      play_date: this.formatDate((row.play_date as any) ?? null),
+      start_time: this.formatTime(row.start_time ?? null),
     };
   }
 
@@ -838,9 +856,9 @@ export class AdminTournamentRepository {
            t.id_tournament, t.tournament_name, t.description, t.created_by,
            t.allow_mixed, t.allow_olympic, t.address, t.contact_phone, t.region, t.visibility, t.is_ranked, t.ranking_level,
            t.num_tables, t.default_best_of_sets,
-           t.event_date, t.event_time, t.created_at,
+           t.event_date, t.event_time, t.end_date, t.day_hours, t.created_at,
            c.id_category, c.category_type, c.category_range, c.gender,
-           c.inscription_price, c.quotas, c.status, c.phase, c.priority,
+           c.inscription_price, c.quotas, c.status, c.phase, c.priority, c.play_date, c.start_time,
            (SELECT COUNT(*)::int FROM ${this.enrollmentsTable} e
             WHERE e.id_category = c.id_category AND e.status = 'active') AS enrolled_count,
            EXISTS (
@@ -892,6 +910,8 @@ export class AdminTournamentRepository {
             enrolled_count: Number(row.enrolled_count ?? 0),
             is_enrolled: Boolean(row.is_enrolled),
             is_paid: Boolean(row.is_paid),
+            play_date: this.formatDate(row.play_date ?? null),
+            start_time: this.formatTime(row.start_time ?? null),
           });
         }
       }
@@ -920,9 +940,9 @@ export class AdminTournamentRepository {
          t.id_tournament, t.tournament_name, t.description, t.created_by,
          t.allow_mixed, t.allow_olympic, t.address, t.contact_phone, t.region, t.visibility, t.is_ranked, t.ranking_level,
          t.num_tables, t.default_best_of_sets,
-         t.event_date, t.event_time, t.created_at,
+         t.event_date, t.event_time, t.end_date, t.day_hours, t.created_at,
          c.id_category, c.category_type, c.category_range, c.gender,
-         c.inscription_price, c.quotas, c.status, c.phase, c.priority,
+         c.inscription_price, c.quotas, c.status, c.phase, c.priority, c.play_date, c.start_time,
          (SELECT COUNT(*)::int FROM ${this.enrollmentsTable} e
           WHERE e.id_category = c.id_category AND e.status = 'active') AS enrolled_count,
          EXISTS (
@@ -1053,6 +1073,8 @@ export class AdminTournamentRepository {
           t.default_best_of_sets,
           t.event_date,
           t.event_time,
+          t.end_date,
+          t.day_hours,
           t.created_at,
           t.status,
           -- Total de inscritos del torneo: el perfil del admin lo mostraba
@@ -1185,6 +1207,8 @@ export class AdminTournamentRepository {
         c.qualifiers_per_group,
         c.priority,
         c.seeding_in_progress,
+        c.play_date,
+        c.start_time,
         COUNT(e.id_enrollment) FILTER (WHERE e.status = 'active')::int AS enrolled_count
       FROM ${this.tournamentCategoriesTable} c
       LEFT JOIN ${this.enrollmentsTable} e

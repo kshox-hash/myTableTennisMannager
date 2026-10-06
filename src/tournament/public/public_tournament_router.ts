@@ -52,7 +52,7 @@ function computeAge(birthDate: string | null): number | null {
 // mientras UNA sola categoría de varias ya había arrancado) — y si TODAS
 // llegaron a "finished" el torneo se da por terminado aunque la fecha sea
 // hoy o esté en el futuro.
-function displayStatus(status: string, eventDate: string | Date | null, categoryPhases: string[]): string {
+function displayStatus(status: string, eventDate: string | Date | null, categoryPhases: string[], endDate?: string | null): string {
   if (status === "cancelled") return "cancelled";
   if (categoryPhases.length > 0 && categoryPhases.every((p) => p === "finished")) return "finished";
   if (categoryPhases.some((p) => p !== "enrollment")) return "ongoing";
@@ -60,7 +60,8 @@ function displayStatus(status: string, eventDate: string | Date | null, category
   if (!date) return "upcoming";
   const today = new Date().toISOString().slice(0, 10);
   if (date > today) return "upcoming";
-  if (date === today) return "ongoing";
+  // En curso desde el primer día hasta el último (campeonatos de varios días).
+  if (date === today || (endDate && endDate >= today)) return "ongoing";
   return "finished";
 }
 
@@ -159,7 +160,8 @@ router.get(
         region: tournament.region,
         event_date: formatDate(tournament.event_date),
         event_time: tournament.event_time,
-        status: displayStatus(tournament.status, tournament.event_date, categories.map((c) => c.phase)),
+        end_date: tournament.end_date ?? null,
+        status: displayStatus(tournament.status, tournament.event_date, categories.map((c) => c.phase), tournament.end_date),
         organizer_club_name: tournament.organizer_club_name ?? tournament.organizer_user_name,
         organizer_id: tournament.organizer_id,
         organizer_avatar_url: tournament.organizer_avatar_url,
@@ -175,6 +177,8 @@ router.get(
           is_finished: c.is_finished,
           phase: c.phase,
           competition_format: c.competition_format,
+          play_date: c.play_date ?? null,
+          start_time: c.start_time ?? null,
         })),
       },
     });

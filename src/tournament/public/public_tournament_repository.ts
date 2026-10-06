@@ -44,6 +44,8 @@ export interface PublicTournamentRow {
 }
 
 export interface PublicCategoryRow {
+  play_date?: string | null;
+  start_time?: string | null;
   id_category: string;
   category_type: string;
   category_range: string;
@@ -64,6 +66,7 @@ export interface PublicCategoryRow {
 }
 
 export interface PublicTournamentDetailRow {
+  end_date?: string | null;
   id_tournament: string;
   tournament_name: string;
   description: string | null;
@@ -149,7 +152,7 @@ export class PublicTournamentRepository {
         ) THEN 'ongoing'
         WHEN t.event_date IS NULL THEN 'upcoming'
         WHEN t.event_date > CURRENT_DATE THEN 'upcoming'
-        WHEN t.event_date = CURRENT_DATE THEN 'ongoing'
+        WHEN COALESCE(t.end_date, t.event_date) >= CURRENT_DATE THEN 'ongoing'
         ELSE 'finished'
       END)`;
   }
@@ -267,7 +270,7 @@ export class PublicTournamentRepository {
   async getById(id_tournament: string): Promise<PublicTournamentDetailRow | null> {
     const res = await this.pool.query<PublicTournamentDetailRow>(
       `SELECT t.id_tournament, t.tournament_name, t.description, t.address, t.contact_phone, t.region,
-              t.event_date, t.event_time, t.status,
+              t.event_date, t.event_time, t.end_date::text AS end_date, t.status,
               -- Preferir el club "real" (el que el admin arma en Clubes, con
               -- escudo/fundación) por sobre el campo de texto suelto de su
               -- perfil (legacy_club, id_club) — antes solo se leía este
@@ -841,6 +844,7 @@ export class PublicTournamentRepository {
     const res = await this.pool.query<PublicCategoryRow>(
       `SELECT
          c.id_category, c.category_type, c.category_range, c.gender, c.status, c.phase, c.competition_format, c.quotas,
+         c.play_date::text AS play_date, to_char(c.start_time, 'HH24:MI') AS start_time,
          COUNT(e.id_enrollment) FILTER (WHERE e.status = 'active')::int AS enrolled_count,
          EXISTS(SELECT 1 FROM bracket_matches bm WHERE bm.id_category = c.id_category) AS has_bracket,
          EXISTS(
