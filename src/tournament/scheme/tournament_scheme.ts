@@ -54,6 +54,8 @@ export const createTournamentSchema = z.object({
   // Puntuable por defecto — apagarlo es la excepción (torneo de prueba,
   // amistoso, etc.), no la regla.
   is_ranked: z.boolean().optional(),
+  // Nivel para el puntaje ITTF del ranking (ver ranking/ittf_points.ts).
+  ranking_level: z.enum(["local", "regional", "nacional"]).optional(),
   num_tables: z.number().int().min(1).max(50).optional(),
   default_best_of_sets: z.union([z.literal(3), z.literal(5), z.literal(7)]).optional(),
   event_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isValidCalendarDate, { message: "Fecha inválida" }),
@@ -65,6 +67,7 @@ export const createTournamentSchema = z.object({
     .optional(),
 
   address: z.string().min(1).nullable().optional(),
+  contact_phone: z.string().max(20).nullable().optional(),
   region: z.string().min(1).nullable().optional(),
 
   categories: z
@@ -95,6 +98,8 @@ export const updateTournamentSchema = z.object({
   description: z.string().nullable().optional(),
   visibility: z.enum(["public", "private", "internal"]).optional(),
   is_ranked: z.boolean().optional(),
+  // Nivel para el puntaje ITTF del ranking (ver ranking/ittf_points.ts).
+  ranking_level: z.enum(["local", "regional", "nacional"]).optional(),
   num_tables: z.number().int().min(1).max(50).optional(),
   default_best_of_sets: z.union([z.literal(3), z.literal(5), z.literal(7)]).optional(),
   event_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isValidCalendarDate, { message: "Fecha inválida" }).optional(),
@@ -106,6 +111,7 @@ export const updateTournamentSchema = z.object({
     .optional(),
 
   address: z.string().min(1).nullable().optional(),
+  contact_phone: z.string().max(20).nullable().optional(),
   region: z.string().min(1).nullable().optional(),
 
   categories: z

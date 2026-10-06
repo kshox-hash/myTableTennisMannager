@@ -2,6 +2,8 @@ import { Router } from "express";
 import { asyncHandler } from "../../middlewares/wrap_async_middleware";
 import { PublicTournamentRepository } from "./public_tournament_repository";
 import { RankingRepository } from "../../ranking/ranking_repository";
+import { ittfPointsByCategorySql } from "../../ranking/ittf_points";
+import DB from "../../db/db_configuration";
 
 const router = Router();
 const repo = new PublicTournamentRepository();
@@ -360,6 +362,22 @@ router.get(
         })),
       },
     });
+  })
+);
+
+// Puntos de ranking (tabla ITTF por ronda alcanzada en la llave) que dio
+// este campeonato, por jugador y categoría. Solo categorías terminadas.
+const UUID_PTS = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+router.get(
+  "/public/tournaments/:id_tournament/points",
+  asyncHandler(async (req, res) => {
+    const { id_tournament } = req.params;
+    if (!UUID_PTS.test(id_tournament)) return res.json({ ok: true, data: [] });
+    const r = await DB.getPool().query(
+      `SELECT id_user, id_category, points FROM (${ittfPointsByCategorySql("t.id_tournament = $1", false)}) x WHERE points > 0`,
+      [id_tournament]
+    );
+    return res.json({ ok: true, data: r.rows });
   })
 );
 

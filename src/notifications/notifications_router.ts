@@ -2,7 +2,7 @@ import { pushSelfTest } from "./push";
 import { Router } from "express";
 import { asyncHandler } from "../middlewares/wrap_async_middleware";
 import { authRequired } from "../middlewares/auth_required_middleware";
-import { NotificationsRepository } from "./notifications_repository";
+import { NotificationsRepository, parseAudience } from "./notifications_repository";
 
 const router = Router();
 const repo = new NotificationsRepository();
@@ -13,8 +13,8 @@ router.get(
   authRequired,
   asyncHandler(async (req, res) => {
     const [items, unreadCount] = await Promise.all([
-      repo.listForUser(req.user!.id_user),
-      repo.countUnread(req.user!.id_user),
+      repo.listForUser(req.user!.id_user, 50, parseAudience(req.query.audience)),
+      repo.countUnread(req.user!.id_user, parseAudience(req.query.audience)),
     ]);
     return res.json({ ok: true, data: { items, unread_count: unreadCount } });
   })
@@ -60,7 +60,7 @@ router.get(
   "/unread-count",
   authRequired,
   asyncHandler(async (req, res) => {
-    const unreadCount = await repo.countUnread(req.user!.id_user);
+    const unreadCount = await repo.countUnread(req.user!.id_user, parseAudience(req.query.audience));
     return res.json({ ok: true, data: { unread_count: unreadCount } });
   })
 );
@@ -81,7 +81,7 @@ router.post(
   "/read-all",
   authRequired,
   asyncHandler(async (req, res) => {
-    await repo.markAllRead(req.user!.id_user);
+    await repo.markAllRead(req.user!.id_user, parseAudience(req.query.audience));
     return res.json({ ok: true });
   })
 );

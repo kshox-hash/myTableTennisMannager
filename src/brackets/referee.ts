@@ -149,11 +149,14 @@ export async function claimRefereeToken(rawToken: string, idUser: string): Promi
       `UPDATE ${table} SET referee_id = $1
         WHERE id_match = $2 AND status NOT IN ('played', 'walkover', 'bye')
           AND player1_id IS NOT NULL AND player2_id IS NOT NULL
+          AND player1_id <> $1 AND player2_id <> $1
         RETURNING id_match`,
       [idUser, t.id_match]
     );
     if ((upd.rowCount ?? 0) === 0) {
       await client.query("ROLLBACK");
+      const own = await client.query(`SELECT 1 FROM ${table} WHERE id_match = $1 AND $2 IN (player1_id, player2_id)`, [t.id_match, idUser]);
+      if ((own.rowCount ?? 0) > 0) return { ok: false, status: 409, message: "No puedes arbitrar tu propio partido." };
       return { ok: false, status: 409, message: "Este partido ya terminó o todavía no tiene a los dos jugadores." };
     }
     await client.query(`UPDATE referee_tokens SET used_at = NOW(), used_by = $1 WHERE token = $2`, [idUser, token]);

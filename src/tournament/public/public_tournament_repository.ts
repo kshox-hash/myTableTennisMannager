@@ -26,6 +26,7 @@ export interface PublicTournamentRow {
   tournament_name: string;
   description: string | null;
   address: string | null;
+  contact_phone: string | null;
   region: string | null;
   event_date: string | Date | null;
   event_time: string | null;
@@ -67,6 +68,7 @@ export interface PublicTournamentDetailRow {
   tournament_name: string;
   description: string | null;
   address: string | null;
+  contact_phone: string | null;
   region: string | null;
   event_date: string | Date | null;
   event_time: string | null;
@@ -236,7 +238,7 @@ export class PublicTournamentRepository {
     // por id_tournament, en vez de aportar al armado de la página entera.
     const rowsRes = await this.pool.query<PublicTournamentRow>(
       `SELECT
-         t.id_tournament, t.tournament_name, t.description, t.address, t.region,
+         t.id_tournament, t.tournament_name, t.description, t.address, t.contact_phone, t.region,
          t.event_date, t.event_time, t.status,
          t.created_by AS organizer_id,
          ${organizerAvatarSql("ou")} AS organizer_avatar_url,
@@ -264,7 +266,7 @@ export class PublicTournamentRepository {
 
   async getById(id_tournament: string): Promise<PublicTournamentDetailRow | null> {
     const res = await this.pool.query<PublicTournamentDetailRow>(
-      `SELECT t.id_tournament, t.tournament_name, t.description, t.address, t.region,
+      `SELECT t.id_tournament, t.tournament_name, t.description, t.address, t.contact_phone, t.region,
               t.event_date, t.event_time, t.status,
               -- Preferir el club "real" (el que el admin arma en Clubes, con
               -- escudo/fundación) por sobre el campo de texto suelto de su
@@ -377,7 +379,7 @@ export class PublicTournamentRepository {
     const statusCase = this.statusCaseSql();
     const res = await this.pool.query<PublicTournamentRow>(
       `SELECT
-         t.id_tournament, t.tournament_name, t.description, t.address, t.region,
+         t.id_tournament, t.tournament_name, t.description, t.address, t.contact_phone, t.region,
          t.event_date, t.event_time, t.status,
          t.created_by AS organizer_id,
          ${organizerAvatarSql("ou")} AS organizer_avatar_url,

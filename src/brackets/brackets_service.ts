@@ -314,8 +314,9 @@ export class BracketsService {
     matchId: string,
     refereeId: string | null
   ): Promise<Result<{ updated: true }, BracketsError>> {
-    const updated = await this.repo.setGroupMatchReferee(matchId, refereeId);
-    if (!updated) return fail(BRACKETS_ERRORS.MATCH_NOT_FOUND);
+    const r = await this.repo.setGroupMatchReferee(matchId, refereeId);
+    if (r === "not_found") return fail(BRACKETS_ERRORS.MATCH_NOT_FOUND);
+    if (r === "own_match") return fail(BRACKETS_ERRORS.OWN_MATCH_REFEREE);
     return ok({ updated: true });
   }
 
@@ -323,8 +324,9 @@ export class BracketsService {
     matchId: string,
     refereeId: string | null
   ): Promise<Result<{ updated: true }, BracketsError>> {
-    const updated = await this.repo.setBracketMatchReferee(matchId, refereeId);
-    if (!updated) return fail(BRACKETS_ERRORS.MATCH_NOT_FOUND);
+    const r = await this.repo.setBracketMatchReferee(matchId, refereeId);
+    if (r === "not_found") return fail(BRACKETS_ERRORS.MATCH_NOT_FOUND);
+    if (r === "own_match") return fail(BRACKETS_ERRORS.OWN_MATCH_REFEREE);
     return ok({ updated: true });
   }
 

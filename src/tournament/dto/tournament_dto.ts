@@ -79,6 +79,7 @@ export type TournamentCreateDTO = {
   allow_olympic: boolean;
 
   address?: string | null;
+  contact_phone?: string | null;
   region?: string | null;
 
   visibility?: TournamentVisibility;
@@ -86,6 +87,7 @@ export type TournamentCreateDTO = {
   // puntuable, y uno público puede no serlo (torneo de prueba, amistoso).
   // Puntuable por defecto (true) si no se manda.
   is_ranked?: boolean;
+  ranking_level?: "local" | "regional" | "nacional";
 
   // Cantidad real de mesas del recinto — antes solo se podía cargar desde
   // el panel de Mesas o (peor) se volvía a preguntar en el modal de
@@ -111,10 +113,12 @@ export type TournamentUpdateDTO = {
   description?: string | null;
 
   address?: string | null;
+  contact_phone?: string | null;
   region?: string | null;
 
   visibility?: TournamentVisibility;
   is_ranked?: boolean;
+  ranking_level?: "local" | "regional" | "nacional";
   num_tables?: number;
   default_best_of_sets?: number;
 
@@ -135,9 +139,11 @@ export interface ITournament {
   allow_olympic: boolean;
 
   address: string | null;
+  contact_phone: string | null;
   region: string | null;
   visibility: TournamentVisibility;
   is_ranked: boolean;
+  ranking_level: "local" | "regional" | "nacional";
   num_tables: number;
   default_best_of_sets: number;
 
@@ -158,9 +164,11 @@ export type AdminTournamentRow = {
   allow_olympic: boolean;
 
   address: string | null;
+  contact_phone: string | null;
   region: string | null;
   visibility: TournamentVisibility;
   is_ranked: boolean;
+  ranking_level: "local" | "regional" | "nacional";
   num_tables: number;
   default_best_of_sets: number;
 

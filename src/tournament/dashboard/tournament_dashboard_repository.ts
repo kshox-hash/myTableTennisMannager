@@ -1,6 +1,6 @@
 import type { Pool } from "pg";
 import DB from "../../db/db_configuration";
-import { RANKING_POINTS_PER_WIN } from "../../ranking/ranking_repository";
+import { ittfPointsByTournamentSql } from "../../ranking/ittf_points";
 
 export type CategoryDashboard = {
   id_category:            string;
@@ -148,8 +148,10 @@ export class TournamentDashboardRepository {
       name: string;
       matches_played: string;
       matches_won: string;
+      points: number;
     }>(
-      `WITH tm AS (
+      `WITH pts AS (${ittfPointsByTournamentSql("t.id_tournament = $1", false)}),
+       tm AS (
          SELECT gm.player1_id AS p1, gm.player2_id AS p2, gm.winner_id
          FROM group_matches gm
          JOIN category_groups cg ON cg.id_group = gm.id_group
@@ -168,11 +170,12 @@ export class TournamentDashboardRepository {
          p.id_user,
          COALESCE(NULLIF(TRIM(u.last_name || ' ' || u.first_name), ''), u.email) AS name,
          (SELECT COUNT(*) FROM tm WHERE tm.p1 = p.id_user OR tm.p2 = p.id_user) AS matches_played,
-         (SELECT COUNT(*) FROM tm WHERE tm.winner_id = p.id_user) AS matches_won
+         (SELECT COUNT(*) FROM tm WHERE tm.winner_id = p.id_user) AS matches_won,
+         COALESCE((SELECT pts.points FROM pts WHERE pts.id_user = p.id_user), 0) AS points
        FROM players p
        JOIN users u ON u.id_user = p.id_user
        WHERE u.is_team = false
-       ORDER BY matches_won DESC, matches_played DESC, name ASC`,
+       ORDER BY points DESC, matches_won DESC, matches_played DESC, name ASC`,
       [id_tournament]
     );
 
@@ -183,7 +186,7 @@ export class TournamentDashboardRepository {
         name: r.name,
         matches_played: Number(r.matches_played),
         matches_won: matchesWon,
-        points: isRanked ? matchesWon * RANKING_POINTS_PER_WIN : 0,
+        points: isRanked ? Number(r.points) : 0,
       };
     });
 

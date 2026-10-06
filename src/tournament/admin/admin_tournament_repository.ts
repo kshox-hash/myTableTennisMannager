@@ -28,9 +28,11 @@ type TournamentRow = {
   allow_mixed: boolean;
   allow_olympic: boolean;
   address: string | null;
+  contact_phone: string | null;
   region: string | null;
   visibility: TournamentVisibility;
   is_ranked: boolean;
+  ranking_level: "local" | "regional" | "nacional";
   num_tables: number | string;
   default_best_of_sets: number | string;
   event_date: string | Date | null;
@@ -62,9 +64,11 @@ type TournamentWithCategoryRow = {
   allow_mixed: boolean;
   allow_olympic: boolean;
   address: string | null;
+  contact_phone: string | null;
   region: string | null;
   visibility: TournamentVisibility;
   is_ranked: boolean;
+  ranking_level: "local" | "regional" | "nacional";
   num_tables: number | string;
   default_best_of_sets: number | string;
   event_date: string | Date | null;
@@ -225,9 +229,11 @@ export class AdminTournamentRepository {
       allow_mixed: tournamentRow.allow_mixed,
       allow_olympic: tournamentRow.allow_olympic,
       address: tournamentRow.address ?? null,
+      contact_phone: tournamentRow.contact_phone ?? null,
       region: tournamentRow.region ?? null,
       visibility: tournamentRow.visibility ?? "public",
       is_ranked: tournamentRow.is_ranked ?? true,
+      ranking_level: tournamentRow.ranking_level ?? "local",
       num_tables: Number(tournamentRow.num_tables ?? 4),
       default_best_of_sets: Number(tournamentRow.default_best_of_sets ?? 3),
       event_date: this.formatDate(tournamentRow.event_date),
@@ -245,9 +251,11 @@ export class AdminTournamentRepository {
       allow_mixed: row.allow_mixed,
       allow_olympic: row.allow_olympic,
       address: row.address ?? null,
+      contact_phone: row.contact_phone ?? null,
       region: row.region ?? null,
       visibility: row.visibility ?? "public",
       is_ranked: row.is_ranked ?? true,
+      ranking_level: row.ranking_level ?? "local",
       num_tables: Number(row.num_tables ?? 4),
       default_best_of_sets: Number(row.default_best_of_sets ?? 3),
       event_date: this.formatDate(row.event_date),
@@ -265,9 +273,11 @@ export class AdminTournamentRepository {
       allow_mixed: row.allow_mixed,
       allow_olympic: row.allow_olympic,
       address: row.address ?? null,
+      contact_phone: row.contact_phone ?? null,
       region: row.region ?? null,
       visibility: row.visibility ?? "public",
       is_ranked: row.is_ranked ?? true,
+      ranking_level: row.ranking_level ?? "local",
       num_tables: Number(row.num_tables ?? 4),
       default_best_of_sets: Number(row.default_best_of_sets ?? 3),
       event_date: row.event_date ? this.formatDate(row.event_date) : null,
@@ -336,10 +346,12 @@ export class AdminTournamentRepository {
           visibility,
           is_ranked,
           num_tables,
-          default_best_of_sets
+          default_best_of_sets,
+          contact_phone,
+          ranking_level
         )
       VALUES
-        ($1, $2, $3, $4, $5, $6::date, $7::time, $8, $9, $10, $11, $12, $13)
+        ($1, $2, $3, $4, $5, $6::date, $7::time, $8, $9, $10, $11, $12, $13, $14, $15)
       RETURNING *;
     `;
 
@@ -357,6 +369,8 @@ export class AdminTournamentRepository {
       payload.is_ranked ?? true,
       payload.num_tables ?? 4,
       payload.default_best_of_sets ?? 3,
+      payload.contact_phone?.trim() || null,
+      payload.ranking_level ?? "local",
     ];
 
     const res: QueryResult<TournamentRow> = await client.query(query, values);
@@ -494,6 +508,10 @@ export class AdminTournamentRepository {
         fields.push(`description = $${i++}`);
         values.push(payload.description);
       }
+      if (payload.contact_phone !== undefined) {
+        fields.push(`contact_phone = ${i++}`);
+        values.push(payload.contact_phone?.trim() || null);
+      }
       if (payload.address !== undefined) {
         fields.push(`address = $${i++}`);
         values.push(payload.address);
@@ -505,6 +523,10 @@ export class AdminTournamentRepository {
       if (payload.visibility !== undefined) {
         fields.push(`visibility = $${i++}`);
         values.push(payload.visibility);
+      }
+      if (payload.ranking_level !== undefined) {
+        fields.push(`ranking_level = ${i++}`);
+        values.push(payload.ranking_level);
       }
       if (payload.is_ranked !== undefined) {
         fields.push(`is_ranked = $${i++}`);
@@ -814,7 +836,7 @@ export class AdminTournamentRepository {
       const dataRes = await this.pool.query<TournamentWithCategoryRow>(
         `SELECT
            t.id_tournament, t.tournament_name, t.description, t.created_by,
-           t.allow_mixed, t.allow_olympic, t.address, t.region, t.visibility, t.is_ranked,
+           t.allow_mixed, t.allow_olympic, t.address, t.contact_phone, t.region, t.visibility, t.is_ranked, t.ranking_level,
            t.num_tables, t.default_best_of_sets,
            t.event_date, t.event_time, t.created_at,
            c.id_category, c.category_type, c.category_range, c.gender,
@@ -896,7 +918,7 @@ export class AdminTournamentRepository {
     const dataRes = await this.pool.query<TournamentWithCategoryRow>(
       `SELECT
          t.id_tournament, t.tournament_name, t.description, t.created_by,
-         t.allow_mixed, t.allow_olympic, t.address, t.region, t.visibility, t.is_ranked,
+         t.allow_mixed, t.allow_olympic, t.address, t.contact_phone, t.region, t.visibility, t.is_ranked, t.ranking_level,
          t.num_tables, t.default_best_of_sets,
          t.event_date, t.event_time, t.created_at,
          c.id_category, c.category_type, c.category_range, c.gender,
@@ -1026,6 +1048,7 @@ export class AdminTournamentRepository {
           t.region,
           t.visibility,
           t.is_ranked,
+          t.ranking_level,
           t.num_tables,
           t.default_best_of_sets,
           t.event_date,

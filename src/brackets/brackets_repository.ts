@@ -5,7 +5,7 @@ import { nextManualGroupName } from "../group_generation_logic";
 import type { GeneratedBracketResult } from "../bracket_generation_logic";
 import { NotificationsRepository } from "../notifications/notifications_repository";
 import { ActivityLogRepository } from "../activity/activity_log_repository";
-import { RANKING_POINTS_PER_WIN, RANKED_PLAYERS_CTE, GLOBAL_RANKING_ENABLED } from "../ranking/ranking_repository";
+import { RANKING_POINTS_PER_WIN, RANKED_PLAYERS_CTE, LEGACY_WIN_POINTS_ENABLED } from "../ranking/ranking_repository";
 import type {
   GroupRow,
   GroupMemberRow,
@@ -433,7 +433,7 @@ export class BracketsRepository {
 
   async reverseTournamentStats(client: PoolClient, tournamentId: string): Promise<void> {
     const isRanked = await this.isTournamentRanked(client, tournamentId);
-    const pointsToRevert = GLOBAL_RANKING_ENABLED && isRanked ? RANKING_POINTS_PER_WIN : 0;
+    const pointsToRevert = LEGACY_WIN_POINTS_ENABLED && isRanked ? RANKING_POINTS_PER_WIN : 0;
 
     const groupRes = await client.query<{
       winner_id: string; player1_id: string; player2_id: string; sets_player1: number; sets_player2: number;
@@ -514,7 +514,7 @@ export class BracketsRepository {
 
     await this.withTransaction(async (client) => {
       const isRanked = await this.isTournamentRanked(client, tournamentId);
-      const pointsAwarded = GLOBAL_RANKING_ENABLED && isRanked ? RANKING_POINTS_PER_WIN : 0;
+      const pointsAwarded = LEGACY_WIN_POINTS_ENABLED && isRanked ? RANKING_POINTS_PER_WIN : 0;
 
       // Resultado del partido
       await client.query(
@@ -643,7 +643,7 @@ export class BracketsRepository {
       // (o el ranking general está desactivado) no se le restan puntos a
       // nadie (nunca se le sumaron).
       const isRanked = await this.isTournamentRanked(client, tournamentId);
-      const pointsToRevert = GLOBAL_RANKING_ENABLED && isRanked ? RANKING_POINTS_PER_WIN : 0;
+      const pointsToRevert = LEGACY_WIN_POINTS_ENABLED && isRanked ? RANKING_POINTS_PER_WIN : 0;
 
       await client.query(
         `UPDATE group_matches
@@ -761,7 +761,7 @@ export class BracketsRepository {
 
     return this.withTransaction(async (client) => {
       const isRanked = await this.isTournamentRanked(client, tournamentId);
-      const pointsToRevert = GLOBAL_RANKING_ENABLED && isRanked ? RANKING_POINTS_PER_WIN : 0;
+      const pointsToRevert = LEGACY_WIN_POINTS_ENABLED && isRanked ? RANKING_POINTS_PER_WIN : 0;
 
       const startRes = await client.query<{
         next_round: number | null; next_match_number: number | null; next_match_slot: 1 | 2 | null;
@@ -1193,7 +1193,7 @@ export class BracketsRepository {
 
     await this.withTransaction(async (client) => {
       const isRanked = await this.isTournamentRanked(client, tournamentId);
-      const pointsAwarded = GLOBAL_RANKING_ENABLED && isRanked ? RANKING_POINTS_PER_WIN : 0;
+      const pointsAwarded = LEGACY_WIN_POINTS_ENABLED && isRanked ? RANKING_POINTS_PER_WIN : 0;
 
       // Resultado del partido de llave
       await client.query(
@@ -1931,19 +1931,29 @@ export class BracketsRepository {
 
   // Árbitro sugerido/anotado para un partido puntual — no es un rol oficial,
   // así que no valida nada (puede ser cualquier inscrito, o limpiarse con null).
-  async setGroupMatchReferee(matchId: string, refereeId: string | null): Promise<boolean> {
-    const res = await this.pool.query(
-      `UPDATE group_matches SET referee_id = $1 WHERE id_match = $2`,
-      [refereeId, matchId]
+  async setGroupMatchReferee(matchId: string, refereeId: string | null): Promise<"ok" | "not_found" | "own_match"> {
+    const cur = await this.pool.query<{ player1_id: string | null; player2_id: string | null }>(
+      `SELECT player1_id, player2_id FROM group_matches WHERE id_match = $1`,
+      [matchId]
     );
-    return (res.rowCount ?? 0) > 0;
+    const m = cur.rows[0];
+    if (!m) return "not_found";
+    // Nadie arbitra su propio partido.
+    if (refereeId && (refereeId === m.player1_id || refereeId === m.player2_id)) return "own_match";
+    await this.pool.query(`UPDATE group_matches SET referee_id = $1 WHERE id_match = $2`, [refereeId, matchId]);
+    return "ok";
   }
 
-  async setBracketMatchReferee(matchId: string, refereeId: string | null): Promise<boolean> {
-    const res = await this.pool.query(
-      `UPDATE bracket_matches SET referee_id = $1 WHERE id_match = $2`,
-      [refereeId, matchId]
+  async setBracketMatchReferee(matchId: string, refereeId: string | null): Promise<"ok" | "not_found" | "own_match"> {
+    const cur = await this.pool.query<{ player1_id: string | null; player2_id: string | null }>(
+      `SELECT player1_id, player2_id FROM bracket_matches WHERE id_match = $1`,
+      [matchId]
     );
-    return (res.rowCount ?? 0) > 0;
+    const m = cur.rows[0];
+    if (!m) return "not_found";
+    // Nadie arbitra su propio partido.
+    if (refereeId && (refereeId === m.player1_id || refereeId === m.player2_id)) return "own_match";
+    await this.pool.query(`UPDATE bracket_matches SET referee_id = $1 WHERE id_match = $2`, [refereeId, matchId]);
+    return "ok";
   }
 }

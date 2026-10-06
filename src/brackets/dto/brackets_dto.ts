@@ -53,6 +53,8 @@ export const BRACKETS_ERRORS = {
   // walkover) — esa consecuencia ya se consumió, hay que deshacer primero
   // el/los resultado(s) de más adelante en el cuadro.
   BRACKET_RESULT_ALREADY_ADVANCED: "BRACKET_RESULT_ALREADY_ADVANCED",
+  // Se intentó poner de árbitro a uno de los dos jugadores del partido.
+  OWN_MATCH_REFEREE: "OWN_MATCH_REFEREE",
 } as const;
 
 export type BracketsError = (typeof BRACKETS_ERRORS)[keyof typeof BRACKETS_ERRORS];

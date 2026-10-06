@@ -1,45 +1,32 @@
 import type { Pool } from "pg";
 import DB from "../db/db_configuration";
 
-// Puntaje simple para arrancar: puntos fijos por victoria (walkover incluido,
-// mismo criterio que ya usa player_stats.matches_won). Nada de rating
-// dinámico (Elo) todavía.
+import { ittfTotalsSql } from "./ittf_points";
+
+// Puntaje viejo (3 por victoria, acumulado en player_stats.ranking_points).
+// Ya no se usa: el ranking se calcula con la tabla ITTF por ronda alcanzada
+// en la llave (ittf_points.ts). Queda apagado para que BracketsRepository
+// no siga sumando a esa columna.
 export const RANKING_POINTS_PER_WIN = 3;
+export const LEGACY_WIN_POINTS_ENABLED = false;
 
-// Ranking general/nacional (toda la plataforma) — DESACTIVADO a pedido
-// explícito del usuario: la pantalla que lo mostraba (RankingPage/
-// PublicRankingPage) ya estaba escondida del menú, y no tiene sentido
-// seguir sumando puntos a una tabla que nadie puede ver. Este interruptor
-// es la única fuente de verdad: en falso, BracketsRepository deja de
-// acreditar ranking_points en cada victoria (ver pointsAwarded en
-// recordMatchResult/recordBracketResult/undoGroupMatchResult) y
-// ranking_router.ts deja de servir datos en /, /me y /public.
-//
-// NO se borra nada — ni la columna player_stats.ranking_points, ni estas
-// consultas, ni las rutas: solo se corta el flujo acá. Reactivarlo es
-// cambiar esta única línea a `true`.
-//
-// El ranking PRIVADO por organizador (getOrganizerRanking, "Mi Ranking" y
-// la ficha pública de Comunidad) es un cálculo completamente aparte — no
-// lee player_stats, recalcula desde los partidos en el momento — así que
-// esto NO lo afecta para nada.
-export const GLOBAL_RANKING_ENABLED = false;
+// Ranking general (toda la plataforma): puntos ITTF de los últimos 12 meses.
+export const GLOBAL_RANKING_ENABLED = true;
 
-// La posición NO se guarda — se calcula acá, al leer. Recalcularla en cada
-// resultado de partido implicaría tocar a TODOS los jugadores de la
-// plataforma (a diferencia de la posición dentro de un grupo, que son 2-4
-// jugadores). Un mismo fragmento de SQL alimenta tanto la pantalla de
-// ranking (getGlobalRanking) como el armado de grupos
-// (BracketsRepository.loadPlayersForCategory), para no duplicar el criterio
-// de orden en dos lugares.
+// La posición NO se guarda — se calcula al leer. Un mismo fragmento de SQL
+// alimenta la pantalla de ranking (getGlobalRanking) y el sembrado de
+// grupos/llave (BracketsRepository.loadPlayersForCategory, SeedingRepository).
 export const RANKED_PLAYERS_CTE = `
   SELECT
-    id_user, ranking_points, matches_played, matches_won, matches_lost,
+    pts.id_user, pts.ranking_points,
+    COALESCE(ps.matches_played, 0) AS matches_played,
+    COALESCE(ps.matches_won, 0) AS matches_won,
+    COALESCE(ps.matches_lost, 0) AS matches_lost,
     ROW_NUMBER() OVER (
-      ORDER BY ranking_points DESC, (sets_won - sets_lost) DESC, matches_played ASC, id_user ASC
+      ORDER BY pts.ranking_points DESC, COALESCE(ps.matches_won, 0) DESC, pts.id_user ASC
     ) AS ranking_position
-  FROM player_stats
-  WHERE matches_played > 0
+  FROM (${ittfTotalsSql()}) pts
+  LEFT JOIN player_stats ps ON ps.id_user = pts.id_user
 `;
 
 export type RankingRow = {
@@ -54,6 +41,17 @@ export type RankingRow = {
   matches_played: number;
   matches_won: number;
 };
+
+// pg devuelve COUNT/ROW_NUMBER (bigint) como texto: se pasan a número.
+function numericRow(r: any): RankingRow {
+  return {
+    ...r,
+    ranking_points: Number(r.ranking_points),
+    ranking_position: Number(r.ranking_position),
+    matches_played: Number(r.matches_played),
+    matches_won: Number(r.matches_won),
+  };
+}
 
 export class RankingRepository {
   private pool: Pool;
@@ -76,7 +74,7 @@ export class RankingRepository {
       LIMIT $1;
     `;
     const res = await this.pool.query(q, [limit]);
-    return res.rows as RankingRow[];
+    return res.rows.map(numericRow);
   }
 
   // Un jugador puntual, para la tarjeta "Ranking nacional" del dashboard —
@@ -96,23 +94,18 @@ export class RankingRepository {
       WHERE rp.id_user = $1;
     `;
     const res = await this.pool.query(q, [idUser]);
-    return (res.rows[0] as RankingRow) ?? null;
+    return res.rows[0] ? numericRow(res.rows[0]) : null;
   }
 
-  // Ranking privado de UN administrador: no vive en player_stats (eso es el
-  // acumulado global de TODA la plataforma, sin distinguir quién organizó
-  // qué) — se recalcula al leer, igual que getPointsSummary de un torneo
-  // puntual (tournament_dashboard_repository.ts), pero uniendo TODOS los
-  // torneos de los que este admin es dueño (created_by). matches_played/won
-  // cuentan siempre (mismo criterio que player_stats en brackets_repository);
-  // ranking_points solo suma los partidos de torneos puntuables
-  // (is_ranked = true) — así un admin que arma un torneo amistoso no le
-  // infla los puntos a nadie en SU propio ranking tampoco.
+  // Ranking privado de UN administrador: mismos puntos ITTF que el general,
+  // pero solo de los campeonatos que él creó (created_by). matches_played/won
+  // cuentan todos sus partidos (también los de torneos no puntuables).
   async getOrganizerRanking(idAdmin: string, limit = 200): Promise<RankingRow[]> {
     const q = `
       WITH admin_tournaments AS (
         SELECT id_tournament, is_ranked FROM tournaments WHERE created_by = $1
       ),
+      pts AS (${ittfTotalsSql("t.created_by = $1")}),
       tm AS (
         SELECT gm.player1_id AS p1, gm.player2_id AS p2, gm.winner_id, at.is_ranked
         FROM group_matches gm
@@ -135,16 +128,16 @@ export class RankingRepository {
           p.id_user,
           (SELECT COUNT(*) FROM tm WHERE tm.p1 = p.id_user OR tm.p2 = p.id_user) AS matches_played,
           (SELECT COUNT(*) FROM tm WHERE tm.winner_id = p.id_user) AS matches_won,
-          (SELECT COUNT(*) FROM tm WHERE tm.winner_id = p.id_user AND tm.is_ranked) AS ranked_wins
+          COALESCE((SELECT pts.ranking_points FROM pts WHERE pts.id_user = p.id_user), 0) AS points
         FROM players p
       )
       SELECT
         a.id_user, u.first_name, u.last_name, u.email, u.avatar_url,
         cl.name AS club_name,
-        (a.ranked_wins * ${RANKING_POINTS_PER_WIN}) AS ranking_points,
+        a.points AS ranking_points,
         a.matches_played, a.matches_won,
         ROW_NUMBER() OVER (
-          ORDER BY (a.ranked_wins * ${RANKING_POINTS_PER_WIN}) DESC, a.matches_played ASC, u.last_name ASC NULLS LAST
+          ORDER BY a.points DESC, a.matches_won DESC, u.last_name ASC NULLS LAST
         ) AS ranking_position
       FROM agg a
       JOIN users u ON u.id_user = a.id_user

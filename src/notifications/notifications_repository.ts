@@ -5,6 +5,19 @@ import { sendPush } from "./push";
 /** Tipos que se avisan al celular (push) y como aviso emergente en la app/web.
  * Mismo listado en la app (notification_popups.dart) y en la web
  * (NotificationPopups.tsx). */
+// Avisos que son para el organizador / dueño de club (rol admin). Todo lo
+// demás es del rol jugador. Con ?audience= cada área ve solo lo suyo.
+export const ADMIN_TYPES = ["enrollment_created", "player_unenrolled", "club_join_request"];
+export type Audience = "admin" | "player" | null;
+export function parseAudience(v: unknown): Audience {
+  return v === "admin" || v === "player" ? v : null;
+}
+function audienceSql(audience: Audience, param: string): string {
+  if (audience === "admin") return ` AND n.type = ANY(${param}::text[])`;
+  if (audience === "player") return ` AND NOT (n.type = ANY(${param}::text[]))`;
+  return "";
+}
+
 export const PUSH_TYPES: ReadonlySet<string> = new Set([
   "tournament_reminder",
   "groups_started",
@@ -181,7 +194,7 @@ export class NotificationsRepository {
     await this.pool.query(`DELETE FROM device_tokens WHERE token = $1 AND id_user = $2`, [token, idUser]);
   }
 
-  async listForUser(idUser: string, limit = 50): Promise<NotificationRow[]> {
+  async listForUser(idUser: string, limit = 50, audience: Audience = null): Promise<NotificationRow[]> {
     const res = await this.pool.query<NotificationRow>(
       // Nombres de torneo y categoría para que la app pueda abrir la pantalla
       // correcta al tocar la notificación (antes solo la marcaba leída).
@@ -192,18 +205,18 @@ export class NotificationsRepository {
        FROM notifications n
        LEFT JOIN tournaments t ON t.id_tournament = n.id_tournament
        LEFT JOIN tournament_categories tc ON tc.id_category = n.id_category
-       WHERE n.id_user = $1
+       WHERE n.id_user = $1${audienceSql(audience, "$3")}
        ORDER BY n.created_at DESC
        LIMIT $2`,
-      [idUser, limit]
+      audience ? [idUser, limit, ADMIN_TYPES] : [idUser, limit]
     );
     return res.rows;
   }
 
-  async countUnread(idUser: string): Promise<number> {
+  async countUnread(idUser: string, audience: Audience = null): Promise<number> {
     const res = await this.pool.query<{ count: string }>(
-      `SELECT COUNT(*) FROM notifications WHERE id_user = $1 AND is_read = FALSE`,
-      [idUser]
+      `SELECT COUNT(*) FROM notifications n WHERE n.id_user = $1 AND n.is_read = FALSE${audienceSql(audience, "$2")}`,
+      audience ? [idUser, ADMIN_TYPES] : [idUser]
     );
     return Number(res.rows[0]?.count ?? 0);
   }
@@ -216,10 +229,10 @@ export class NotificationsRepository {
     return (res.rowCount ?? 0) > 0;
   }
 
-  async markAllRead(idUser: string): Promise<void> {
+  async markAllRead(idUser: string, audience: Audience = null): Promise<void> {
     await this.pool.query(
-      `UPDATE notifications SET is_read = TRUE WHERE id_user = $1 AND is_read = FALSE`,
-      [idUser]
+      `UPDATE notifications n SET is_read = TRUE WHERE n.id_user = $1 AND n.is_read = FALSE${audienceSql(audience, "$2")}`,
+      audience ? [idUser, ADMIN_TYPES] : [idUser]
     );
   }
 }
