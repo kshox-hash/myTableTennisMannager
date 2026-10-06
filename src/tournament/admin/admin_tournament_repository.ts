@@ -579,6 +579,24 @@ export class AdminTournamentRepository {
         await this.syncCategories(client, tournamentId, payload.categories);
       }
 
+      // Si cambió la fecha de inicio, los días ya asignados a las categorías
+      // (y la fecha de término) se corren lo mismo: si no, quedaban en las
+      // fechas viejas, incluso antes del nuevo inicio.
+      if (payload.event_date !== undefined && t.event_date && payload.event_date !== t.event_date) {
+        await client.query(
+          `UPDATE ${this.tournamentCategoriesTable}
+              SET play_date = play_date + ($1::date - $2::date)
+            WHERE id_tournament = $3 AND play_date IS NOT NULL`,
+          [payload.event_date, t.event_date, tournamentId]
+        );
+        await client.query(
+          `UPDATE ${this.tournamentsTable}
+              SET end_date = end_date + ($1::date - $2::date)
+            WHERE id_tournament = $3 AND end_date IS NOT NULL`,
+          [payload.event_date, t.event_date, tournamentId]
+        );
+      }
+
       const tournamentRes = await client.query<TournamentRow>(
         `SELECT * FROM ${this.tournamentsTable} WHERE id_tournament = $1`,
         [tournamentId]

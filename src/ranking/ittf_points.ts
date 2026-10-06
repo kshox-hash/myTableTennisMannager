@@ -1,6 +1,7 @@
 // Puntaje del ranking al estilo ITTF/WTT: los puntos se ganan por la ronda
 // que alcanzas en la LLAVE (la fase de grupos no da puntos, igual que en el
-// circuito mundial). El nivel del campeonato (tournaments.ranking_level)
+// circuito mundial; en grupo único cuenta el puesto final de la tabla). El
+// nivel del campeonato (tournaments.ranking_level)
 // elige la fila de la tabla oficial:
 //   local    → WTT Feeder
 //   regional → WTT Contender
@@ -72,6 +73,17 @@ export function ittfPointsByCategorySql(scope = "TRUE", windowed = true): string
                   ELSE (2 ^ (MAX(max_round) - MAX(round) + 1))::int END AS draw_size
       FROM appear
       GROUP BY id_tournament, id_category, id_user
+      UNION ALL
+      -- Grupo único (sin llave): la posición final en la tabla equivale a la
+      -- ronda alcanzada — 1° campeón, 2° final, 3°–4° semis, 5°–8° cuartos...
+      SELECT cg.id_tournament, cg.id_category, gs.id_user,
+             CASE WHEN gs.position = 1 THEN 1
+                  ELSE (2 ^ CEIL(LOG(2::numeric, gs.position::numeric)))::int END AS draw_size
+      FROM group_standings gs
+      JOIN category_groups cg ON cg.id_group = gs.id_group
+      JOIN tournament_categories rr ON rr.id_category = cg.id_category
+      WHERE rr.competition_format = 'round_robin' AND gs.position IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM bracket_matches b WHERE b.id_category = cg.id_category)
     ),
     per_category AS (
       SELECT r.id_user, r.id_tournament, r.id_category, ${pointsCase("t.ranking_level", "r.draw_size")} AS points
