@@ -27,6 +27,8 @@ export type GeneratedGroup = {
   sort_order: number;
   status: GroupStatus;
   group_kind: "normal" | "manual" | "playoff_two";
+  /** Clasificados de este grupo si no es el de la categoría (grupos divididos: 2). */
+  qualifiers_override?: number;
 };
 
 export type GeneratedGroupMember = {
@@ -88,6 +90,8 @@ type GenerateGroupsOptions = {
   bestOfGroups?: 3 | 5 | 7;
   /** Grupo único: todos los jugadores en un solo grupo (todos contra todos). */
   singleGroup?: boolean;
+  /** Índices (del plan base) de grupos de 4 a dividir en dos grupos de 2. */
+  splitFours?: number[];
 };
 
 /**
@@ -181,6 +185,37 @@ export function calculateGroupPlan(totalPlayers: number): Array<2 | 3 | 4> {
   }
   groups.push(2);
   return groups;
+}
+
+/**
+ * Plan de grupos con divisiones elegidas por el organizador: cada índice de
+ * `splitFours` (posición en el plan base) que sea un grupo de 4 se reemplaza
+ * por dos grupos de 2 — más rápido (2 partidos en vez de 6) y, en esos
+ * grupos, clasifican los dos (ver qualifiers_override).
+ * `source[i]` dice de qué grupo del plan base sale cada grupo final, y
+ * `split[i]` si viene de una división.
+ */
+export function buildGroupPlan(
+  totalPlayers: number,
+  splitFours: number[] = []
+): { plan: Array<2 | 3 | 4>; source: number[]; split: boolean[] } {
+  const base = calculateGroupPlan(totalPlayers);
+  const toSplit = new Set(splitFours);
+  const plan: Array<2 | 3 | 4> = [];
+  const source: number[] = [];
+  const split: boolean[] = [];
+  base.forEach((size, i) => {
+    if (size === 4 && toSplit.has(i)) {
+      plan.push(2, 2);
+      source.push(i, i);
+      split.push(true, true);
+    } else {
+      plan.push(size);
+      source.push(i);
+      split.push(false);
+    }
+  });
+  return { plan, source, split };
 }
 
 /**
@@ -453,18 +488,20 @@ export function generateGroupsFromPlayers(
   const sortedPlayers = sortPlayersForGrouping(rawPlayers);
   // Grupo único (competition_format = round_robin): todos en un grupo.
   // target_size no tiene tope en la base (solo >= 0).
-  const plan = options?.singleGroup
-    ? ([sortedPlayers.length] as Array<2 | 3 | 4>)
-    : calculateGroupPlan(sortedPlayers.length);
-  const buckets = assignPlayersToGroups(sortedPlayers, plan);
+  const built = options?.singleGroup
+    ? { plan: [sortedPlayers.length] as Array<2 | 3 | 4>, split: [false] }
+    : buildGroupPlan(sortedPlayers.length, options?.splitFours ?? []);
+  const buckets = assignPlayersToGroups(sortedPlayers, built.plan);
 
-  const groups: GeneratedGroup[] = buckets.map((group) => ({
+  const groups: GeneratedGroup[] = buckets.map((group, i) => ({
     temp_group_id: group.temp_group_id,
     group_name: group.group_name,
     target_size: group.target_size,
     sort_order: group.sort_order,
     status: group.status,
     group_kind: group.group_kind,
+    // Grupos de 2 que salen de dividir uno de 4: clasifican los dos.
+    ...(built.split[i] ? { qualifiers_override: 2 } : {}),
   }));
 
   const members: GeneratedGroupMember[] = buckets.flatMap((group) =>

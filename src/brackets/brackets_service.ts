@@ -1,4 +1,4 @@
-import { generateGroupsFromPlayers, buildManualGroups } from "../group_generation_logic";
+import { generateGroupsFromPlayers, buildManualGroups, buildGroupPlan } from "../group_generation_logic";
 import {
   drawBracketSlotsForGroups,
   buildBracketWithPreRound,
@@ -84,7 +84,8 @@ export class BracketsService {
   // correrlo (ver generateGroups más abajo).
   async previewGroups(
     tournamentId: string,
-    categoryId: string
+    categoryId: string,
+    splitFours: number[] = []
   ): Promise<Result<GroupsPreview, BracketsError>> {
     const alreadyExist = await this.repo.groupsExist(tournamentId, categoryId);
     if (alreadyExist) return fail(BRACKETS_ERRORS.GROUPS_ALREADY_EXIST);
@@ -93,7 +94,9 @@ export class BracketsService {
     if (players.length < 2) return fail(BRACKETS_ERRORS.NOT_ENOUGH_PLAYERS);
 
     const singleGroup = await this.repo.isRoundRobinCategory(categoryId);
-    const generated = generateGroupsFromPlayers(players, { bestOfGroups: 3, singleGroup });
+    const generated = generateGroupsFromPlayers(players, { bestOfGroups: 3, singleGroup, splitFours });
+    // De qué grupo base sale cada grupo (para "Dividir en 2 de 2" / "Unir").
+    const built = singleGroup ? null : buildGroupPlan(players.length, splitFours);
 
     const names = await this.repo.getUserNames(generated.members.map((m) => m.id_user));
     const nameFields = (idUser: string) => {
@@ -107,11 +110,13 @@ export class BracketsService {
     };
 
     return ok({
-      groups: generated.groups.map((g) => ({
+      groups: generated.groups.map((g, i) => ({
         group_name: g.group_name,
         sort_order: g.sort_order,
         target_size: g.target_size,
         group_kind: g.group_kind,
+        base_index: built ? built.source[i] : 0,
+        is_split: built ? built.split[i] : false,
         members: generated.members
           .filter((m) => m.temp_group_id === g.temp_group_id)
           .map((m) => ({
@@ -161,6 +166,7 @@ export class BracketsService {
     const generated = generateGroupsFromPlayers(players, {
       bestOfGroups: input.best_of_sets ?? 3,
       singleGroup: await this.repo.isRoundRobinCategory(categoryId),
+      splitFours: input.split_fours ?? [],
     });
 
     if (groupOrder) {

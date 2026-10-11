@@ -169,7 +169,7 @@ export class BracketsRepository {
          RETURNING id_group`,
         [
           tournamentId, categoryId, group.group_name, group.target_size,
-          group.sort_order, group.status, group.group_kind, qualifiersPerGroup,
+          group.sort_order, group.status, group.group_kind, group.qualifiers_override ?? qualifiersPerGroup,
         ]
       );
       groupIdMap.set(group.temp_group_id, res.rows[0].id_group);

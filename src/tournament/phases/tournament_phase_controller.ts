@@ -47,6 +47,12 @@ function parsePlayerIds(value: unknown): string[] | undefined {
   return parseGroupOrder(value);
 }
 
+// Índices de grupos de 4 a dividir en dos de 2 (body: [0, 2] · query: "0,2").
+function parseSplitFours(value: unknown): number[] {
+  const raw = Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : [];
+  return raw.map((v) => Number(v)).filter((n) => Number.isInteger(n) && n >= 0 && n < 64);
+}
+
 export class TournamentPhaseController {
   constructor(private service: TournamentPhaseService) {}
 
@@ -83,8 +89,9 @@ export class TournamentPhaseController {
     const bestOfSets = parseBestOfSets(req.body.best_of_sets, 5);
     const groupOrder = parseGroupOrder(req.body.group_order);
     const playerIds = parsePlayerIds(req.body.player_ids);
+    const splitFours = parseSplitFours(req.body.split_fours);
 
-    const result = await this.service.advanceToGroups(id_category, id_tournament, bestOfSets, groupOrder, playerIds);
+    const result = await this.service.advanceToGroups(id_category, id_tournament, bestOfSets, groupOrder, playerIds, splitFours);
 
     if (!result.ok) {
       if (result.error === PHASE_ERRORS.CATEGORY_NOT_FOUND)
@@ -107,7 +114,7 @@ export class TournamentPhaseController {
   previewGroups = async (req: Request, res: Response) => {
     const { id_tournament, id_category } = req.params;
 
-    const result = await this.service.previewGroups(id_category, id_tournament);
+    const result = await this.service.previewGroups(id_category, id_tournament, parseSplitFours(req.query.split_fours));
 
     if (!result.ok) {
       if (result.error === PHASE_ERRORS.CATEGORY_NOT_FOUND)

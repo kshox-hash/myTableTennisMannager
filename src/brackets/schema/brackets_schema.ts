@@ -3,6 +3,7 @@ import { z } from "zod";
 export const generateGroupsSchema = z
   .object({
     best_of_sets: z.union([z.literal(3), z.literal(5), z.literal(7)]).optional(),
+    split_fours: z.array(z.number().int().min(0)).max(64).optional(),
   })
   .strict();
 

@@ -37,7 +37,8 @@ export class TournamentPhaseService {
     id_tournament: string,
     bestOfSets: 3 | 5 | 7 = 3,
     groupOrder?: GroupOrderInput,
-    expectedPlayerIds?: string[]
+    expectedPlayerIds?: string[],
+    splitFours: number[] = []
   ) {
     const cat = await this.repo.getCategoryPhase(id_category);
     if (!cat) return { ok: false as const, error: PHASE_ERRORS.CATEGORY_NOT_FOUND };
@@ -46,7 +47,7 @@ export class TournamentPhaseService {
     const result = await this.bracketsService.generateGroups(
       id_tournament,
       id_category,
-      { best_of_sets: bestOfSets },
+      { best_of_sets: bestOfSets, split_fours: splitFours },
       groupOrder,
       expectedPlayerIds
     );
@@ -59,12 +60,12 @@ export class TournamentPhaseService {
   // Previsualiza la composición de los grupos (sin persistir) para la
   // pantalla de fixture donde el admin elige el orden de juego antes de
   // confirmar generar los grupos de verdad.
-  async previewGroups(id_category: string, id_tournament: string) {
+  async previewGroups(id_category: string, id_tournament: string, splitFours: number[] = []) {
     const cat = await this.repo.getCategoryPhase(id_category);
     if (!cat) return { ok: false as const, error: PHASE_ERRORS.CATEGORY_NOT_FOUND };
     if (cat.phase !== "enrollment") return { ok: false as const, error: PHASE_ERRORS.WRONG_PHASE };
 
-    return this.bracketsService.previewGroups(id_tournament, id_category);
+    return this.bracketsService.previewGroups(id_tournament, id_category, splitFours);
   }
 
   // Avanzar manualmente de groups → bracket (genera llaves)
