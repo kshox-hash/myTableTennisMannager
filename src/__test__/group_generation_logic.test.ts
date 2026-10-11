@@ -41,8 +41,9 @@ describe("calculateGroupPlan", () => {
     expect(calculateGroupPlan(10)).toEqual([3, 3, 4]);
   });
 
-  it("resto 2 -> los ÚLTIMOS DOS grupos pasan a 4", () => {
-    expect(calculateGroupPlan(11)).toEqual([3, 4, 4]);
+  it("resto 2 -> grupo de 2 aparte (prioridad a los grupos de 3)", () => {
+    expect(calculateGroupPlan(11)).toEqual([3, 3, 3, 2]);
+    expect(calculateGroupPlan(14)).toEqual([3, 3, 3, 3, 2]);
   });
 
   it("resto 2 con un solo grupo base (5 jugadores) -> grupo nuevo de 2, no hay 'últimos dos' para agrandar", () => {

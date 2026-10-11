@@ -142,12 +142,10 @@ function buildTempMatchId(groupIndex: number, matchIndex: number): string {
  * Regla base acordada (spec "Proyecto de Sistema de Torneos TDM", Punto 2):
  * - grupos idealmente de 3
  * - si sobra 1 => el ÚLTIMO grupo pasa a 4
- * - si sobran 2 => los ÚLTIMOS DOS grupos pasan a 4 cada uno
+ * - si sobran 2 => se arma un grupo de 2 aparte (prioridad a los grupos de 3:
+ *   con 14 jugadores, 3+3+3+3+2 y no 3+3+4+4 — pedido del organizador,
+ *   2026-10-11: menos partidos). En ese grupo de 2 clasifican los dos.
  * - si sobran 0 => todos de 3
- *
- * Excepción: con un solo grupo base (3 jugadores) y resto 2 (total 5), no
- * hay "últimos dos grupos" para agrandar — ahí se arma un segundo grupo de 2
- * en vez de estirar el único grupo a 5 (viola el máximo de 4 por grupo).
  *
  * Casos mínimos:
  * - 2 jugadores => [2]
@@ -177,12 +175,7 @@ export function calculateGroupPlan(totalPlayers: number): Array<2 | 3 | 4> {
     return groups;
   }
 
-  // remainder === 2
-  if (baseGroups >= 2) {
-    groups[groups.length - 1] = 4;
-    groups[groups.length - 2] = 4;
-    return groups;
-  }
+  // remainder === 2: un grupo de 2 aparte (prioridad a los grupos de 3).
   groups.push(2);
   return groups;
 }
@@ -500,8 +493,9 @@ export function generateGroupsFromPlayers(
     sort_order: group.sort_order,
     status: group.status,
     group_kind: group.group_kind,
-    // Grupos de 2 que salen de dividir uno de 4: clasifican los dos.
-    ...(built.split[i] ? { qualifiers_override: 2 } : {}),
+    // Grupos de 2 (los que salen de dividir uno de 4, o el que sobra al
+    // armar los grupos): un solo partido y clasifican los dos.
+    ...(built.split[i] || group.target_size === 2 ? { qualifiers_override: 2 } : {}),
   }));
 
   const members: GeneratedGroupMember[] = buckets.flatMap((group) =>
