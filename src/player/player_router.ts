@@ -3,6 +3,7 @@ import { asyncHandler } from "../middlewares/wrap_async_middleware";
 import { authRequired } from "../middlewares/auth_required_middleware";
 import { requireRole } from "../middlewares/require_role_middleware";
 import { PlayerRepository } from "./player_repository";
+import { dismissCelebration, getPendingCelebrations } from "./celebrations";
 
 const router = Router();
 const repo   = new PlayerRepository();
@@ -138,6 +139,30 @@ router.get(
   asyncHandler(async (req, res) => {
     const data = await repo.getPlayerAchievements(req.params.id_user);
     return res.json({ ok: true, data });
+  })
+);
+
+// GET /api/v1/player/me/celebrations — posiciones finales que el jugador
+// todavía no vio (ventana de celebración en web y app).
+router.get(
+  "/me/celebrations",
+  authRequired,
+  requireRole(["admin", "player"]),
+  asyncHandler(async (req, res) => {
+    const data = await getPendingCelebrations(req.user!.id_user);
+    return res.json({ ok: true, data });
+  })
+);
+
+// POST /api/v1/player/me/celebrations/:id_notification/dismiss — la cerró.
+router.post(
+  "/me/celebrations/:id_notification/dismiss",
+  authRequired,
+  requireRole(["admin", "player"]),
+  asyncHandler(async (req, res) => {
+    const ok = await dismissCelebration(req.user!.id_user, req.params.id_notification);
+    if (!ok) return res.status(404).json({ ok: false, message: "Celebración no encontrada" });
+    return res.json({ ok: true, data: null });
   })
 );
 
