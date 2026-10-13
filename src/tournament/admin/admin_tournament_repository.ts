@@ -406,10 +406,10 @@ export class AdminTournamentRepository {
     const placeholders: string[] = [];
 
     categories.forEach((cat, index) => {
-      const base = index * 11; // 11 columnas por categoría (ver INSERT)
+      const base = index * 13; // 13 columnas por categoría (ver INSERT)
 
       placeholders.push(
-        `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10}, $${base + 11})`
+        `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10}, $${base + 11}, $${base + 12}::date, $${base + 13}::time)`
       );
 
       values.push(
@@ -423,7 +423,10 @@ export class AdminTournamentRepository {
         cat.qualifiers_per_group ?? 2,
         cat.priority ?? 1,
         cat.format === "doubles" ? "doubles" : "singles",
-        cat.competition_format === "round_robin" ? "round_robin" : "groups_bracket"
+        cat.competition_format === "round_robin" ? "round_robin" : "groups_bracket",
+        // Día y hora elegidos al crear (campeonatos de varios días).
+        cat.play_date ?? null,
+        cat.start_time ?? null
       );
     });
 
@@ -440,7 +443,9 @@ export class AdminTournamentRepository {
           qualifiers_per_group,
           priority,
           format,
-          competition_format
+          competition_format,
+          play_date,
+          start_time
         )
       VALUES ${placeholders.join(",")}
       RETURNING *;
@@ -463,8 +468,9 @@ export class AdminTournamentRepository {
           tournamentRow.id_tournament,
           payload.categories
         );
+        const endDate = await this.recomputeEndDate(client, tournamentRow.id_tournament);
 
-        return this.mapTournamentRowToITournament(tournamentRow, categoryRows);
+        return this.mapTournamentRowToITournament({ ...tournamentRow, end_date: endDate }, categoryRows);
       });
     } catch (error: any) {
       if (error?.code === "23505") {
@@ -582,7 +588,10 @@ export class AdminTournamentRepository {
       // Si cambió la fecha de inicio, los días ya asignados a las categorías
       // (y la fecha de término) se corren lo mismo: si no, quedaban en las
       // fechas viejas, incluso antes del nuevo inicio.
-      if (payload.event_date !== undefined && t.event_date && payload.event_date !== t.event_date) {
+      // Si el formulario ya manda el día de cada categoría (calculado con la
+      // fecha nueva), no se corre nada: se usa lo que viene.
+      const daysInPayload = !!payload.categories?.some((c) => c.play_date !== undefined);
+      if (!daysInPayload && payload.event_date !== undefined && t.event_date && payload.event_date !== t.event_date) {
         await client.query(
           `UPDATE ${this.tournamentCategoriesTable}
               SET play_date = play_date + ($1::date - $2::date)
@@ -596,6 +605,8 @@ export class AdminTournamentRepository {
           [payload.event_date, t.event_date, tournamentId]
         );
       }
+
+      if (daysInPayload) await this.recomputeEndDate(client, tournamentId);
 
       const tournamentRes = await client.query<TournamentRow>(
         `SELECT * FROM ${this.tournamentsTable} WHERE id_tournament = $1`,
@@ -658,6 +669,22 @@ export class AdminTournamentRepository {
 
   // Categorías con inscritos activos son inmutables: se actualizan/insertan/eliminan
   // únicamente las que no tienen inscripciones.
+  // Término = último día con categorías, si es posterior al inicio (mismo
+  // criterio que tournament_schedule.ts).
+  private async recomputeEndDate(client: PoolClient, tournamentId: string): Promise<string | null> {
+    const res = await client.query<{ end_date: string | null }>(
+      `UPDATE ${this.tournamentsTable} t
+          SET end_date = (
+            SELECT CASE WHEN MAX(tc.play_date) > t.event_date THEN MAX(tc.play_date) END
+            FROM ${this.tournamentCategoriesTable} tc WHERE tc.id_tournament = t.id_tournament
+          )
+        WHERE t.id_tournament = $1
+        RETURNING end_date::text`,
+      [tournamentId]
+    );
+    return res.rows[0]?.end_date ?? null;
+  }
+
   private async syncCategories(
     client: PoolClient,
     tournamentId: string,
@@ -681,6 +708,14 @@ export class AdminTournamentRepository {
       const existing = cat.id_category ? existingById.get(cat.id_category) : undefined;
 
       if (existing) {
+        // El día y la hora se pueden mover aunque la categoría ya tenga
+        // inscritos (el resto de la categoría sí queda inmutable).
+        if (cat.play_date !== undefined || cat.start_time !== undefined) {
+          await client.query(
+            `UPDATE ${this.tournamentCategoriesTable} SET play_date = $1::date, start_time = $2::time WHERE id_category = $3`,
+            [cat.play_date ?? null, cat.start_time ?? null, cat.id_category]
+          );
+        }
         if (Number(existing.enrolled_count) > 0) continue; // categoría con inscritos: inmutable
 
         await client.query(
@@ -705,8 +740,8 @@ export class AdminTournamentRepository {
       } else {
         await client.query(
           `INSERT INTO ${this.tournamentCategoriesTable}
-             (id_tournament, category_type, category_range, gender, inscription_price, quotas, status, qualifiers_per_group, priority, format, competition_format)
-           VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, $8, $9, $10)`,
+             (id_tournament, category_type, category_range, gender, inscription_price, quotas, status, qualifiers_per_group, priority, format, competition_format, play_date, start_time)
+           VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, $8, $9, $10, $11::date, $12::time)`,
           [
             tournamentId,
             cat.category_type.trim(),
@@ -718,6 +753,8 @@ export class AdminTournamentRepository {
             cat.priority ?? 1,
             cat.format === "doubles" ? "doubles" : "singles",
             cat.competition_format === "round_robin" ? "round_robin" : "groups_bracket",
+            cat.play_date ?? null,
+            cat.start_time ?? null,
           ]
         );
       }

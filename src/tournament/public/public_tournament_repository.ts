@@ -30,6 +30,8 @@ export interface PublicTournamentRow {
   region: string | null;
   event_date: string | Date | null;
   event_time: string | null;
+  // Último día (campeonatos de varios días); null = un solo día.
+  end_date?: string | null;
   status: string;
   // Estado ya resuelto (upcoming/ongoing/finished/cancelled) — ver
   // statusCase más abajo. A diferencia de `status` (active/cancelled crudo
@@ -242,7 +244,7 @@ export class PublicTournamentRepository {
     const rowsRes = await this.pool.query<PublicTournamentRow>(
       `SELECT
          t.id_tournament, t.tournament_name, t.description, t.address, t.contact_phone, t.region,
-         t.event_date, t.event_time, t.status,
+         t.event_date, t.event_time, t.end_date::text AS end_date, t.status,
          t.created_by AS organizer_id,
          ${organizerAvatarSql("ou")} AS organizer_avatar_url,
          ${statusCase} AS computed_status,
@@ -383,7 +385,7 @@ export class PublicTournamentRepository {
     const res = await this.pool.query<PublicTournamentRow>(
       `SELECT
          t.id_tournament, t.tournament_name, t.description, t.address, t.contact_phone, t.region,
-         t.event_date, t.event_time, t.status,
+         t.event_date, t.event_time, t.end_date::text AS end_date, t.status,
          t.created_by AS organizer_id,
          ${organizerAvatarSql("ou")} AS organizer_avatar_url,
          ${statusCase} AS computed_status,

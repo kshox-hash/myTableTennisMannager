@@ -85,6 +85,9 @@ export const createTournamentSchema = z.object({
         status: z.string().optional(),
         qualifiers_per_group: z.number().int().min(1).max(4).optional(),
         priority: z.number().int().min(1).optional(),
+        // Día y hora de inicio (campeonatos de varios días).
+        play_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isValidCalendarDate, { message: "Fecha inválida" }).nullable().optional(),
+        start_time: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/).refine(isValidClockTime, { message: "Hora inválida" }).nullable().optional(),
       })
     )
     .optional()
@@ -127,6 +130,9 @@ export const updateTournamentSchema = z.object({
         quotas: z.number().int().positive().nullable(),
         qualifiers_per_group: z.number().int().min(1).max(4).optional(),
         priority: z.number().int().min(1).optional(),
+        // Día y hora de inicio (campeonatos de varios días).
+        play_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isValidCalendarDate, { message: "Fecha inválida" }).nullable().optional(),
+        start_time: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/).refine(isValidClockTime, { message: "Hora inválida" }).nullable().optional(),
       })
     )
     .optional()
