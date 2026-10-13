@@ -30,6 +30,8 @@ export type ClubMemberRow = {
   name: string;
   email: string;
   selected: boolean;
+  fee_mode: FeeMode;
+  fee_custom_amount: number | null;
 };
 
 export type ClubRequestRow = {
@@ -41,6 +43,12 @@ export type ClubRequestRow = {
 };
 
 export type FeeFrequency = "monthly" | "weekly";
+// "none" = sin fila en club_member_fees (sin cobro).
+export type FeeMode = "none" | "standard" | "custom" | "exempt" | "paused";
+export type PaymentMethod = "cash" | "transfer" | "other";
+// Estado de un socio en UN periodo. "unpaid" es neutro ("sin registrar"),
+// no deuda; "not_started" = se le cobra, pero desde un periodo posterior.
+export type DueStatus = "paid" | "unpaid" | "not_started" | "none" | "exempt" | "paused";
 
 export type ClubDetail = {
   id_club: string;
@@ -51,19 +59,41 @@ export type ClubDetail = {
   crest_image_url: string | null;
   monthly_fee: number | null;
   fee_frequency: FeeFrequency;
+  show_dues_to_members: boolean;
   created_at: string;
   created_by: string;
   members: ClubMemberRow[];
   pending_requests: ClubRequestRow[];
 };
 
+export type ClubPaymentRow = {
+  id_payment: string;
+  amount: number;
+  periods: number;
+  method: PaymentMethod | null;
+  note: string | null;
+  paid_on: string | null;
+};
+
 export type ClubDueRow = {
   id_user: string;
   name: string;
   email: string;
+  fee_mode: FeeMode;
   amount: number;
-  paid: boolean;
-  paid_at: string | null;
+  status: DueStatus;
+  payment: ClubPaymentRow | null;
+};
+
+export type MyPayments = {
+  club_name: string;
+  fee_frequency: FeeFrequency;
+  fee_mode: FeeMode;
+  fee_amount: number | null;
+  payments: Array<{
+    id_payment: string; amount: number; periods: number; first_period: string;
+    method: PaymentMethod | null; paid_on: string;
+  }>;
 };
 
 export type ClubDuesPeriod = {
@@ -95,6 +125,7 @@ export type ClubArrearsRow = {
   paidPeriods: number;
   owedPeriods: number;
   owedAmount: number;
+  firstUnpaid: string | null;
 };
 
 export type MyRequestRow = {
@@ -219,9 +250,9 @@ export class ClubsRepository {
     const head = await this.pool.query<{
       id_club: string; name: string; description: string | null; founded_date: string | null;
       header_image_url: string | null; crest_image_url: string | null; monthly_fee: string | null;
-      fee_frequency: FeeFrequency; created_at: string; created_by: string | null;
+      fee_frequency: FeeFrequency; show_dues_to_members: boolean; created_at: string; created_by: string | null;
     }>(
-      `SELECT id_club, name, description, founded_date::text, header_image_url, crest_image_url, monthly_fee, fee_frequency, created_at, created_by
+      `SELECT id_club, name, description, founded_date::text, header_image_url, crest_image_url, monthly_fee, fee_frequency, show_dues_to_members, created_at, created_by
        FROM clubs WHERE id_club = $1`,
       [idClub]
     );
@@ -229,11 +260,14 @@ export class ClubsRepository {
     const h = head.rows[0];
 
     const [membersRes, requestsRes] = await Promise.all([
-      this.pool.query<ClubMemberRow>(
+      this.pool.query<Omit<ClubMemberRow, "fee_custom_amount"> & { fee_custom_amount: string | null }>(
         `SELECT u.id_user, ${NAME_SQL} AS name, u.email,
-                (s.id_user IS NOT NULL) AS selected
+                (s.id_user IS NOT NULL) AS selected,
+                COALESCE(f.mode, 'none') AS fee_mode,
+                f.custom_amount AS fee_custom_amount
          FROM users u
          LEFT JOIN club_selected_players s ON s.id_club = u.id_club AND s.id_user = u.id_user
+         LEFT JOIN club_member_fees f ON f.id_club = u.id_club AND f.id_user = u.id_user
          WHERE u.id_club = $1
          ORDER BY name ASC`,
         [idClub]
@@ -252,16 +286,20 @@ export class ClubsRepository {
       header_image_url: h.header_image_url, crest_image_url: h.crest_image_url,
       monthly_fee: h.monthly_fee === null ? null : Number(h.monthly_fee),
       fee_frequency: h.fee_frequency,
+      show_dues_to_members: h.show_dues_to_members,
       created_at: h.created_at,
       created_by: h.created_by!,
-      members: membersRes.rows,
+      members: membersRes.rows.map((m) => ({
+        ...m,
+        fee_custom_amount: m.fee_custom_amount === null ? null : Number(m.fee_custom_amount),
+      })),
       pending_requests: requestsRes.rows,
     };
   }
 
   async update(idClub: string, patch: {
     name?: string; description?: string | null; founded_date?: string | null; monthly_fee?: number | null;
-    fee_frequency?: FeeFrequency;
+    fee_frequency?: FeeFrequency; show_dues_to_members?: boolean;
   }): Promise<void> {
     await this.pool.query(
       `UPDATE clubs SET
@@ -269,7 +307,8 @@ export class ClubsRepository {
          description   = CASE WHEN $3 THEN $4 ELSE description END,
          founded_date  = CASE WHEN $5 THEN $6 ELSE founded_date END,
          monthly_fee   = CASE WHEN $7 THEN $8 ELSE monthly_fee END,
-         fee_frequency = COALESCE($9, fee_frequency)
+         fee_frequency = COALESCE($9, fee_frequency),
+         show_dues_to_members = COALESCE($10, show_dues_to_members)
        WHERE id_club = $1`,
       [
         idClub,
@@ -278,6 +317,7 @@ export class ClubsRepository {
         patch.founded_date !== undefined, patch.founded_date ?? null,
         patch.monthly_fee !== undefined, patch.monthly_fee ?? null,
         patch.fee_frequency ?? null,
+        patch.show_dues_to_members ?? null,
       ]
     );
   }
@@ -385,16 +425,17 @@ export class ClubsRepository {
   }
 
   // ─────────────────────────────────────────────────────────
-  // Cuotas — una fila por (socio, periodo). Se calcula el monto por
-  // defecto desde clubs.monthly_fee salvo que el admin lo pise a mano
-  // (ej. una cuota rebajada puntual), por eso `amount` vive en la fila
-  // y no se recalcula desde clubs en cada lectura.
+  // Cuotas — flexibles por socio (ver migración 070).
+  //
+  // La cuota del club (clubs.monthly_fee) es solo el valor sugerido. Cada
+  // socio tiene su modalidad en club_member_fees: normal (la del club),
+  // especial (monto propio), exento o en pausa; sin fila = sin cobro. Solo
+  // normal/especial generan "por cobrar", y solo desde starts_on.
   //
   // El periodo NO se pide como fecha desde el frontend — se navega con un
   // `offset` entero (0 = periodo actual, -1 = el anterior, etc.) y acá se
   // calculan las fechas reales según clubs.fee_frequency (semana ISO o
-  // mes calendario). Así el frontend no necesita saber si el club cobra
-  // semanal o mensual, solo mostrar "Anterior"/"Siguiente".
+  // mes calendario).
   async getDues(idClub: string, offset: number): Promise<ClubDuesPeriod | null> {
     const club = await this.pool.query<{ fee_frequency: FeeFrequency }>(
       `SELECT fee_frequency FROM clubs WHERE id_club = $1`,
@@ -403,32 +444,27 @@ export class ClubsRepository {
     if (club.rowCount === 0) return null;
     const frequency = club.rows[0].fee_frequency;
 
-    // Esta consulta no necesita idClub (solo la frecuencia, ya la
-    // tenemos) — usar $1 acá y no $2 es a propósito: Postgres no puede
-    // inferir el tipo de un parámetro que nunca se referencia en el
-    // texto ("could not determine data type of parameter $1") si se
-    // salta un número, así que solo se pasa lo que realmente se usa.
+    // Solo se pasa $1 (Postgres no infiere el tipo de un parámetro que no
+    // aparece en el texto).
     const bounds = await this.pool.query<{ period_start: string; period_end: string }>(
       frequency === "weekly"
-        ? `SELECT (date_trunc('week', NOW()) + make_interval(weeks => $1::int))::date AS period_start,
-                  (date_trunc('week', NOW()) + make_interval(weeks => $1::int) + INTERVAL '6 days')::date AS period_end`
-        : `SELECT (date_trunc('month', NOW()) + make_interval(months => $1::int))::date AS period_start,
-                  (date_trunc('month', NOW()) + make_interval(months => $1::int) + INTERVAL '1 month' - INTERVAL '1 day')::date AS period_end`,
+        ? `SELECT (date_trunc('week', NOW()) + make_interval(weeks => $1::int))::date::text AS period_start,
+                  (date_trunc('week', NOW()) + make_interval(weeks => $1::int) + INTERVAL '6 days')::date::text AS period_end`
+        : `SELECT (date_trunc('month', NOW()) + make_interval(months => $1::int))::date::text AS period_start,
+                  (date_trunc('month', NOW()) + make_interval(months => $1::int) + INTERVAL '1 month' - INTERVAL '1 day')::date::text AS period_end`,
       [offset]
     );
     const { period_start, period_end } = bounds.rows[0];
 
-    // Alias distinto de "name" a propósito: clubs también tiene una columna
-    // "name" (el nombre del club) y con JOIN clubs de por medio, Postgres
-    // resuelve un ORDER BY/GROUP BY "name" ambiguo a favor de la columna de
-    // tabla, no del alias — el ORDER BY quedaba ordenando por el nombre del
-    // club (constante, un solo club) en vez del jugador, en silencio.
-    //
-    // member_start (mismo criterio que getArrears): un socio no aparece en
-    // un periodo anterior a que se uniera — antes esto no se filtraba acá,
-    // así que navegando a un mes previo a que alguien fuera socio igual
-    // aparecía "debiendo" ese mes, con el toggle de pagar funcionando.
-    const res = await this.pool.query<{ id_user: string; player_name: string; email: string; amount: string | null; paid: boolean | null; paid_at: string | null }>(
+    // Alias "player_name" y no "name": con JOIN clubs de por medio, un
+    // ORDER BY "name" se resolvía a la columna del club, no al jugador.
+    // member_start: un socio no aparece en periodos anteriores a unirse.
+    const res = await this.pool.query<{
+      id_user: string; player_name: string; email: string;
+      fee_mode: FeeMode; fee_amount: string | null; starts_on: string | null;
+      paid: boolean; id_payment: string | null; pay_amount: string | null; pay_periods: number | null;
+      pay_method: PaymentMethod | null; pay_note: string | null; paid_on: string | null;
+    }>(
       `WITH member_start AS (
          SELECT u.id_user,
                 COALESCE(
@@ -441,13 +477,20 @@ export class ClubsRepository {
          WHERE u.id_club = $1
        )
        SELECT u.id_user, ${NAME_SQL} AS player_name, u.email,
-              COALESCE(d.amount, c.monthly_fee) AS amount,
-              COALESCE(d.paid, FALSE) AS paid,
-              d.paid_at
+              COALESCE(f.mode, 'none') AS fee_mode,
+              CASE WHEN f.mode = 'custom' THEN f.custom_amount
+                   WHEN f.mode = 'standard' THEN c.monthly_fee
+                   ELSE NULL END AS fee_amount,
+              f.starts_on::text AS starts_on,
+              (d.paid IS TRUE) AS paid,
+              p.id_payment, p.amount AS pay_amount, p.periods AS pay_periods,
+              p.method AS pay_method, p.note AS pay_note, p.paid_on::text AS paid_on
        FROM users u
        JOIN clubs c ON c.id_club = u.id_club
        JOIN member_start ms ON ms.id_user = u.id_user
+       LEFT JOIN club_member_fees f ON f.id_club = u.id_club AND f.id_user = u.id_user
        LEFT JOIN club_dues d ON d.id_club = u.id_club AND d.id_user = u.id_user AND d.period_start = $2::date
+       LEFT JOIN club_payments p ON p.id_payment = d.id_payment
        WHERE u.id_club = $1 AND ms.start_at <= $3::date
        ORDER BY player_name ASC`,
       [idClub, period_start, period_end]
@@ -457,90 +500,189 @@ export class ClubsRepository {
       periodStart: period_start,
       periodEnd: period_end,
       frequency,
-      rows: res.rows.map((r) => ({
-        id_user: r.id_user, name: r.player_name, email: r.email,
-        amount: r.amount === null ? 0 : Number(r.amount),
-        paid: r.paid ?? false,
-        paid_at: r.paid_at,
-      })),
+      rows: res.rows.map((r) => {
+        const charging = r.fee_mode === "standard" || r.fee_mode === "custom";
+        // Se cobra este periodo si la modalidad cobra y ya había empezado
+        // (starts_on dentro o antes del periodo).
+        const charged = charging && r.starts_on !== null && r.starts_on <= period_end;
+        const status: DueStatus = r.paid
+          ? "paid"
+          : charged ? "unpaid"
+          : charging ? "not_started"
+          : (r.fee_mode as "none" | "exempt" | "paused");
+        return {
+          id_user: r.id_user, name: r.player_name, email: r.email,
+          fee_mode: r.fee_mode,
+          amount: r.fee_amount === null ? 0 : Number(r.fee_amount),
+          status,
+          payment: r.id_payment
+            ? {
+                id_payment: r.id_payment,
+                amount: Number(r.pay_amount ?? 0),
+                periods: Number(r.pay_periods ?? 1),
+                method: r.pay_method,
+                note: r.pay_note,
+                paid_on: r.paid_on,
+              }
+            : null,
+        };
+      }),
     };
   }
 
-  // Mismo criterio que getDues: no se puede marcar pagada/pendiente una
-  // cuota de un periodo anterior a que la persona fuera socia — antes esto
-  // no se validaba acá, así que aunque la UI ya no lo muestre, un llamado
-  // directo a la API todavía podía crear una cuota "de antes de existir".
-  async setDuePaid(
-    idClub: string, idUser: string, periodStart: string, paid: boolean, amount: number
-  ): Promise<{ ok: true } | { ok: false; error: "PERIOD_BEFORE_MEMBERSHIP" }> {
-    const startRes = await this.pool.query<{ allowed: boolean }>(
-      `SELECT $3::date >= COALESCE(
-         (SELECT MIN(r.decided_at) FROM club_join_requests r
-          WHERE r.id_club = $1 AND r.id_user = $2 AND r.status = 'approved'),
-         c.created_at
-       )::date AS allowed
-       FROM clubs c WHERE c.id_club = $1`,
-      [idClub, idUser, periodStart]
-    );
-    if (startRes.rows[0] && !startRes.rows[0].allowed) {
-      return { ok: false, error: "PERIOD_BEFORE_MEMBERSHIP" };
+  // Modalidad de cuota de un socio. "none" borra la fila (sin cobro).
+  // starts_on se reinicia al periodo actual cada vez que alguien PASA a
+  // cobrarse (desde sin cobro, exento o pausa) — lo anterior no cuenta;
+  // entre normal y especial se conserva.
+  async setMemberFee(idClub: string, idUser: string, mode: FeeMode, customAmount: number | null): Promise<void> {
+    if (mode === "none") {
+      await this.pool.query(`DELETE FROM club_member_fees WHERE id_club = $1 AND id_user = $2`, [idClub, idUser]);
+      return;
     }
-
     await this.pool.query(
-      `INSERT INTO club_dues (id_club, id_user, period_start, period_end, amount, paid, paid_at)
-       SELECT $1, $2, $3::date,
-              CASE WHEN c.fee_frequency = 'weekly'
-                THEN $3::date + INTERVAL '6 days'
-                ELSE ($3::date + INTERVAL '1 month' - INTERVAL '1 day')
-              END,
-              $4, $5, CASE WHEN $5 THEN NOW() ELSE NULL END
+      `INSERT INTO club_member_fees (id_club, id_user, mode, custom_amount, starts_on)
+       SELECT $1, $2, $3, $4,
+              CASE WHEN c.fee_frequency = 'weekly' THEN date_trunc('week', NOW())::date
+                   ELSE date_trunc('month', NOW())::date END
        FROM clubs c WHERE c.id_club = $1
-       ON CONFLICT (id_club, id_user, period_start)
-       DO UPDATE SET paid = $5, paid_at = CASE WHEN $5 THEN NOW() ELSE NULL END, amount = $4`,
-      [idClub, idUser, periodStart, amount, paid]
+       ON CONFLICT (id_club, id_user) DO UPDATE SET
+         mode = EXCLUDED.mode,
+         custom_amount = EXCLUDED.custom_amount,
+         updated_at = NOW(),
+         starts_on = CASE
+           WHEN club_member_fees.mode IN ('standard', 'custom') AND EXCLUDED.mode IN ('standard', 'custom')
+             THEN club_member_fees.starts_on
+           ELSE EXCLUDED.starts_on
+         END`,
+      [idClub, idUser, mode, mode === "custom" ? customAmount : null]
     );
-    return { ok: true };
   }
 
-  // Morosidad — a diferencia de getDues (una foto de UN periodo), esto
-  // mira todos los periodos desde que cada jugador entró al club (fecha
-  // de aprobación de su solicitud; si no hay registro, desde que se creó
-  // el club) hasta hoy, y cuenta cuántos quedaron sin pagar. El paso
-  // (semana o mes) sale de clubs.fee_frequency, con un tope hacia atrás
-  // distinto para cada uno (semanal genera muchos más periodos que
-  // mensual en el mismo lapso de tiempo, así que el tope es más corto en
-  // tiempo real para no generar una serie gigante en clubes muy viejos).
-  // Sin cuota configurada no hay nada que deber, así que el router no
-  // llama esto si clubs.monthly_fee es NULL.
+  // Registrar un pago: crea el pago, marca como pagados los `periods`
+  // periodos consecutivos desde firstPeriod (alineado a semana/mes) y,
+  // si se pide, suma el ingreso a la Caja. Todo en una transacción.
+  async registerPayment(idClub: string, input: {
+    idUser: string; amount: number; periods: number; firstPeriod: string;
+    method: PaymentMethod | null; note: string | null; addToCash: boolean; createdBy: string;
+  }): Promise<{ ok: true; id_payment: string } | { ok: false; error: "PERIOD_BEFORE_MEMBERSHIP" | "PERIOD_ALREADY_PAID" }> {
+    return this.withTx(async (c) => {
+      const clubRes = await c.query<{ fee_frequency: FeeFrequency; first: string; allowed: boolean }>(
+        `SELECT c.fee_frequency,
+                (CASE WHEN c.fee_frequency = 'weekly' THEN date_trunc('week', $3::date)
+                      ELSE date_trunc('month', $3::date) END)::date::text AS first,
+                (CASE WHEN c.fee_frequency = 'weekly' THEN date_trunc('week', $3::date)
+                      ELSE date_trunc('month', $3::date) END)::date
+                  >= (CASE WHEN c.fee_frequency = 'weekly' THEN date_trunc('week', ms.start_at)
+                           ELSE date_trunc('month', ms.start_at) END)::date AS allowed
+         FROM clubs c
+         CROSS JOIN LATERAL (
+           SELECT COALESCE(
+             (SELECT MIN(r.decided_at) FROM club_join_requests r
+              WHERE r.id_club = $1 AND r.id_user = $2 AND r.status = 'approved'),
+             c.created_at) AS start_at
+         ) ms
+         WHERE c.id_club = $1`,
+        [idClub, input.idUser, input.firstPeriod]
+      );
+      const club = clubRes.rows[0];
+      if (!club.allowed) return { ok: false as const, error: "PERIOD_BEFORE_MEMBERSHIP" as const };
+      const step = club.fee_frequency === "weekly" ? "1 week" : "1 month";
+
+      const taken = await c.query(
+        `SELECT 1 FROM club_dues
+         WHERE id_club = $1 AND id_user = $2 AND paid
+           AND period_start IN (SELECT gs::date FROM generate_series($3::date, $3::date + ($4::int - 1) * $5::interval, $5::interval) gs)
+         LIMIT 1`,
+        [idClub, input.idUser, club.first, input.periods, step]
+      );
+      if ((taken.rowCount ?? 0) > 0) return { ok: false as const, error: "PERIOD_ALREADY_PAID" as const };
+
+      let idMovement: string | null = null;
+      if (input.addToCash && input.amount > 0) {
+        const who = await c.query<{ name: string }>(`SELECT ${NAME_SQL} AS name FROM users WHERE id_user = $1`, [input.idUser]);
+        const unit = club.fee_frequency === "weekly"
+          ? (input.periods === 1 ? "semana" : "semanas")
+          : (input.periods === 1 ? "mes" : "meses");
+        const mv = await c.query<{ id_movement: string }>(
+          `INSERT INTO club_cash_movements (id_club, type, amount, description, created_by)
+           VALUES ($1, 'income', $2, $3, $4) RETURNING id_movement`,
+          [idClub, input.amount, `Cuota ${who.rows[0]?.name ?? ""} (${input.periods} ${unit})`.slice(0, 200), input.createdBy]
+        );
+        idMovement = mv.rows[0].id_movement;
+      }
+
+      const pay = await c.query<{ id_payment: string }>(
+        `INSERT INTO club_payments (id_club, id_user, amount, periods, first_period, method, note, id_movement, created_by)
+         VALUES ($1, $2, $3, $4, $5::date, $6, $7, $8, $9) RETURNING id_payment`,
+        [idClub, input.idUser, input.amount, input.periods, club.first, input.method, input.note, idMovement, input.createdBy]
+      );
+      const idPayment = pay.rows[0].id_payment;
+
+      // Monto por periodo: el total repartido (el último absorbe el redondeo).
+      const per = Math.floor(input.amount / input.periods);
+      await c.query(
+        `INSERT INTO club_dues (id_club, id_user, period_start, period_end, amount, paid, paid_at, id_payment)
+         SELECT $1, $2, gs::date, (gs + $5::interval - INTERVAL '1 day')::date,
+                CASE WHEN ord = $4::int THEN $6::numeric - $7::numeric * ($4::int - 1) ELSE $7::numeric END,
+                TRUE, NOW(), $8
+         FROM generate_series($3::date, $3::date + ($4::int - 1) * $5::interval, $5::interval) WITH ORDINALITY AS t(gs, ord)
+         ON CONFLICT (id_club, id_user, period_start)
+         DO UPDATE SET paid = TRUE, paid_at = NOW(), amount = EXCLUDED.amount, id_payment = EXCLUDED.id_payment`,
+        [idClub, input.idUser, club.first, input.periods, step, input.amount, per, idPayment]
+      );
+      return { ok: true as const, id_payment: idPayment };
+    });
+  }
+
+  // Anular un pago: sus periodos vuelven a "sin registrar" (club_dues se
+  // borra en cascada) y, si había sumado a la Caja, ese ingreso se quita.
+  async deletePayment(idClub: string, idPayment: string): Promise<boolean> {
+    return this.withTx(async (c) => {
+      const res = await c.query<{ id_movement: string | null }>(
+        `DELETE FROM club_payments WHERE id_club = $1 AND id_payment = $2 RETURNING id_movement`,
+        [idClub, idPayment]
+      );
+      if (res.rowCount === 0) return false;
+      const idMovement = res.rows[0].id_movement;
+      if (idMovement) {
+        await c.query(`DELETE FROM club_cash_movements WHERE id_club = $1 AND id_movement = $2`, [idClub, idMovement]);
+      }
+      return true;
+    });
+  }
+
+  // Por cobrar — solo socios con cuota normal o especial, contando desde
+  // starts_on (o desde que se unió, lo que sea más tarde) hasta hoy. Es
+  // información para el dueño; el socio nunca la ve. firstUnpaid: el
+  // periodo más antiguo sin pago, para pre-llenar "Registrar pago".
   async getArrears(idClub: string): Promise<ClubArrearsRow[]> {
-    // Mismo cuidado que getDues con el alias "name" — acá además el GROUP
-    // BY usa las columnas reales (u.first_name/u.last_name/u.email), no el
-    // alias, porque el JOIN clubs vuelve a meter una columna "name" de por
-    // medio y un `GROUP BY name` ambiguo agrupaba por el nombre del CLUB
-    // (constante) en vez del jugador — Postgres tiraba "u.first_name must
-    // appear in the GROUP BY clause" porque en la práctica nunca agrupaba
-    // por la expresión real del nombre.
+    // GROUP BY con las columnas reales (no el alias): con JOIN clubs, un
+    // GROUP BY "name" ambiguo agrupaba por el nombre del CLUB.
     const res = await this.pool.query<{
       id_user: string; player_name: string; email: string;
-      total_periods: string; paid_periods: string; owed_amount: string;
+      total_periods: string; paid_periods: string; owed_amount: string; first_unpaid: string | null;
     }>(
       `WITH club AS (
          SELECT id_club, monthly_fee, fee_frequency, created_at FROM clubs WHERE id_club = $1
        ),
        member_start AS (
          SELECT u.id_user,
-                COALESCE(
-                  (SELECT MIN(r.decided_at) FROM club_join_requests r
-                   WHERE r.id_club = $1 AND r.id_user = u.id_user AND r.status = 'approved'),
-                  cl.created_at
+                GREATEST(
+                  f.starts_on::timestamptz,
+                  COALESCE(
+                    (SELECT MIN(r.decided_at) FROM club_join_requests r
+                     WHERE r.id_club = $1 AND r.id_user = u.id_user AND r.status = 'approved'),
+                    cl.created_at)
                 ) AS start_at,
-                cl.fee_frequency
+                cl.fee_frequency,
+                CASE WHEN f.mode = 'custom' THEN f.custom_amount ELSE cl.monthly_fee END AS fee
          FROM users u
          CROSS JOIN club cl
+         JOIN club_member_fees f ON f.id_club = $1 AND f.id_user = u.id_user AND f.mode IN ('standard', 'custom')
          WHERE u.id_club = $1
        ),
        bounds AS (
-         SELECT ms.id_user,
+         SELECT ms.id_user, ms.fee,
                 CASE WHEN ms.fee_frequency = 'weekly'
                   THEN date_trunc('week', GREATEST(ms.start_at, NOW() - INTERVAL '104 weeks'))
                   ELSE date_trunc('month', GREATEST(ms.start_at, NOW() - INTERVAL '35 months'))
@@ -553,17 +695,17 @@ export class ClubsRepository {
          FROM member_start ms
        ),
        periods AS (
-         SELECT b.id_user, gs::date AS period_start
+         SELECT b.id_user, b.fee, gs::date AS period_start
          FROM bounds b
          CROSS JOIN LATERAL generate_series(b.from_ts, b.to_ts, b.step) AS gs
        )
        SELECT p.id_user, ${NAME_SQL} AS player_name, u.email,
               COUNT(*)::int AS total_periods,
               COUNT(*) FILTER (WHERE d.paid IS TRUE)::int AS paid_periods,
-              COALESCE(SUM(CASE WHEN d.paid IS NOT TRUE THEN COALESCE(d.amount, c.monthly_fee, 0) ELSE 0 END), 0) AS owed_amount
+              COALESCE(SUM(CASE WHEN d.paid IS NOT TRUE THEN COALESCE(p.fee, 0) ELSE 0 END), 0) AS owed_amount,
+              (MIN(p.period_start) FILTER (WHERE d.paid IS NOT TRUE))::text AS first_unpaid
        FROM periods p
        JOIN users u ON u.id_user = p.id_user
-       JOIN clubs c ON c.id_club = $1
        LEFT JOIN club_dues d ON d.id_club = $1 AND d.id_user = p.id_user AND d.period_start = p.period_start
        GROUP BY p.id_user, u.first_name, u.last_name, u.email
        ORDER BY (COUNT(*) - COUNT(*) FILTER (WHERE d.paid IS TRUE)) DESC, player_name ASC`,
@@ -577,8 +719,48 @@ export class ClubsRepository {
         totalPeriods, paidPeriods,
         owedPeriods: totalPeriods - paidPeriods,
         owedAmount: Number(r.owed_amount),
+        firstUnpaid: r.first_unpaid,
       };
     });
+  }
+
+  // Lo que ve el socio de sus cuotas — solo si el dueño activó
+  // show_dues_to_members (si no, null y la app no muestra nada). Nunca
+  // incluye "deuda": su modalidad y su historial de pagos.
+  async getMyPayments(idUser: string): Promise<MyPayments | null> {
+    const head = await this.pool.query<{
+      id_club: string; club_name: string; show: boolean; fee_frequency: FeeFrequency;
+      fee_mode: FeeMode; fee_amount: string | null;
+    }>(
+      `SELECT c.id_club, c.name AS club_name, c.show_dues_to_members AS show, c.fee_frequency,
+              COALESCE(f.mode, 'none') AS fee_mode,
+              CASE WHEN f.mode = 'custom' THEN f.custom_amount
+                   WHEN f.mode = 'standard' THEN c.monthly_fee ELSE NULL END AS fee_amount
+       FROM users u
+       JOIN clubs c ON c.id_club = u.id_club
+       LEFT JOIN club_member_fees f ON f.id_club = c.id_club AND f.id_user = u.id_user
+       WHERE u.id_user = $1`,
+      [idUser]
+    );
+    const h = head.rows[0];
+    if (!h || !h.show) return null;
+    const pays = await this.pool.query<{
+      id_payment: string; amount: string; periods: number; first_period: string;
+      method: PaymentMethod | null; paid_on: string;
+    }>(
+      // Sin la nota: es interna del dueño ("con descuento", etc.).
+      `SELECT id_payment, amount, periods, first_period::text, method, paid_on::text
+       FROM club_payments WHERE id_club = $1 AND id_user = $2
+       ORDER BY paid_on DESC, created_at DESC LIMIT 36`,
+      [h.id_club, idUser]
+    );
+    return {
+      club_name: h.club_name,
+      fee_frequency: h.fee_frequency,
+      fee_mode: h.fee_mode,
+      fee_amount: h.fee_amount === null ? null : Number(h.fee_amount),
+      payments: pays.rows.map((p) => ({ ...p, amount: Number(p.amount) })),
+    };
   }
 
   // ─────────────────────────────────────────────────────────

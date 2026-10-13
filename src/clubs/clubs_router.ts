@@ -3,7 +3,6 @@ import { z } from "zod";
 import { asyncHandler } from "../middlewares/wrap_async_middleware";
 import { authRequired } from "../middlewares/auth_required_middleware";
 import { requireRole } from "../middlewares/require_role_middleware";
-import DB from "../db/db_configuration";
 import { ClubsRepository } from "./clubs_repository";
 import { NotificationsRepository } from "../notifications/notifications_repository";
 import {
@@ -56,16 +55,26 @@ const updateSchema = z.object({
   founded_date: z.string().trim().nullable().optional(),
   monthly_fee: z.number().min(0).max(99999999).nullable().optional(),
   fee_frequency: z.enum(["monthly", "weekly"]).optional(),
+  show_dues_to_members: z.boolean().optional(),
 });
 
-const dueSchema = z.object({
-  period_start: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha de periodo inválida"),
-  paid: z.boolean(),
+const memberFeeSchema = z
+  .object({
+    mode: z.enum(["none", "standard", "custom", "exempt", "paused"]),
+    custom_amount: z.number().min(0).max(99999999).nullable().optional(),
+  })
+  .refine((v) => v.mode !== "custom" || (v.custom_amount !== null && v.custom_amount !== undefined), {
+    message: "Indica el monto de la cuota especial",
+  });
+
+const paymentSchema = z.object({
+  id_user: z.string().uuid(),
   amount: z.number().min(0).max(99999999),
-  // Qué periodo está mirando el admin ahora mismo (0 = actual, -1 = el
-  // anterior, etc.) — se usa solo para devolver ESE mismo periodo
-  // actualizado, no siempre el actual, si está revisando uno pasado.
-  offset: z.number().int().min(-1000).max(1000).default(0),
+  periods: z.number().int().min(1).max(24),
+  first_period: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha de periodo inválida"),
+  method: z.enum(["cash", "transfer", "other"]).nullable().optional(),
+  note: z.string().trim().max(200).nullable().optional(),
+  add_to_cash: z.boolean().default(true),
 });
 
 const cashMovementSchema = z.object({
@@ -158,33 +167,26 @@ router.delete(
   })
 );
 
-// GET /api/v1/clubs/me/dues — el propio jugador ve si está al día con su
-// club (mismo cálculo de morosidad que ve el dueño, solo su fila).
+// GET /api/v1/clubs/me/dues — RETIRADO. Las versiones anteriores de la app
+// mostraban con esto "Debes N meses" al jugador; ahora responde siempre
+// vacío y esas versiones ocultan la tarjeta solas. La app nueva usa
+// /me/payments.
 router.get(
   "/me/dues",
   authRequired,
   requireRole(["admin", "player"]),
+  asyncHandler(async (_req, res) => res.json({ ok: true, data: null }))
+);
+
+// GET /api/v1/clubs/me/payments — el socio ve su modalidad de cuota y su
+// historial de pagos, solo si el dueño del club lo activó (si no, null).
+router.get(
+  "/me/payments",
+  authRequired,
+  requireRole(["admin", "player"]),
   asyncHandler(async (req, res) => {
-    const me = await DB.getPool().query<{ id_club: string | null; club_name: string | null; monthly_fee: number | null; fee_frequency: string | null }>(
-      `SELECT u.id_club, c.name AS club_name, c.monthly_fee, c.fee_frequency
-       FROM users u LEFT JOIN clubs c ON c.id_club = u.id_club WHERE u.id_user = $1`,
-      [req.user!.id_user]
-    );
-    const row = me.rows[0];
-    if (!row?.id_club) return res.json({ ok: true, data: null });
-    const arrears = await repo.getArrears(row.id_club);
-    const mine = arrears.find((a) => a.id_user === req.user!.id_user);
-    return res.json({
-      ok: true,
-      data: {
-        club_name: row.club_name,
-        fee: row.monthly_fee != null ? Number(row.monthly_fee) : null,
-        fee_frequency: row.fee_frequency ?? "monthly",
-        owed_periods: mine?.owedPeriods ?? 0,
-        owed_amount: mine?.owedAmount ?? 0,
-        paid_periods: mine?.paidPeriods ?? 0,
-      },
-    });
+    const data = await repo.getMyPayments(req.user!.id_user);
+    return res.json({ ok: true, data });
   })
 );
 
@@ -344,37 +346,104 @@ router.get(
   })
 );
 
-// PUT /api/v1/clubs/:id_club/dues/:id_user  (admin, dueño) — marcar pagada/pendiente
+// PUT /api/v1/clubs/:id_club/members/:id_user/fee  (admin, dueño)
+// Modalidad de cuota del socio: none | standard | custom | exempt | paused.
 router.put(
-  "/:id_club/dues/:id_user",
+  "/:id_club/members/:id_user/fee",
   authRequired,
   requireRole("admin"),
   requireOwnClub,
   asyncHandler(async (req, res) => {
-    const p = dueSchema.safeParse(req.body);
-    if (!p.success) return res.status(400).json({ ok: false, message: "Datos inválidos", issues: p.error.issues });
+    const p = memberFeeSchema.safeParse(req.body);
+    if (!p.success) {
+      return res.status(400).json({ ok: false, message: p.error.issues[0]?.message ?? "Datos inválidos", issues: p.error.issues });
+    }
     if (!(await repo.isMember(req.params.id_club, req.params.id_user))) {
       return res.status(404).json({ ok: false, message: "Ese jugador no es socio de este club" });
     }
-    const result = await repo.setDuePaid(req.params.id_club, req.params.id_user, p.data.period_start, p.data.paid, p.data.amount);
-    if (!result.ok) {
-      return res.status(400).json({ ok: false, message: "Ese periodo es anterior a que este jugador fuera socio del club" });
-    }
-    // Aviso al socio cuando se registra su pago (no al desmarcarlo).
-    if (p.data.paid) {
-      await new NotificationsRepository().create({
-        idUser: req.params.id_user,
-        type: "club_payment",
-        title: "Se registró tu pago",
-        message: `Tu club registró el pago de la cuota del periodo que empieza el ${p.data.period_start.split("-").reverse().join("-")}.`,
-      });
-    }
-    const period = await repo.getDues(req.params.id_club, p.data.offset);
-    return res.json({ ok: true, data: period });
+    await repo.setMemberFee(req.params.id_club, req.params.id_user, p.data.mode, p.data.custom_amount ?? null);
+    const d = await repo.getDetail(req.params.id_club);
+    return res.json({ ok: true, data: d });
   })
 );
 
-// GET /api/v1/clubs/:id_club/arrears  (admin, dueño) — morosidad acumulada
+// POST /api/v1/clubs/:id_club/payments  (admin, dueño) — registrar un pago
+// (uno o varios periodos seguidos, con método/nota y opcionalmente a Caja).
+router.post(
+  "/:id_club/payments",
+  authRequired,
+  requireRole("admin"),
+  requireOwnClub,
+  asyncHandler(async (req, res) => {
+    const p = paymentSchema.safeParse(req.body);
+    if (!p.success) return res.status(400).json({ ok: false, message: "Datos inválidos", issues: p.error.issues });
+    if (!(await repo.isMember(req.params.id_club, p.data.id_user))) {
+      return res.status(404).json({ ok: false, message: "Ese jugador no es socio de este club" });
+    }
+    const result = await repo.registerPayment(req.params.id_club, {
+      idUser: p.data.id_user,
+      amount: p.data.amount,
+      periods: p.data.periods,
+      firstPeriod: p.data.first_period,
+      method: p.data.method ?? null,
+      note: p.data.note?.trim() || null,
+      addToCash: p.data.add_to_cash,
+      createdBy: req.user!.id_user,
+    });
+    if (!result.ok) {
+      const message = result.error === "PERIOD_ALREADY_PAID"
+        ? "Alguno de esos periodos ya tiene un pago registrado"
+        : "Ese periodo es anterior a que este jugador fuera socio del club";
+      return res.status(400).json({ ok: false, message });
+    }
+    // Comprobante para el socio (es un aviso positivo, nunca de deuda).
+    await notifications.create({
+      idUser: p.data.id_user,
+      type: "club_payment",
+      title: "Se registró tu pago",
+      message: `Tu club registró tu pago de $${Math.round(p.data.amount).toLocaleString("es-CL")}. ¡Gracias!`,
+    });
+    return res.status(201).json({ ok: true, data: { id_payment: result.id_payment } });
+  })
+);
+
+// DELETE /api/v1/clubs/:id_club/payments/:id_payment  (admin, dueño) —
+// anular: sus periodos quedan sin registrar y se quita de la Caja.
+router.delete(
+  "/:id_club/payments/:id_payment",
+  authRequired,
+  requireRole("admin"),
+  requireOwnClub,
+  asyncHandler(async (req, res) => {
+    const deleted = await repo.deletePayment(req.params.id_club, req.params.id_payment);
+    if (!deleted) return res.status(404).json({ ok: false, message: "Pago no encontrado" });
+    return res.json({ ok: true, data: null });
+  })
+);
+
+// POST /api/v1/clubs/:id_club/members/:id_user/remind  (admin, dueño) —
+// recordatorio amable de la cuota, solo cuando el dueño lo decide.
+router.post(
+  "/:id_club/members/:id_user/remind",
+  authRequired,
+  requireRole("admin"),
+  requireOwnClub,
+  asyncHandler(async (req, res) => {
+    if (!(await repo.isMember(req.params.id_club, req.params.id_user))) {
+      return res.status(404).json({ ok: false, message: "Ese jugador no es socio de este club" });
+    }
+    const clubName = (await repo.getClubName(req.params.id_club)) ?? "Tu club";
+    await notifications.create({
+      idUser: req.params.id_user,
+      type: "club_payment",
+      title: "Recordatorio de cuota",
+      message: `${clubName} te recuerda la cuota del club. Si ya la pagaste, no te preocupes.`,
+    });
+    return res.json({ ok: true, data: null });
+  })
+);
+
+// GET /api/v1/clubs/:id_club/arrears  (admin, dueño) — por cobrar (solo lo ve el dueño)
 router.get(
   "/:id_club/arrears",
   authRequired,
