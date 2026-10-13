@@ -76,6 +76,10 @@ export class UserService {
       // bandera junto al nombre en la ficha del jugador.
       country: user.country ?? null,
       avatar_url: user.avatar_url,
+      // Datos de presentación para la ficha (sin fecha de nacimiento ni contacto).
+      dominant_hand: user.dominant_hand ?? null,
+      region: user.region ?? null,
+      member_since: user.created_at ?? null,
       stats: stats ?? {
         matches_played: 0,
         matches_won: 0,
