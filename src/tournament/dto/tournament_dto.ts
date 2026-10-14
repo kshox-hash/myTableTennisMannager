@@ -155,6 +155,9 @@ export interface ITournament {
   // Último día del campeonato (null = un solo día) y horas por jornada.
   end_date?: string | null;
   day_hours?: number;
+  /** Estado del campeonato (solo lo llena findById): la web lo usa para
+   * mostrarlo cancelado y no ofrecer inscribirse/modificar. */
+  status?: "active" | "cancelled";
 
   categories: TournamentCategoryDTO[];
 }

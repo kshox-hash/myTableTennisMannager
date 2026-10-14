@@ -36,13 +36,22 @@ export function requireTournamentOwnership(
     }
 
     const pool = DB.getPool();
-    const tRes = await pool.query<{ created_by: string }>(
-      `SELECT created_by FROM tournaments WHERE id_tournament = $1`,
+    const tRes = await pool.query<{ created_by: string; status: string }>(
+      `SELECT created_by, status FROM tournaments WHERE id_tournament = $1`,
       [idTournament]
     );
     const tournament = tRes.rows[0];
     if (!tournament) {
       return res.status(404).json({ ok: false, message: "Campeonato no encontrado" });
+    }
+
+    // Campeonato cancelado: queda solo para consulta. Antes se podía seguir
+    // inscribiendo gente, armar grupos, generar la llave y cargar
+    // resultados entrando desde "Mostrar cancelados". Solo se permite leer
+    // y el borrado definitivo del torneo (DELETE sobre el torneo mismo).
+    const isTournamentDelete = req.method === "DELETE" && /\/admin\/tournaments\/[^/]+\/?$/.test(req.path);
+    if (tournament.status === "cancelled" && req.method !== "GET" && !isTournamentDelete) {
+      return res.status(409).json({ ok: false, message: "Este campeonato está cancelado: ya no se puede modificar." });
     }
 
     if (tournament.created_by === req.user.id_user) return next();

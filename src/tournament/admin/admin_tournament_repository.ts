@@ -996,6 +996,7 @@ export class AdminTournamentRepository {
          t.allow_mixed, t.allow_olympic, t.address, t.contact_phone, t.region, t.visibility, t.is_ranked, t.ranking_level,
          t.num_tables, t.default_best_of_sets,
          t.event_date, t.event_time, t.end_date, t.day_hours, t.created_at,
+         t.status AS tournament_status,
          c.id_category, c.category_type, c.category_range, c.gender,
          c.inscription_price, c.quotas, c.status, c.phase, c.priority, c.play_date, c.start_time,
          (SELECT COUNT(*)::int FROM ${this.enrollmentsTable} e
@@ -1031,6 +1032,9 @@ export class AdminTournamentRepository {
     const eventDate = (dataRes.rows[0] as { event_date?: string | Date | null }).event_date ?? null;
 
     const tournament = this.mapTournamentListBase(dataRes.rows[0]);
+    // Antes no se mandaba: la web veía siempre "activo" y un campeonato
+    // cancelado seguía ofreciendo inscribirse y modificar.
+    tournament.status = (dataRes.rows[0] as { tournament_status?: string }).tournament_status === "cancelled" ? "cancelled" : "active";
     for (const row of dataRes.rows) {
       if (row.id_category) {
         tournament.categories.push({
