@@ -189,6 +189,8 @@ export type AdminTournamentRow = {
   enrolled_count?: number;
   /** Todas sus categorías en fase 'finished' — solo lo llena findByCreator. */
   all_finished?: boolean;
+  /** Rol de quien pide la lista en este torneo — solo lo llena findByCreator. */
+  my_role?: "owner" | "organizer" | "viewer";
 };
 
 // Enrollments list row

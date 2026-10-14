@@ -7,14 +7,21 @@ import { sendPush } from "./push";
  * (NotificationPopups.tsx). */
 // Avisos que son para el organizador / dueño de club (rol admin). Todo lo
 // demás es del rol jugador. Con ?audience= cada área ve solo lo suyo.
-export const ADMIN_TYPES = ["enrollment_created", "player_unenrolled", "club_join_request"];
+export const ADMIN_TYPES = ["enrollment_created", "player_unenrolled", "club_join_request", "organizer_invited", "organizer_removed"];
 export type Audience = "admin" | "player" | null;
 export function parseAudience(v: unknown): Audience {
   return v === "admin" || v === "player" ? v : null;
 }
+// Avisos de organizador que también se ven en la vista Jugador: a una
+// cuenta que está mirando como jugador la invitan a coorganizar y, si solo
+// salía en la campana de Administrador, no se enteraba hasta cambiar de vista.
+export const SHARED_TYPES = ["organizer_invited", "organizer_removed"];
 function audienceSql(audience: Audience, param: string): string {
   if (audience === "admin") return ` AND n.type = ANY(${param}::text[])`;
-  if (audience === "player") return ` AND NOT (n.type = ANY(${param}::text[]))`;
+  if (audience === "player") {
+    const shared = SHARED_TYPES.map((t) => `'${t}'`).join(", ");
+    return ` AND (NOT (n.type = ANY(${param}::text[])) OR n.type IN (${shared}))`;
+  }
   return "";
 }
 
@@ -37,6 +44,7 @@ export const PUSH_TYPES: ReadonlySet<string> = new Set([
   "club_join_rejected",
   "referee_assigned",
   "tournament_finished",
+  "organizer_invited",
 ]);
 
 export type NotificationType =
@@ -66,7 +74,10 @@ export type NotificationType =
   | "player_unenrolled"
   | "referee_assigned"
   | "tournament_finished"
-  | "tournament_reminder";
+  | "tournament_reminder"
+  // Coorganizadores: te sumaron (o te cambiaron el rol) / te sacaron.
+  | "organizer_invited"
+  | "organizer_removed";
 
 export type NotificationRow = {
   id_notification: string;

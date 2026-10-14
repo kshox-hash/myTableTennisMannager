@@ -1143,7 +1143,13 @@ export class AdminTournamentRepository {
           -- que este listado no trae, así que un torneo terminado salía "Activo".
           (EXISTS (SELECT 1 FROM ${this.tournamentCategoriesTable} c WHERE c.id_tournament = t.id_tournament)
            AND NOT EXISTS (SELECT 1 FROM ${this.tournamentCategoriesTable} c
-                            WHERE c.id_tournament = t.id_tournament AND c.phase IS DISTINCT FROM 'finished')) AS all_finished
+                            WHERE c.id_tournament = t.id_tournament AND c.phase IS DISTINCT FROM 'finished')) AS all_finished,
+          -- Rol de quien pide en cada torneo (dueño / coorganizador / invitado):
+          -- la web oculta lo que ese rol no puede hacer.
+          CASE WHEN t.created_by = $1 THEN 'owner'
+               ELSE COALESCE((SELECT o.role FROM tournament_organizers o
+                               WHERE o.id_tournament = t.id_tournament AND o.id_user = $1), 'owner')
+          END AS my_role
         FROM ${this.tournamentsTable} t
         ${where}
         ORDER BY t.created_at DESC, t.id_tournament DESC
@@ -1158,11 +1164,12 @@ export class AdminTournamentRepository {
 
       return {
         rows: res.rows.map((row) => {
-          const extra = row as TournamentRow & { enrolled_count?: number; all_finished?: boolean };
+          const extra = row as TournamentRow & { enrolled_count?: number; all_finished?: boolean; my_role?: string };
           return {
             ...this.mapAdminTournamentRow(row),
             enrolled_count: Number(extra.enrolled_count ?? 0),
             all_finished: Boolean(extra.all_finished),
+            my_role: extra.my_role === "viewer" ? "viewer" : extra.my_role === "organizer" ? "organizer" : "owner",
           };
         }),
         total,

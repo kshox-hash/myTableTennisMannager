@@ -16,7 +16,13 @@ function errorResponse(res: import("express").Response, error: string) {
     return res.status(404).json({ ok: false, message: "No hay ninguna cuenta con ese email" });
   }
   if (error === "USER_NOT_ADMIN") {
-    return res.status(400).json({ ok: false, message: "Esa cuenta no es de administrador" });
+    return res.status(400).json({
+      ok: false,
+      message: "Ese email es de una cuenta de jugador. Para coorganizar necesita una cuenta de organizador (puede crearla con otro email).",
+    });
+  }
+  if (error === "IS_OWNER") {
+    return res.status(400).json({ ok: false, message: "Ese email es el tuyo: ya eres el dueño de este campeonato" });
   }
   return res.status(400).json({ ok: false, message: error });
 }
@@ -30,6 +36,21 @@ router.get(
   requireTournamentOwnership(undefined, { allowViewer: true }),
   asyncHandler(async (req, res) => {
     const data = await repo.list(req.params.id_tournament);
+    return res.json({ ok: true, data });
+  })
+);
+
+// GET /api/v1/tournament/admin/tournaments/:id_tournament/team
+// Dueño + coorganizadores + el rol de quien pide (owner/organizer/viewer):
+// la web lo usa para mostrar solo las acciones que ese rol puede hacer.
+router.get(
+  "/admin/tournaments/:id_tournament/team",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(undefined, { allowViewer: true }),
+  asyncHandler(async (req, res) => {
+    const data = await repo.team(req.params.id_tournament, req.user!.id_user);
+    if (!data) return res.status(404).json({ ok: false, message: "Campeonato no encontrado" });
     return res.json({ ok: true, data });
   })
 );
