@@ -32,7 +32,8 @@ router.get(
   requireRole("admin"),
   requireTournamentOwnership(undefined, { allowViewer: true }),
   asyncHandler(async (req, res) => {
-    const data = await repo.getPointsSummary(req.params.id_tournament);
+    const category = typeof req.query.category === "string" && req.query.category ? req.query.category : null;
+    const data = await repo.getPointsSummary(req.params.id_tournament, category);
     if (!data) return res.status(404).json({ ok: false, message: "Torneo no encontrado" });
     return res.json({ ok: true, data });
   })

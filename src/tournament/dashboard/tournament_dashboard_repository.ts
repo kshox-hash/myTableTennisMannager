@@ -1,6 +1,6 @@
 import type { Pool } from "pg";
 import DB from "../../db/db_configuration";
-import { ittfPointsByTournamentSql } from "../../ranking/ittf_points";
+import { ittfPointsByCategorySql, ittfPointsByTournamentSql } from "../../ranking/ittf_points";
 
 export type CategoryDashboard = {
   id_category:            string;
@@ -135,7 +135,9 @@ export class TournamentDashboardRepository {
   // el torneo es "no puntuable" (is_ranked = false) -- mismo criterio que ya
   // usa BracketsRepository al sumar de verdad, así esta pantalla nunca
   // muestra puntos que en realidad no se sumaron al ranking público.
-  async getPointsSummary(id_tournament: string): Promise<PointsSummary | null> {
+  // Con id_category: solo esa categoría (partidos y puntos de esa categoría;
+  // la pestaña Puntos vive dentro de cada categoría).
+  async getPointsSummary(id_tournament: string, id_category?: string | null): Promise<PointsSummary | null> {
     const tRes = await this.pool.query<{ is_ranked: boolean }>(
       `SELECT is_ranked FROM tournaments WHERE id_tournament = $1`,
       [id_tournament]
@@ -150,16 +152,22 @@ export class TournamentDashboardRepository {
       matches_won: string;
       points: number;
     }>(
-      `WITH pts AS (${ittfPointsByTournamentSql("t.id_tournament = $1", false)}),
+      `WITH pts AS (${
+         id_category
+           ? `SELECT id_user, points FROM (${ittfPointsByCategorySql("t.id_tournament = $1", false)}) pc WHERE pc.id_category = $2`
+           : ittfPointsByTournamentSql("t.id_tournament = $1", false)
+       }),
        tm AS (
          SELECT gm.player1_id AS p1, gm.player2_id AS p2, gm.winner_id
          FROM group_matches gm
          JOIN category_groups cg ON cg.id_group = gm.id_group
          WHERE cg.id_tournament = $1 AND gm.winner_id IS NOT NULL
+           ${id_category ? "AND cg.id_category = $2" : ""}
          UNION ALL
          SELECT bm.player1_id, bm.player2_id, bm.winner_id
          FROM bracket_matches bm
          WHERE bm.id_tournament = $1 AND bm.winner_id IS NOT NULL
+           ${id_category ? "AND bm.id_category = $2" : ""}
        ),
        players AS (
          SELECT p1 AS id_user FROM tm WHERE p1 IS NOT NULL
@@ -176,7 +184,7 @@ export class TournamentDashboardRepository {
        JOIN users u ON u.id_user = p.id_user
        WHERE u.is_team = false
        ORDER BY points DESC, matches_won DESC, matches_played DESC, name ASC`,
-      [id_tournament]
+      id_category ? [id_tournament, id_category] : [id_tournament]
     );
 
     const players: PlayerPointsRow[] = res.rows.map((r) => {
