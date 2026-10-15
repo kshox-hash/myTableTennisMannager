@@ -58,7 +58,9 @@ export class UserRepository {
          public_ranking_enabled = COALESCE($11, public_ranking_enabled),
          organizer_first_name   = CASE WHEN $13 THEN $14 ELSE organizer_first_name END,
          organizer_last_name    = CASE WHEN $15 THEN $16 ELSE organizer_last_name END,
-         region                 = CASE WHEN $17 THEN $18 ELSE region END
+         region                 = CASE WHEN $17 THEN $18 ELSE region END,
+         doc_color_primary      = CASE WHEN $19 THEN $20 ELSE doc_color_primary END,
+         doc_color_accent       = CASE WHEN $21 THEN $22 ELSE doc_color_accent END
        WHERE id_user = $12`,
       [
         input.first_name ?? null,
@@ -76,6 +78,8 @@ export class UserRepository {
         input.organizer_first_name !== undefined, input.organizer_first_name ?? null,
         input.organizer_last_name !== undefined, input.organizer_last_name ?? null,
         input.region !== undefined, input.region ?? null,
+        input.doc_color_primary !== undefined, input.doc_color_primary ?? null,
+        input.doc_color_accent !== undefined, input.doc_color_accent ?? null,
       ]
     );
 
@@ -120,6 +124,8 @@ export class UserRepository {
         u.last_name,
         u.organizer_first_name,
         u.organizer_last_name,
+        u.doc_color_primary,
+        u.doc_color_accent,
         u.gender,
         r.name AS role,
         u.id_club,

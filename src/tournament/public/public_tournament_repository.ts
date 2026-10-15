@@ -103,6 +103,8 @@ export interface PublicOrganizerRow {
 
 export interface PublicOrganizerProfileRow {
   id_user: string;
+  doc_color_primary: string | null;
+  doc_color_accent: string | null;
   organizer_name: string | null;
   club_name: string | null;
   avatar_url: string | null;
@@ -333,6 +335,8 @@ export class PublicTournamentRepository {
          cl.name AS club_name,
          ${organizerAvatarSql("u")} AS avatar_url,
          u.public_ranking_enabled,
+         u.doc_color_primary,
+         u.doc_color_accent,
          cl.id_club,
          cl.description AS club_description,
          cl.crest_image_url AS club_crest_image_url,

@@ -24,6 +24,9 @@ export const updateProfileSchema = z
     // Mostrar el ranking privado ("Mi Ranking") también en la página
     // pública de organizador ("Comunidad") — ver 043_public_organizer_profile.sql.
     public_ranking_enabled: z.boolean().optional(),
+    // Colores de los PDF/imágenes que publica el organizador (#rrggbb). null = por defecto.
+    doc_color_primary: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional(),
+    doc_color_accent: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional(),
   })
   .strict();
 

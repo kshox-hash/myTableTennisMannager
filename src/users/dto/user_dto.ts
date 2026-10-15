@@ -33,6 +33,9 @@ export type UserProfileDB = {
   // sigue usando la de jugador (ORGANIZER_AVATAR_SQL en
   // public_tournament_repository.ts).
   organizer_avatar_url: string | null;
+  // Colores de los documentos del organizador (#rrggbb), null = por defecto.
+  doc_color_primary: string | null;
+  doc_color_accent: string | null;
   // Si el admin decidió mostrar su ranking privado ("Mi Ranking") también
   // en su página pública de organizador ("Comunidad") — false por defecto,
   // no cambia nada para quien no lo prende a propósito.
