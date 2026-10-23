@@ -309,6 +309,7 @@ export class PlayerRepository {
            gm.player1_id, gm.player2_id,
            opp.id_user AS opponent_id,
            COALESCE(NULLIF(TRIM(opp.last_name || ' ' || opp.first_name), ''), opp.email) AS opponent_name,
+           opp.avatar_url AS opponent_avatar_url,
            oppcl.name AS opponent_club,
            CASE WHEN gm.player1_id = ANY($1::uuid[]) THEN 'player1' ELSE 'player2' END AS my_slot,
            COALESCE(NULLIF(TRIM(ref.last_name || ' ' || ref.first_name), ''), ref.email) AS referee_name
@@ -333,6 +334,7 @@ export class PlayerRepository {
            bm.player1_id, bm.player2_id,
            opp.id_user AS opponent_id,
            COALESCE(NULLIF(TRIM(opp.last_name || ' ' || opp.first_name), ''), opp.email) AS opponent_name,
+           opp.avatar_url AS opponent_avatar_url,
            oppcl.name AS opponent_club,
            CASE WHEN bm.player1_id = ANY($1::uuid[]) THEN 'player1' ELSE 'player2' END AS my_slot,
            COALESCE(NULLIF(TRIM(ref.last_name || ' ' || ref.first_name), ''), ref.email) AS referee_name
@@ -358,6 +360,7 @@ export class PlayerRepository {
            gs.id_user, gs.played, gs.won, gs.lost,
            gs.sets_for, gs.sets_against, gs.points_for, gs.points_against, gs.position, gs.qualified_to_bracket,
            COALESCE(NULLIF(TRIM(u.last_name || ' ' || u.first_name), ''), u.email) AS player_name,
+           u.avatar_url,
            cl.name AS club_name
          FROM group_standings gs
          JOIN users u ON u.id_user = gs.id_user
@@ -397,6 +400,7 @@ export class PlayerRepository {
       `SELECT
          u.id_user,
          COALESCE(NULLIF(TRIM(u.first_name || ' ' || u.last_name), ''), u.email) AS player_name,
+         u.avatar_url,
          cl.name AS club_name,
          u.gender,
          e.enrolled_at
@@ -465,6 +469,7 @@ export class PlayerRepository {
           p.position,
           u.id_user,
           COALESCE(NULLIF(TRIM(u.first_name || ' ' || u.last_name), ''), u.email) AS player_name,
+          u.avatar_url,
           cl.name AS club_name
         FROM placed p
         JOIN users u ON u.id_user = p.id_user
@@ -480,6 +485,7 @@ export class PlayerRepository {
         gs.position,
         u.id_user,
         COALESCE(NULLIF(TRIM(u.first_name || ' ' || u.last_name), ''), u.email) AS player_name,
+        u.avatar_url,
         cl.name AS club_name
       FROM group_standings gs
       JOIN category_groups cg ON cg.id_group = gs.id_group
@@ -566,6 +572,7 @@ export class PlayerRepository {
           p1cl.name AS player1_club,
           gm.player2_id,
           COALESCE(NULLIF(TRIM(p2.last_name || ' ' || p2.first_name), ''), p2.email) AS player2_name,
+          p1.avatar_url AS player1_avatar_url, p2.avatar_url AS player2_avatar_url,
           p2cl.name AS player2_club,
           gm.status, gm.sets_player1, gm.sets_player2, gm.winner_id, gm.set_scores, gm.result_reason,
           gm.played_at::text, gm.table_number, gm.played_table_number,
@@ -592,6 +599,7 @@ export class PlayerRepository {
           p1cl.name AS player1_club,
           bm.player2_id,
           COALESCE(NULLIF(TRIM(p2.last_name || ' ' || p2.first_name), ''), p2.email) AS player2_name,
+          p1.avatar_url AS player1_avatar_url, p2.avatar_url AS player2_avatar_url,
           p2cl.name AS player2_club,
           bm.status, bm.sets_player1, bm.sets_player2, bm.winner_id, bm.set_scores, bm.result_reason,
           bm.played_at::text, bm.table_number, bm.played_table_number,
@@ -657,6 +665,7 @@ export class PlayerRepository {
         p1cl.name AS player1_club,
         gm.player2_id,
         COALESCE(NULLIF(TRIM(p2.last_name || ' ' || p2.first_name), ''), p2.email) AS player2_name,
+          p1.avatar_url AS player1_avatar_url, p2.avatar_url AS player2_avatar_url,
         p2cl.name AS player2_club,
         gm.winner_id, gm.sets_player1, gm.sets_player2, gm.set_scores, gm.result_reason,
         gm.status, gm.played_at::text, gm.table_number, gm.played_table_number,
@@ -687,6 +696,7 @@ export class PlayerRepository {
         p1cl.name AS player1_club,
         bm.player2_id,
         COALESCE(NULLIF(TRIM(p2.last_name || ' ' || p2.first_name), ''), p2.email) AS player2_name,
+          p1.avatar_url AS player1_avatar_url, p2.avatar_url AS player2_avatar_url,
         p2cl.name AS player2_club,
         bm.winner_id, bm.sets_player1, bm.sets_player2, bm.set_scores, bm.result_reason,
         bm.status, bm.played_at::text, bm.table_number, bm.played_table_number,
@@ -725,6 +735,7 @@ export class PlayerRepository {
           COALESCE(NULLIF(TRIM(p1.last_name || ' ' || p1.first_name), ''), p1.email) AS player1_name,
           gm.player2_id,
           COALESCE(NULLIF(TRIM(p2.last_name || ' ' || p2.first_name), ''), p2.email) AS player2_name,
+          p1.avatar_url AS player1_avatar_url, p2.avatar_url AS player2_avatar_url,
           oppcl.name AS opponent_club,
           gm.status, gm.sets_player1, gm.sets_player2, gm.winner_id, gm.played_at::text
         FROM group_matches gm
@@ -750,6 +761,7 @@ export class PlayerRepository {
           COALESCE(NULLIF(TRIM(p1.last_name || ' ' || p1.first_name), ''), p1.email) AS player1_name,
           bm.player2_id,
           COALESCE(NULLIF(TRIM(p2.last_name || ' ' || p2.first_name), ''), p2.email) AS player2_name,
+          p1.avatar_url AS player1_avatar_url, p2.avatar_url AS player2_avatar_url,
           oppcl.name AS opponent_club,
           bm.status, bm.sets_player1, bm.sets_player2, bm.winner_id, bm.played_at::text
         FROM bracket_matches bm
