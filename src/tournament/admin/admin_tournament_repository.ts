@@ -918,11 +918,11 @@ export class AdminTournamentRepository {
             WHERE e.id_category = c.id_category AND e.status = 'active') AS enrolled_count,
            EXISTS (
              SELECT 1 FROM ${this.enrollmentsTable} e
-             WHERE e.id_category = c.id_category AND e.status = 'active' AND e.id_user = $2
+             WHERE e.id_category = c.id_category AND e.status = 'active' AND (e.id_user = $2 OR e.id_user IN (SELECT dt.id_user FROM doubles_teams dt WHERE dt.id_player_1 = $2 OR dt.id_player_2 = $2))
            ) AS is_enrolled,
            EXISTS (
              SELECT 1 FROM ${this.enrollmentsTable} e
-             WHERE e.id_category = c.id_category AND e.status = 'active' AND e.id_user = $2 AND e.paid
+             WHERE e.id_category = c.id_category AND e.status = 'active' AND (e.id_user = $2 OR e.id_user IN (SELECT dt.id_user FROM doubles_teams dt WHERE dt.id_player_1 = $2 OR dt.id_player_2 = $2)) AND e.paid
            ) AS is_paid,
            -- Organizador para la tarjeta del listado (app): su nombre y foto
            -- de organizador, con la de jugador como respaldo.
@@ -996,18 +996,18 @@ export class AdminTournamentRepository {
          t.allow_mixed, t.allow_olympic, t.address, t.contact_phone, t.region, t.visibility, t.is_ranked, t.ranking_level,
          t.num_tables, t.default_best_of_sets,
          t.event_date, t.event_time, t.end_date, t.day_hours, t.created_at,
-         t.status AS tournament_status,
+         t.status AS tournament_status, t.kind AS tournament_kind,
          c.id_category, c.category_type, c.category_range, c.gender,
          c.inscription_price, c.quotas, c.status, c.phase, c.priority, c.play_date, c.start_time,
          (SELECT COUNT(*)::int FROM ${this.enrollmentsTable} e
           WHERE e.id_category = c.id_category AND e.status = 'active') AS enrolled_count,
          EXISTS (
            SELECT 1 FROM ${this.enrollmentsTable} e
-           WHERE e.id_category = c.id_category AND e.status = 'active' AND e.id_user = $2
+           WHERE e.id_category = c.id_category AND e.status = 'active' AND (e.id_user = $2 OR e.id_user IN (SELECT dt.id_user FROM doubles_teams dt WHERE dt.id_player_1 = $2 OR dt.id_player_2 = $2))
          ) AS is_enrolled,
            EXISTS (
              SELECT 1 FROM ${this.enrollmentsTable} e
-             WHERE e.id_category = c.id_category AND e.status = 'active' AND e.id_user = $2 AND e.paid
+             WHERE e.id_category = c.id_category AND e.status = 'active' AND (e.id_user = $2 OR e.id_user IN (SELECT dt.id_user FROM doubles_teams dt WHERE dt.id_player_1 = $2 OR dt.id_player_2 = $2)) AND e.paid
            ) AS is_paid
        FROM ${this.tournamentsTable} t
        LEFT JOIN ${this.tournamentCategoriesTable} c ON c.id_tournament = t.id_tournament
@@ -1035,6 +1035,9 @@ export class AdminTournamentRepository {
     // Antes no se mandaba: la web veía siempre "activo" y un campeonato
     // cancelado seguía ofreciendo inscribirse y modificar.
     tournament.status = (dataRes.rows[0] as { tournament_status?: string }).tournament_status === "cancelled" ? "cancelled" : "active";
+    // Liga interna (045) o campeonato: la app del jugador muestra la liga
+    // como tal (antes la presentaba como un campeonato más).
+    (tournament as { kind?: string }).kind = (dataRes.rows[0] as { tournament_kind?: string }).tournament_kind === "league" ? "league" : "tournament";
     for (const row of dataRes.rows) {
       if (row.id_category) {
         tournament.categories.push({

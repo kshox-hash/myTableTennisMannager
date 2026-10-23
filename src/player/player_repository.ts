@@ -71,7 +71,31 @@ export class PlayerRepository {
     this.tablesRepo = new TablesRepository(this.pool);
   }
 
+  // Dobles (044): una pareja es un "usuario equipo" (doubles_teams). Las
+  // vistas del jugador buscan por él Y por sus parejas — antes un jugador
+  // de dobles no veía esa categoría ni sus partidos en ningún lado.
+  private async myIds(id_user: string): Promise<string[]> {
+    const res = await this.pool.query<{ id_user: string }>(
+      `SELECT id_user FROM doubles_teams WHERE id_player_1 = $1 OR id_player_2 = $1`,
+      [id_user]
+    );
+    return [id_user, ...res.rows.map((r) => r.id_user)];
+  }
+
+  // En lo que vuelve, la pareja se presenta como el propio jugador: así la
+  // app y la web lo reconocen como "yo" (resaltado, ganado/perdido, slot).
+  private asMe<T extends object>(rows: T[], ids: string[], id_user: string): T[] {
+    if (ids.length === 1) return rows;
+    const team = new Set(ids.slice(1));
+    const keys = ["player1_id", "player2_id", "winner_id", "id_user"];
+    for (const r of rows as Record<string, unknown>[]) {
+      for (const k of keys) if (typeof r[k] === "string" && team.has(r[k] as string)) r[k] = id_user;
+    }
+    return rows;
+  }
+
   async getDashboard(id_user: string): Promise<PlayerDashboard> {
+    const ids = await this.myIds(id_user);
     // Próximo partido pendiente POR CATEGORÍA (grupo o llave — nunca las dos
     // a la vez, porque una categoría está en una sola fase por vez) — así un
     // jugador anotado en varias categorías ve el estado de cada una, no solo
@@ -102,15 +126,15 @@ export class PlayerRepository {
          JOIN tournament_categories tc ON tc.id_category = cg.id_category
          JOIN tournaments t ON t.id_tournament = cg.id_tournament
          LEFT JOIN users opp ON opp.id_user = CASE
-           WHEN gm.player1_id = $1 THEN gm.player2_id
+           WHEN gm.player1_id = ANY($1::uuid[]) THEN gm.player2_id
            ELSE gm.player1_id
          END
          LEFT JOIN clubs oppcl ON oppcl.id_club = opp.id_club
-         WHERE (gm.player1_id = $1 OR gm.player2_id = $1)
+         WHERE (gm.player1_id = ANY($1::uuid[]) OR gm.player2_id = ANY($1::uuid[]))
            AND gm.winner_id IS NULL
            AND gm.player1_id IS NOT NULL AND gm.player2_id IS NOT NULL
          ORDER BY tc.id_category, gm.table_number DESC NULLS LAST`,
-        [id_user]
+        [ids]
       ),
       this.pool.query<NextMatch>(
         `SELECT DISTINCT ON (tc.id_category)
@@ -136,20 +160,20 @@ export class PlayerRepository {
          JOIN tournament_categories tc ON tc.id_category = bm.id_category
          JOIN tournaments t ON t.id_tournament = bm.id_tournament
          LEFT JOIN users opp ON opp.id_user = CASE
-           WHEN bm.player1_id = $1 THEN bm.player2_id
+           WHEN bm.player1_id = ANY($1::uuid[]) THEN bm.player2_id
            ELSE bm.player1_id
          END
          LEFT JOIN clubs oppcl ON oppcl.id_club = opp.id_club
-         WHERE (bm.player1_id = $1 OR bm.player2_id = $1)
+         WHERE (bm.player1_id = ANY($1::uuid[]) OR bm.player2_id = ANY($1::uuid[]))
            AND bm.winner_id IS NULL
            AND bm.player1_id IS NOT NULL AND bm.player2_id IS NOT NULL
          ORDER BY tc.id_category, bm.table_number DESC NULLS LAST`,
-        [id_user]
+        [ids]
       ),
       this.pool.query<{ count: string }>(
         `SELECT COUNT(*) AS count FROM enrollments
-         WHERE id_user = $1 AND status = 'active'`,
-        [id_user]
+         WHERE id_user = ANY($1::uuid[]) AND status = 'active'`,
+        [ids]
       ),
       this.pool.query<PlayerStats>(
         `SELECT
@@ -158,8 +182,8 @@ export class PlayerRepository {
            COALESCE(matches_lost,   0) AS matches_lost,
            COALESCE(sets_won,       0) AS sets_won,
            COALESCE(sets_lost,      0) AS sets_lost
-         FROM player_stats WHERE id_user = $1`,
-        [id_user]
+         FROM player_stats WHERE id_user = ANY($1::uuid[])`,
+        [ids]
       ),
     ]);
 
@@ -170,7 +194,7 @@ export class PlayerRepository {
     for (const row of [...groupNext.rows, ...bracketNext.rows]) {
       if (!byCategory.has(row.id_category)) byCategory.set(row.id_category, row);
     }
-    const allNext = [...byCategory.values()];
+    const allNext = this.asMe([...byCategory.values()], ids, id_user);
 
     // Si todavía no tiene mesa, calculamos en qué posición de la cola está
     // (misma cola/orden que usa "Auto-asignar mesas" del admin) para que el
@@ -257,10 +281,13 @@ export class PlayerRepository {
 
   // Vista de una categoría desde la perspectiva del jugador
   async getCategoryView(id_user: string, id_tournament: string, id_category: string) {
+    const ids = await this.myIds(id_user);
     const [phase, myGroup, myGroupMatches, myBracketMatches] = await Promise.all([
       // Fase actual
-      this.pool.query<{ phase: string }>(
-        `SELECT COALESCE(phase, 'enrollment') AS phase
+      this.pool.query<{ phase: string; competition_format: string; finished_early: boolean }>(
+        `SELECT COALESCE(phase, 'enrollment') AS phase,
+                COALESCE(competition_format, 'groups_bracket') AS competition_format,
+                COALESCE(finished_early, false) AS finished_early
          FROM tournament_categories WHERE id_category = $1`,
         [id_category]
       ),
@@ -269,9 +296,9 @@ export class PlayerRepository {
         `SELECT cg.id_group, cg.group_name
          FROM group_members gm
          JOIN category_groups cg ON cg.id_group = gm.id_group
-         WHERE gm.id_user = $1 AND cg.id_category = $2
+         WHERE gm.id_user = ANY($1::uuid[]) AND cg.id_category = $2
          LIMIT 1`,
-        [id_user, id_category]
+        [ids, id_category]
       ),
       // Mis partidos de grupo
       this.pool.query(
@@ -283,19 +310,19 @@ export class PlayerRepository {
            opp.id_user AS opponent_id,
            COALESCE(NULLIF(TRIM(opp.last_name || ' ' || opp.first_name), ''), opp.email) AS opponent_name,
            oppcl.name AS opponent_club,
-           CASE WHEN gm.player1_id = $1 THEN 'player1' ELSE 'player2' END AS my_slot,
+           CASE WHEN gm.player1_id = ANY($1::uuid[]) THEN 'player1' ELSE 'player2' END AS my_slot,
            COALESCE(NULLIF(TRIM(ref.last_name || ' ' || ref.first_name), ''), ref.email) AS referee_name
          FROM group_matches gm
          JOIN category_groups cg ON cg.id_group = gm.id_group
          LEFT JOIN users opp ON opp.id_user = CASE
-           WHEN gm.player1_id = $1 THEN gm.player2_id ELSE gm.player1_id
+           WHEN gm.player1_id = ANY($1::uuid[]) THEN gm.player2_id ELSE gm.player1_id
          END
          LEFT JOIN clubs oppcl ON oppcl.id_club = opp.id_club
          LEFT JOIN users ref ON ref.id_user = gm.referee_id
-         WHERE (gm.player1_id = $1 OR gm.player2_id = $1)
+         WHERE (gm.player1_id = ANY($1::uuid[]) OR gm.player2_id = ANY($1::uuid[]))
            AND cg.id_category = $2
          ORDER BY gm.match_number`,
-        [id_user, id_category]
+        [ids, id_category]
       ),
       // Mis partidos de llave
       this.pool.query(
@@ -307,18 +334,18 @@ export class PlayerRepository {
            opp.id_user AS opponent_id,
            COALESCE(NULLIF(TRIM(opp.last_name || ' ' || opp.first_name), ''), opp.email) AS opponent_name,
            oppcl.name AS opponent_club,
-           CASE WHEN bm.player1_id = $1 THEN 'player1' ELSE 'player2' END AS my_slot,
+           CASE WHEN bm.player1_id = ANY($1::uuid[]) THEN 'player1' ELSE 'player2' END AS my_slot,
            COALESCE(NULLIF(TRIM(ref.last_name || ' ' || ref.first_name), ''), ref.email) AS referee_name
          FROM bracket_matches bm
          LEFT JOIN users opp ON opp.id_user = CASE
-           WHEN bm.player1_id = $1 THEN bm.player2_id ELSE bm.player1_id
+           WHEN bm.player1_id = ANY($1::uuid[]) THEN bm.player2_id ELSE bm.player1_id
          END
          LEFT JOIN clubs oppcl ON oppcl.id_club = opp.id_club
          LEFT JOIN users ref ON ref.id_user = bm.referee_id
-         WHERE (bm.player1_id = $1 OR bm.player2_id = $1)
+         WHERE (bm.player1_id = ANY($1::uuid[]) OR bm.player2_id = ANY($1::uuid[]))
            AND bm.id_category = $2
          ORDER BY bm.round, bm.match_number`,
-        [id_user, id_category]
+        [ids, id_category]
       ),
     ]);
 
@@ -350,10 +377,14 @@ export class PlayerRepository {
 
     return {
       phase:              phase.rows[0]?.phase ?? "enrollment",
+      // round_robin = grupo único, sin llave (061). finished_early = el
+      // organizador cerró la categoría antes de tiempo: sin podio ni puntos (066).
+      competition_format: phase.rows[0]?.competition_format ?? "groups_bracket",
+      finished_early:     phase.rows[0]?.finished_early ?? false,
       my_group:           myGroup.rows[0] ?? null,
-      standings:          allStandings,
-      my_group_matches:   myGroupMatches.rows,
-      my_bracket_matches: myBracketMatches.rows,
+      standings:          this.asMe(allStandings, ids, id_user),
+      my_group_matches:   this.asMe(myGroupMatches.rows, ids, id_user),
+      my_bracket_matches: this.asMe(myBracketMatches.rows, ids, id_user),
       bracket_total_rounds: totalRoundsRes.rows[0]?.total_rounds ?? null,
     };
   }
@@ -677,6 +708,7 @@ export class PlayerRepository {
   // offset: para paginar el historial (un jugador que juega todos los fines
   // de semana junta cientos de partidos; antes solo se veían los últimos 50).
   async getPlayerMatchHistory(id_user: string, limit = 15, offset = 0) {
+    const ids = await this.myIds(id_user);
     const query = `
       WITH matches AS (
         SELECT
@@ -696,9 +728,9 @@ export class PlayerRepository {
         JOIN tournaments t ON t.id_tournament = cg.id_tournament
         LEFT JOIN users p1 ON p1.id_user = gm.player1_id
         LEFT JOIN users p2 ON p2.id_user = gm.player2_id
-        LEFT JOIN users opp ON opp.id_user = CASE WHEN gm.player1_id = $1 THEN gm.player2_id ELSE gm.player1_id END
+        LEFT JOIN users opp ON opp.id_user = CASE WHEN gm.player1_id = ANY($1::uuid[]) THEN gm.player2_id ELSE gm.player1_id END
         LEFT JOIN clubs oppcl ON oppcl.id_club = opp.id_club
-        WHERE (gm.player1_id = $1 OR gm.player2_id = $1)
+        WHERE (gm.player1_id = ANY($1::uuid[]) OR gm.player2_id = ANY($1::uuid[]))
           AND gm.status IN ('played', 'walkover')
 
         UNION ALL
@@ -720,17 +752,17 @@ export class PlayerRepository {
         JOIN tournaments t ON t.id_tournament = bm.id_tournament
         LEFT JOIN users p1 ON p1.id_user = bm.player1_id
         LEFT JOIN users p2 ON p2.id_user = bm.player2_id
-        LEFT JOIN users opp ON opp.id_user = CASE WHEN bm.player1_id = $1 THEN bm.player2_id ELSE bm.player1_id END
+        LEFT JOIN users opp ON opp.id_user = CASE WHEN bm.player1_id = ANY($1::uuid[]) THEN bm.player2_id ELSE bm.player1_id END
         LEFT JOIN clubs oppcl ON oppcl.id_club = opp.id_club
-        WHERE (bm.player1_id = $1 OR bm.player2_id = $1)
+        WHERE (bm.player1_id = ANY($1::uuid[]) OR bm.player2_id = ANY($1::uuid[]))
           AND bm.status IN ('played', 'walkover')
       )
       SELECT * FROM matches
       ORDER BY played_at DESC NULLS LAST, id_match
       LIMIT $2 OFFSET $3
     `;
-    const res = await this.pool.query(query, [id_user, Math.min(limit, 50), Math.max(offset, 0)]);
-    return res.rows;
+    const res = await this.pool.query(query, [ids, Math.min(limit, 50), Math.max(offset, 0)]);
+    return this.asMe(res.rows, ids, id_user);
   }
 
   // Podio (top 3) de este jugador en categorías ya finalizadas — mismo
@@ -738,6 +770,7 @@ export class PlayerRepository {
   // las categorías de una — para mostrar logros en el perfil en vez de
   // solo datos de cuenta.
   async getPlayerAchievements(id_user: string) {
+    const ids = await this.myIds(id_user);
     const query = `
       WITH my_categories AS (
         SELECT DISTINCT tc.id_category, tc.id_tournament, tc.category_type, tc.category_range,
@@ -745,7 +778,7 @@ export class PlayerRepository {
         FROM enrollments e
         JOIN tournament_categories tc ON tc.id_category = e.id_category
         JOIN tournaments t ON t.id_tournament = tc.id_tournament
-        WHERE e.id_user = $1 AND tc.phase = 'finished' AND NOT tc.finished_early
+        WHERE e.id_user = ANY($1::uuid[]) AND tc.phase = 'finished' AND NOT tc.finished_early
       ),
       bracket_totals AS (
         SELECT id_category, MAX(round) AS total_rounds
@@ -778,16 +811,17 @@ export class PlayerRepository {
         mc.id_category, mc.category_type, mc.category_range,
         p.position
       FROM my_categories mc
-      JOIN placed p ON p.id_category = mc.id_category AND p.id_user = $1
+      JOIN placed p ON p.id_category = mc.id_category AND p.id_user = ANY($1::uuid[])
       WHERE p.position <= 3
       ORDER BY mc.event_date DESC NULLS LAST, p.position ASC
     `;
-    const res = await this.pool.query(query, [id_user]);
+    const res = await this.pool.query(query, [ids]);
     return res.rows;
   }
 
   // Mis inscripciones activas con info del torneo y fase de cada categoría
   async getMyEnrollments(id_user: string) {
+    const ids = await this.myIds(id_user);
     const res = await this.pool.query(
       `SELECT
          t.id_tournament, t.tournament_name, t.event_date, t.address, t.region,
@@ -797,9 +831,9 @@ export class PlayerRepository {
        FROM enrollments e
        JOIN tournament_categories tc ON tc.id_category = e.id_category
        JOIN tournaments t ON t.id_tournament = e.id_tournament
-       WHERE e.id_user = $1 AND e.status = 'active'
+       WHERE e.id_user = ANY($1::uuid[]) AND e.status = 'active'
        ORDER BY t.event_date DESC NULLS LAST, t.tournament_name`,
-      [id_user]
+      [ids]
     );
     return res.rows;
   }

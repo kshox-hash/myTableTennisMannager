@@ -114,7 +114,27 @@ export class NotificationsRepository {
     return client ?? this.pool;
   }
 
+  // Dobles (044): una pareja es un "usuario equipo" sin cuenta ni celular.
+  // Un aviso dirigido a la pareja se les manda a los DOS jugadores reales —
+  // antes quedaba en la campana del equipo, que nadie ve, y el push no
+  // llegaba a ninguno.
+  private async expandTeams(userIds: string[], client?: PoolClient): Promise<string[]> {
+    if (userIds.length === 0) return userIds;
+    const res = await this.runner(client).query<{ id_user: string; id_player_1: string; id_player_2: string }>(
+      `SELECT id_user, id_player_1, id_player_2 FROM doubles_teams WHERE id_user = ANY($1::uuid[])`,
+      [userIds]
+    );
+    if (res.rows.length === 0) return userIds;
+    const members = new Map(res.rows.map((r) => [r.id_user, [r.id_player_1, r.id_player_2]]));
+    return [...new Set(userIds.flatMap((id) => members.get(id) ?? [id]))];
+  }
+
   async create(input: CreateInput, client?: PoolClient): Promise<void> {
+    const recipients = await this.expandTeams([input.idUser], client);
+    if (recipients.length !== 1 || recipients[0] !== input.idUser) {
+      const { idUser: _team, ...rest } = input;
+      return this.createForMany(recipients, rest, client);
+    }
     await this.runner(client).query(
       `INSERT INTO notifications (id_user, type, title, message, id_tournament, id_category, id_match, match_type)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
@@ -159,7 +179,7 @@ export class NotificationsRepository {
     input: Omit<CreateInput, "idUser">,
     client?: PoolClient
   ): Promise<void> {
-    const ids = [...new Set(userIds)];
+    const ids = await this.expandTeams([...new Set(userIds)], client);
     if (ids.length === 0) return;
 
     const runner = this.runner(client);
