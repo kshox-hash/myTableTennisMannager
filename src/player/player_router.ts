@@ -86,7 +86,7 @@ router.get(
   })
 );
 
-// GET /api/v1/player/tournament/:id_tournament/matches?status=finished&limit=6&offset=0
+// GET /api/v1/player/tournament/:id_tournament/matches?status=finished&limit=6&offset=0&category=<id>
 router.get(
   "/tournament/:id_tournament/matches",
   authRequired,
@@ -95,7 +95,8 @@ router.get(
     const status = req.query.status as "all" | "scheduled" | "live" | "finished" | undefined;
     const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
     const offset = req.query.offset ? parseInt(req.query.offset as string, 10) : undefined;
-    const { rows, total } = await repo.getTournamentMatches(req.params.id_tournament, { status, limit, offset });
+    const id_category = typeof req.query.category === "string" ? req.query.category : undefined;
+    const { rows, total } = await repo.getTournamentMatches(req.params.id_tournament, { status, limit, offset, id_category });
     return res.json({ ok: true, data: { matches: rows, total } });
   })
 );

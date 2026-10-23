@@ -530,9 +530,12 @@ export class PlayerRepository {
   // jugar) | 'finished' (jugado o walkover).
   async getTournamentMatches(
     id_tournament: string,
-    opts: { status?: "all" | "scheduled" | "live" | "finished"; limit?: number; offset?: number } = {}
+    opts: { status?: "all" | "scheduled" | "live" | "finished"; limit?: number; offset?: number; id_category?: string } = {}
   ) {
     const status = opts.status ?? "all";
+    // Filtro por categoría (la app muestra una categoría a la vez: mezclar
+    // los partidos de todas en una lista no se entendía). null = todas.
+    const idCategory = opts.id_category && /^[0-9a-f-]{36}$/i.test(opts.id_category) ? opts.id_category : null;
     const limit = Math.min(opts.limit ?? 100, 100);
     const offset = Math.max(opts.offset ?? 0, 0);
 
@@ -603,6 +606,7 @@ export class PlayerRepository {
       )
       SELECT * FROM matches
       WHERE NOT (player1_id IS NULL AND player2_id IS NULL) ${statusClause}
+        AND ($4::uuid IS NULL OR id_category = $4::uuid)
       ${orderClause}
       LIMIT $2 OFFSET $3
     `;
@@ -613,24 +617,25 @@ export class PlayerRepository {
     // el frontend sepa cuántas páginas mostrar.
     const countQuery = `
       WITH matches AS (
-        SELECT gm.player1_id, gm.player2_id, gm.status, gm.table_number
+        SELECT cg.id_category, gm.player1_id, gm.player2_id, gm.status, gm.table_number
         FROM group_matches gm
         JOIN category_groups cg ON cg.id_group = gm.id_group
         WHERE cg.id_tournament = $1
 
         UNION ALL
 
-        SELECT bm.player1_id, bm.player2_id, bm.status, bm.table_number
+        SELECT bm.id_category, bm.player1_id, bm.player2_id, bm.status, bm.table_number
         FROM bracket_matches bm
         WHERE bm.id_tournament = $1
       )
       SELECT COUNT(*)::text AS count FROM matches
       WHERE NOT (player1_id IS NULL AND player2_id IS NULL) ${statusClause}
+        AND ($2::uuid IS NULL OR id_category = $2::uuid)
     `;
 
     const [res, countRes] = await Promise.all([
-      this.pool.query(query, [id_tournament, limit, offset]),
-      this.pool.query<{ count: string }>(countQuery, [id_tournament]),
+      this.pool.query(query, [id_tournament, limit, offset, idCategory]),
+      this.pool.query<{ count: string }>(countQuery, [id_tournament, idCategory]),
     ]);
     return { rows: res.rows, total: Number(countRes.rows[0]?.count ?? 0) };
   }
