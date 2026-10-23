@@ -55,7 +55,7 @@ export function authRequired(req: Request, res: Response, next: NextFunction) {
   // la cuenta o la base): antes pasaba y cada escritura fallaba con errores
   // raros ("IDs inválidos"). Ahora se corta acá y el cliente vuelve al login.
   DB.getPool()
-    .query("SELECT 1 FROM users WHERE id_user = $1", [req.user!.id_user])
+    .query("SELECT 1 FROM users WHERE id_user = $1 AND deleted_at IS NULL", [req.user!.id_user])
     .then((r) => {
       if ((r.rowCount ?? 0) === 0) {
         return res.status(401).json({

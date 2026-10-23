@@ -18,3 +18,14 @@ export const authRateLimit = rateLimit({
   legacyHeaders: false,
   message: { ok: false, message: "Demasiados intentos. Inténtalo de nuevo en unos minutos." },
 });
+
+// Pedir código de recuperación: cuenta TODOS los pedidos (siempre responde
+// 200, así que skipSuccessfulRequests no frenaría nada) — evita usar el
+// endpoint para mandarle spam de emails a un tercero.
+export const passwordResetRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, message: "Demasiados intentos. Inténtalo de nuevo en unos minutos." },
+});

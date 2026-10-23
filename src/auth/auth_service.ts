@@ -1,11 +1,16 @@
 import { OAuth2Client } from "google-auth-library";
 import { ERRORS, type AuthError, type AuthSuccess } from "../auth/dto/auth_dto";
 import { AuthRepository } from "./auth_repository";
-import type { SignInDTO, SignUpDTO } from "./schema/auth_schema";
+import type { SignInDTO, SignUpDTO, ResetPasswordDTO } from "./schema/auth_schema";
 import { Result, ok, fail } from "../core/constants/result";
 import { hashPassword, comparePassword } from "../bcrypt/bcrypt";
 import { signToken } from "../jwt/jwt";
 import { ROLE_IDS, resolveEffectiveRole } from "../core/constants/roles";
+import { randomInt } from "crypto";
+import { sendMail } from "../core/mailer";
+
+const RESET_CODE_TTL_MS = 15 * 60 * 1000;
+const RESET_MAX_ATTEMPTS = 5;
 
 // Sin GOOGLE_CLIENT_ID el server igual levanta (dev local sin Google
 // configurado) — el endpoint /auth/google devuelve error recién cuando se
@@ -167,6 +172,57 @@ export class AuthService {
       // (vinculó una cuenta admin ya existente, por ejemplo) no tiene por
       // qué pasar por la ficha de jugador (género/club no le sirven).
       profile_incomplete: profile.role === "player" && profile.gender == null,
+    });
+  }
+
+  // --- Recuperar contraseña: código de 6 dígitos por email ---
+  //
+  // forgotPassword no dice si el email existe (el controller responde
+  // siempre igual) para no revelar qué correos tienen cuenta. Sirve también
+  // para una cuenta creada con Google: así puede ponerse una contraseña.
+  async forgotPassword(email: string): Promise<void> {
+    const user = await this.repo.findUserByEmail(email);
+    if (!user) return;
+
+    const code = randomInt(0, 1_000_000).toString().padStart(6, "0");
+    await this.repo.saveResetCode(user.id_user, await hashPassword(code), new Date(Date.now() + RESET_CODE_TTL_MS));
+
+    await sendMail(
+      user.email,
+      `Tu código de MyTTM: ${code}`,
+      `<div style="font-family:Arial,sans-serif;max-width:420px">
+         <h2 style="margin:0 0 12px">Recupera tu contraseña</h2>
+         <p>Usa este código en la app para crear una contraseña nueva:</p>
+         <p style="font-size:32px;font-weight:bold;letter-spacing:6px;margin:16px 0">${code}</p>
+         <p style="color:#666">Vence en 15 minutos. Si no lo pediste, ignora este correo: tu cuenta sigue igual.</p>
+       </div>`,
+      `Tu código para recuperar la contraseña de MyTTM es ${code}. Vence en 15 minutos. Si no lo pediste, ignora este correo.`
+    );
+  }
+
+  async resetPassword(input: ResetPasswordDTO): Promise<Result<AuthSuccess, AuthError>> {
+    const user = await this.repo.findUserByEmail(input.email);
+    if (!user) return fail<AuthError>(ERRORS.RESET_CODE_INVALID);
+
+    const saved = await this.repo.findResetCode(user.id_user);
+    if (!saved) return fail<AuthError>(ERRORS.RESET_CODE_INVALID);
+    if (new Date(saved.expires_at).getTime() < Date.now() || saved.attempts >= RESET_MAX_ATTEMPTS) {
+      return fail<AuthError>(ERRORS.RESET_CODE_EXPIRED);
+    }
+
+    if (!(await comparePassword(input.code, saved.code_hash))) {
+      await this.repo.bumpResetAttempts(user.id_user);
+      return fail<AuthError>(ERRORS.RESET_CODE_INVALID);
+    }
+
+    await this.repo.setPasswordAndClearCode(user.id_user, await hashPassword(input.password));
+
+    // Entra directo con la contraseña nueva (sin volver a tipearla).
+    const effectiveRole = resolveEffectiveRole(user.email, user.role);
+    const token = signToken({ id_user: user.id_user, role: effectiveRole });
+    return ok<AuthSuccess>({
+      token,
+      user: { id_user: user.id_user, email: user.email, role: effectiveRole },
     });
   }
 }

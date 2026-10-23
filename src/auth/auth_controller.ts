@@ -80,4 +80,28 @@ export class AuthController {
       data: result.data,
     });
   };
+
+  // POST /auth/password/forgot — siempre 200 (no revela si el email existe).
+  forgotPassword = async (req: Request, res: Response) => {
+    await this.service.forgotPassword(req.body.email);
+    return res.json({
+      ok: true,
+      message: "Si el email tiene una cuenta, te enviamos un código para crear una contraseña nueva.",
+    });
+  };
+
+  // POST /auth/password/reset — con el código correcto cambia la contraseña y entra.
+  resetPassword = async (req: Request, res: Response) => {
+    const result = await this.service.resetPassword(req.body);
+    if (!result.ok) {
+      return res.status(400).json({
+        ok: false,
+        message:
+          result.error === ERRORS.RESET_CODE_EXPIRED
+            ? "El código venció. Pide uno nuevo."
+            : "El código no es correcto.",
+      });
+    }
+    return res.json({ ok: true, data: result.data });
+  };
 }

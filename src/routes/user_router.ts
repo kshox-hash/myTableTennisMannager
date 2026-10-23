@@ -54,6 +54,9 @@ userRouter.patch(
   asyncHandler(controller.updateMe)
 );
 
+// DELETE /api/v1/users/me — eliminar la cuenta (exigido por Google Play)
+userRouter.delete("/me", authRequired, asyncHandler(controller.deleteMe));
+
 // --- Avatar (foto de perfil) — subida directa a Cloudflare R2 ---
 // POST /api/v1/users/me/avatar/upload-url  → URL firmada para el PUT a R2
 userRouter.post("/me/avatar/upload-url", authRequired, asyncHandler(controller.avatarUploadUrl));

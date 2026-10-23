@@ -171,4 +171,45 @@ export class AuthRepository {
     const res = await this.pool.query(query, values);
     return { ...res.rows[0], role: "player" } as UserAuthProfileDB;
   }
+
+  // --- Recuperar contraseña (ver 073_account_deletion_password_reset.sql) ---
+
+  // Uno vigente por usuario: pedir otro reemplaza al anterior y reinicia los intentos.
+  async saveResetCode(id_user: string, code_hash: string, expires_at: Date): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO password_reset_codes (id_user, code_hash, expires_at)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (id_user) DO UPDATE
+         SET code_hash = EXCLUDED.code_hash, expires_at = EXCLUDED.expires_at, attempts = 0, created_at = NOW()`,
+      [id_user, code_hash, expires_at]
+    );
+  }
+
+  async findResetCode(id_user: string): Promise<{ code_hash: string; expires_at: Date; attempts: number } | null> {
+    const res = await this.pool.query(
+      `SELECT code_hash, expires_at, attempts FROM password_reset_codes WHERE id_user = $1`,
+      [id_user]
+    );
+    return res.rows[0] ?? null;
+  }
+
+  async bumpResetAttempts(id_user: string): Promise<void> {
+    await this.pool.query(`UPDATE password_reset_codes SET attempts = attempts + 1 WHERE id_user = $1`, [id_user]);
+  }
+
+  // Cambia la contraseña y borra el código, todo junto.
+  async setPasswordAndClearCode(id_user: string, password_hash: string): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(`UPDATE ${this.usersTable} SET password_hash = $2 WHERE id_user = $1`, [id_user, password_hash]);
+      await client.query(`DELETE FROM password_reset_codes WHERE id_user = $1`, [id_user]);
+      await client.query("COMMIT");
+    } catch (e) {
+      await client.query("ROLLBACK");
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
 }

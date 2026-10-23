@@ -171,4 +171,11 @@ export class UserController {
     }
     return res.json({ ok: true, data: result.data });
   };
+
+  // DELETE /api/v1/users/me — elimina la cuenta (datos personales fuera).
+  deleteMe = async (req: Request, res: Response) => {
+    const result = await this.service.deleteAccount(req.user!.id_user);
+    if (!result.ok) return res.status(404).json({ ok: false, message: "Usuario no encontrado" });
+    return res.json({ ok: true });
+  };
 }

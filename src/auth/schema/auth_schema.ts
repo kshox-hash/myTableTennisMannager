@@ -47,6 +47,20 @@ export const googleAuthSchema = z.object({
   credential: z.string().min(10, "Falta el token de Google"),
 });
 
+export const forgotPasswordSchema = z.object({
+  email: z.string().trim().toLowerCase().email("Debes ingresar un email válido"),
+});
+
+export const resetPasswordSchema = z.object({
+  email: z.string().trim().toLowerCase().email("Debes ingresar un email válido"),
+  code: z.string().trim().regex(/^\d{6}$/, "El código tiene 6 dígitos"),
+  password: z
+    .string()
+    .min(8, "La contraseña debe tener al menos 8 caracteres")
+    .max(72, "La contraseña es demasiado larga"),
+});
+
+export type ResetPasswordDTO = z.infer<typeof resetPasswordSchema>;
 export type SignUpDTO = z.infer<typeof signUpSchema>;
 export type SignInDTO = z.infer<typeof signInSchema>;
 export type GoogleAuthDTO = z.infer<typeof googleAuthSchema>;

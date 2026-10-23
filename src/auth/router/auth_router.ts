@@ -5,9 +5,9 @@ import { AuthRepository } from "../auth_repository";
 
 import { validateBody } from "../../middlewares/validate_body_middleware";
 import { asyncHandler } from "../../middlewares/wrap_async_middleware";
-import { authRateLimit } from "../../middlewares/rate_limit_middleware";
+import { authRateLimit, passwordResetRateLimit } from "../../middlewares/rate_limit_middleware";
 
-import { signInSchema, signUpSchema, googleAuthSchema } from "../schema/auth_schema";
+import { signInSchema, signUpSchema, googleAuthSchema, forgotPasswordSchema, resetPasswordSchema } from "../schema/auth_schema";
 
 const router = Router();
 
@@ -37,6 +37,21 @@ router.post(
   authRateLimit,
   validateBody(googleAuthSchema),
   asyncHandler(controller.google)
+);
+
+// RECUPERAR CONTRASEÑA — 1) pedir el código por email, 2) usarlo
+router.post(
+  "/password/forgot",
+  passwordResetRateLimit,
+  validateBody(forgotPasswordSchema),
+  asyncHandler(controller.forgotPassword)
+);
+
+router.post(
+  "/password/reset",
+  authRateLimit,
+  validateBody(resetPasswordSchema),
+  asyncHandler(controller.resetPassword)
 );
 
 export default router;

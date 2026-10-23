@@ -254,4 +254,54 @@ export class UserRepository {
     );
     return res.rows[0] ?? null;
   }
+
+  // Eliminar cuenta (Google Play lo exige): la fila no se borra — sus
+  // partidos, llaves y rankings son también de los rivales — sino que se
+  // vacía de datos personales y queda marcada con deleted_at (authRequired
+  // rechaza sus tokens). Lo que es solo suyo (dispositivos, avisos,
+  // solicitudes pendientes, códigos) se borra. Devuelve false si no existía.
+  async anonymizeUser(id_user: string): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const res = await client.query(
+        `UPDATE users SET
+           email = 'eliminado+' || id_user || '@myttm.invalid',
+           password_hash = NULL,
+           google_sub = NULL,
+           first_name = 'Jugador',
+           last_name = 'eliminado',
+           avatar_url = NULL,
+           organizer_first_name = NULL,
+           organizer_last_name = NULL,
+           organizer_avatar_url = NULL,
+           birth_date = NULL,
+           country = NULL,
+           region = NULL,
+           id_document = NULL,
+           category = NULL,
+           dominant_hand = NULL,
+           id_club = NULL,
+           public_ranking_enabled = FALSE,
+           deleted_at = NOW()
+         WHERE id_user = $1 AND deleted_at IS NULL`,
+        [id_user]
+      );
+      if ((res.rowCount ?? 0) === 0) {
+        await client.query("ROLLBACK");
+        return false;
+      }
+      for (const table of ["device_tokens", "notifications", "password_reset_codes"]) {
+        await client.query(`DELETE FROM ${table} WHERE id_user = $1`, [id_user]);
+      }
+      await client.query(`DELETE FROM club_join_requests WHERE id_user = $1 AND status = 'pending'`, [id_user]);
+      await client.query("COMMIT");
+      return true;
+    } catch (e) {
+      await client.query("ROLLBACK");
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
 }

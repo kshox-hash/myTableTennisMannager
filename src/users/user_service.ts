@@ -284,4 +284,21 @@ export class UserService {
       updated_at: new Date().toISOString(),
     });
   }
+
+  // DELETE /users/me — ver UserRepository.anonymizeUser. Las fotos se
+  // borran del bucket antes (si falla R2, la cuenta igual se elimina).
+  async deleteAccount(id_user: string): Promise<Result<true, "USER_NOT_FOUND">> {
+    if (r2Configured) {
+      for (const key of [avatarKey(id_user), organizerAvatarKey(id_user)]) {
+        try {
+          await deleteObject(key);
+        } catch {
+          // puede no existir; no frena la eliminación
+        }
+      }
+    }
+    const done = await this.repo.anonymizeUser(id_user);
+    if (!done) return fail("USER_NOT_FOUND");
+    return ok(true);
+  }
 }

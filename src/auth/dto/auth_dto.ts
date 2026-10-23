@@ -11,6 +11,9 @@ export const ERRORS = {
   // El token de Google no verificó (vencido, mal formado, audience
   // distinta) o no trajo email — no es un error de credenciales nuestro.
   GOOGLE_TOKEN_INVALID: "GOOGLE_TOKEN_INVALID",
+  // Recuperar contraseña: código mal escrito, o vencido / sin intentos.
+  RESET_CODE_INVALID: "RESET_CODE_INVALID",
+  RESET_CODE_EXPIRED: "RESET_CODE_EXPIRED",
 } as const;
 
 export type AuthError = typeof ERRORS[keyof typeof ERRORS];
