@@ -133,6 +133,7 @@ export class PlayerRepository {
          WHERE (gm.player1_id = ANY($1::uuid[]) OR gm.player2_id = ANY($1::uuid[]))
            AND gm.winner_id IS NULL
            AND gm.player1_id IS NOT NULL AND gm.player2_id IS NOT NULL
+           AND t.status <> 'cancelled'
          ORDER BY tc.id_category, gm.table_number DESC NULLS LAST`,
         [ids]
       ),
@@ -167,12 +168,14 @@ export class PlayerRepository {
          WHERE (bm.player1_id = ANY($1::uuid[]) OR bm.player2_id = ANY($1::uuid[]))
            AND bm.winner_id IS NULL
            AND bm.player1_id IS NOT NULL AND bm.player2_id IS NOT NULL
+           AND t.status <> 'cancelled'
          ORDER BY tc.id_category, bm.table_number DESC NULLS LAST`,
         [ids]
       ),
       this.pool.query<{ count: string }>(
-        `SELECT COUNT(*) AS count FROM enrollments
-         WHERE id_user = ANY($1::uuid[]) AND status = 'active'`,
+        `SELECT COUNT(*) AS count FROM enrollments e
+         JOIN tournaments t ON t.id_tournament = e.id_tournament
+         WHERE e.id_user = ANY($1::uuid[]) AND e.status = 'active' AND t.status <> 'cancelled'`,
         [ids]
       ),
       this.pool.query<PlayerStats>(
@@ -848,7 +851,7 @@ export class PlayerRepository {
        FROM enrollments e
        JOIN tournament_categories tc ON tc.id_category = e.id_category
        JOIN tournaments t ON t.id_tournament = e.id_tournament
-       WHERE e.id_user = ANY($1::uuid[]) AND e.status = 'active'
+       WHERE e.id_user = ANY($1::uuid[]) AND e.status = 'active' AND t.status <> 'cancelled'
        ORDER BY t.event_date DESC NULLS LAST, t.tournament_name`,
       [ids]
     );

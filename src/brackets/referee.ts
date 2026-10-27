@@ -90,7 +90,8 @@ export async function notifyRefereeAssigned(type: "group" | "bracket", idMatch: 
 /** Partidos sin terminar donde el usuario es árbitro (para "Tienes un partido para arbitrar"). */
 export async function myRefereeMatches(idUser: string): Promise<MatchInfo[]> {
   const where = `WHERE m.referee_id = $1 AND m.status NOT IN ('played', 'walkover', 'bye')
-                   AND m.player1_id IS NOT NULL AND m.player2_id IS NOT NULL`;
+                   AND m.player1_id IS NOT NULL AND m.player2_id IS NOT NULL
+                   AND t.status <> 'cancelled'`;
   const [g, b] = await Promise.all([
     pool().query<MatchInfo>(`${MATCH_INFO_SQL("group_matches", "group")} ${where}`, [idUser]),
     pool().query<MatchInfo>(`${MATCH_INFO_SQL("bracket_matches", "bracket")} ${where}`, [idUser]),

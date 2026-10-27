@@ -55,6 +55,9 @@ export class CalendarRepository {
         JOIN tournaments t           ON t.id_tournament = e.id_tournament
         WHERE e.id_user = $1
           AND e.status = 'active'
+          -- Un campeonato cancelado no es "próximo" ni "en curso": antes
+          -- seguía en el calendario y en "Mis campeonatos" del Inicio.
+          AND t.status <> 'cancelled'
       )
       SELECT day::text AS date, 'tournament' AS type, tournament_id, tournament_name, address,
              category_id, category_type, category_range, gender, phase, status
