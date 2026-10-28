@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
-import type { EffectiveRole } from "../core/constants/roles";
+import { resolveEffectiveRole, type DbRole, type EffectiveRole } from "../core/constants/roles";
 import DB from "../db/db_configuration";
 
 export interface AuthPayload {
@@ -45,25 +45,41 @@ export function authRequired(req: Request, res: Response, next: NextFunction) {
     const payload = jwt.verify(token, secret, { algorithms: ["HS256"] }) as AuthPayload;
     req.user = payload;
   } catch {
+    // Token vencido (JWT_EXPIRES_IN, 7 días) o mal formado. Antes respondía
+    // solo "Token inválido" sin código: la web no cerraba la sesión, se
+    // veía "logueado" y cada acción (crear un campeonato, p. ej.) fallaba
+    // con "Token inválido". Con SESSION_INVALID el cliente vuelve al login.
     return res.status(401).json({
       ok: false,
-      message: "Token inválido",
+      code: "SESSION_INVALID",
+      message: "Tu sesión expiró. Vuelve a iniciar sesión.",
     });
   }
 
   // El token puede ser válido pero de un usuario que ya no existe (se borró
   // la cuenta o la base): antes pasaba y cada escritura fallaba con errores
   // raros ("IDs inválidos"). Ahora se corta acá y el cliente vuelve al login.
+  // El rol se toma de la base, no del token: si el superadmin convierte a un
+  // jugador en organizador, puede crear campeonatos al instante (antes el
+  // token viejo seguía diciendo "player" y recibía "Acceso denegado" hasta
+  // cerrar sesión y volver a entrar).
   DB.getPool()
-    .query("SELECT 1 FROM users WHERE id_user = $1 AND deleted_at IS NULL", [req.user!.id_user])
+    .query<{ email: string; role: DbRole }>(
+      `SELECT u.email, r.name AS role
+       FROM users u JOIN roles r ON r.id_role = u.id_role
+       WHERE u.id_user = $1 AND u.deleted_at IS NULL`,
+      [req.user!.id_user]
+    )
     .then((r) => {
-      if ((r.rowCount ?? 0) === 0) {
+      const row = r.rows[0];
+      if (!row) {
         return res.status(401).json({
           ok: false,
           code: "SESSION_INVALID",
           message: "Tu sesión ya no es válida. Vuelve a iniciar sesión.",
         });
       }
+      req.user!.role = resolveEffectiveRole(row.email, row.role);
       return next();
     })
     .catch(next);
