@@ -1931,28 +1931,51 @@ export class BracketsRepository {
 
   // Árbitro sugerido/anotado para un partido puntual — no es un rol oficial,
   // así que no valida nada (puede ser cualquier inscrito, o limpiarse con null).
-  async setGroupMatchReferee(matchId: string, refereeId: string | null): Promise<"ok" | "not_found" | "own_match"> {
-    const cur = await this.pool.query<{ player1_id: string | null; player2_id: string | null }>(
-      `SELECT player1_id, player2_id FROM group_matches WHERE id_match = $1`,
+  // ¿Está esta persona en una mesa del torneo (jugando o arbitrando un
+  // partido con mesa asignada), sin contar el partido [exceptMatch]?
+  private async isAtOtherTable(idTournament: string, idUser: string, exceptMatch: string): Promise<boolean> {
+    const r = await this.pool.query(
+      `SELECT 1 FROM group_matches gm JOIN category_groups cg ON cg.id_group = gm.id_group
+        WHERE cg.id_tournament = $1 AND gm.table_number IS NOT NULL AND gm.id_match <> $3
+          AND $2 IN (gm.player1_id, gm.player2_id, gm.referee_id)
+       UNION ALL
+       SELECT 1 FROM bracket_matches bm
+        WHERE bm.id_tournament = $1 AND bm.table_number IS NOT NULL AND bm.id_match <> $3
+          AND $2 IN (bm.player1_id, bm.player2_id, bm.referee_id)
+       LIMIT 1`,
+      [idTournament, idUser, exceptMatch]
+    );
+    return (r.rowCount ?? 0) > 0;
+  }
+
+  async setGroupMatchReferee(matchId: string, refereeId: string | null): Promise<"ok" | "not_found" | "own_match" | "referee_busy"> {
+    const cur = await this.pool.query<{ player1_id: string | null; player2_id: string | null; table_number: number | null; id_tournament: string }>(
+      `SELECT gm.player1_id, gm.player2_id, gm.table_number, cg.id_tournament
+         FROM group_matches gm JOIN category_groups cg ON cg.id_group = gm.id_group
+        WHERE gm.id_match = $1`,
       [matchId]
     );
     const m = cur.rows[0];
     if (!m) return "not_found";
     // Nadie arbitra su propio partido.
     if (refereeId && (refereeId === m.player1_id || refereeId === m.player2_id)) return "own_match";
+    // Partido ya en mesa: el árbitro no puede estar en otra mesa a la vez.
+    if (refereeId && m.table_number != null && (await this.isAtOtherTable(m.id_tournament, refereeId, matchId))) return "referee_busy";
     await this.pool.query(`UPDATE group_matches SET referee_id = $1 WHERE id_match = $2`, [refereeId, matchId]);
     return "ok";
   }
 
-  async setBracketMatchReferee(matchId: string, refereeId: string | null): Promise<"ok" | "not_found" | "own_match"> {
-    const cur = await this.pool.query<{ player1_id: string | null; player2_id: string | null }>(
-      `SELECT player1_id, player2_id FROM bracket_matches WHERE id_match = $1`,
+  async setBracketMatchReferee(matchId: string, refereeId: string | null): Promise<"ok" | "not_found" | "own_match" | "referee_busy"> {
+    const cur = await this.pool.query<{ player1_id: string | null; player2_id: string | null; table_number: number | null; id_tournament: string }>(
+      `SELECT player1_id, player2_id, table_number, id_tournament FROM bracket_matches WHERE id_match = $1`,
       [matchId]
     );
     const m = cur.rows[0];
     if (!m) return "not_found";
     // Nadie arbitra su propio partido.
     if (refereeId && (refereeId === m.player1_id || refereeId === m.player2_id)) return "own_match";
+    // Partido ya en mesa: el árbitro no puede estar en otra mesa a la vez.
+    if (refereeId && m.table_number != null && (await this.isAtOtherTable(m.id_tournament, refereeId, matchId))) return "referee_busy";
     await this.pool.query(`UPDATE bracket_matches SET referee_id = $1 WHERE id_match = $2`, [refereeId, matchId]);
     return "ok";
   }

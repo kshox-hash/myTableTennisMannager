@@ -39,6 +39,9 @@ export type ReadyMatch = {
   player2_id:    string;
   player1_name:  string | null;
   player2_name:  string | null;
+  // Árbitro asignado (null = sin árbitro). Si está ocupado en otra mesa
+  // —jugando o arbitrando— el partido tampoco puede ir a mesa.
+  referee_id?:   string | null;
 };
 
 export class TablesRepository {
@@ -108,7 +111,7 @@ export class TablesRepository {
            gm.match_number,
            gm.table_number,
            gm.called_out_of_order,
-           gm.player1_id, gm.player2_id,
+           gm.player1_id, gm.player2_id, gm.referee_id,
            COALESCE(NULLIF(TRIM(u1.last_name || ' ' || u1.first_name), ''), u1.email) AS player1_name,
            COALESCE(NULLIF(TRIM(u2.last_name || ' ' || u2.first_name), ''), u2.email) AS player2_name
          FROM group_matches gm
@@ -130,7 +133,7 @@ export class TablesRepository {
            bm.match_number,
            bm.table_number,
            bm.called_out_of_order,
-           bm.player1_id, bm.player2_id,
+           bm.player1_id, bm.player2_id, bm.referee_id,
            COALESCE(NULLIF(TRIM(u1.last_name || ' ' || u1.first_name), ''), u1.email) AS player1_name,
            COALESCE(NULLIF(TRIM(u2.last_name || ' ' || u2.first_name), ''), u2.email) AS player2_name
          FROM bracket_matches bm
@@ -155,29 +158,30 @@ export class TablesRepository {
   private async getBusyPlayerIds(id_tournament: string, client?: PoolClient): Promise<Set<string>> {
     const db = client ?? this.pool;
     const [groupRes, bracketRes] = await Promise.all([
-      db.query<{ player1_id: string; player2_id: string }>(
-        `SELECT gm.player1_id, gm.player2_id
+      db.query<{ player1_id: string; player2_id: string; referee_id: string | null }>(
+        `SELECT gm.player1_id, gm.player2_id, gm.referee_id
          FROM group_matches gm
          JOIN category_groups cg ON cg.id_group = gm.id_group
          WHERE cg.id_tournament = $1 AND gm.table_number IS NOT NULL`,
         [id_tournament]
       ),
-      db.query<{ player1_id: string | null; player2_id: string | null }>(
-        `SELECT bm.player1_id, bm.player2_id
+      db.query<{ player1_id: string | null; player2_id: string | null; referee_id: string | null }>(
+        `SELECT bm.player1_id, bm.player2_id, bm.referee_id
          FROM bracket_matches bm
          WHERE bm.id_tournament = $1 AND bm.table_number IS NOT NULL`,
         [id_tournament]
       ),
     ]);
 
+    // Ocupado = jugando en una mesa O arbitrando un partido que está en
+    // mesa: en los dos casos esa persona está en una mesa y no puede ir a
+    // otra (antes solo se contaban los jugadores: a un árbitro en plena
+    // tarea se le podía asignar un partido para jugar, y viceversa).
     const busy = new Set<string>();
-    for (const r of groupRes.rows) {
-      busy.add(r.player1_id);
-      busy.add(r.player2_id);
-    }
-    for (const r of bracketRes.rows) {
+    for (const r of [...groupRes.rows, ...bracketRes.rows]) {
       if (r.player1_id) busy.add(r.player1_id);
       if (r.player2_id) busy.add(r.player2_id);
+      if (r.referee_id) busy.add(r.referee_id);
     }
     return busy;
   }
@@ -262,12 +266,10 @@ export class TablesRepository {
     id_tournament: string
   ): Promise<{ ready: ReadyMatch[]; blocked: ReadyMatch[] }> {
     const { combined, busyPlayers } = await this.loadCandidateMatches(id_tournament);
-    const ready = combined.filter(
-      (m) => !busyPlayers.has(m.player1_id) && !busyPlayers.has(m.player2_id)
-    );
-    const blocked = combined.filter(
-      (m) => busyPlayers.has(m.player1_id) || busyPlayers.has(m.player2_id)
-    );
+    const isBusy = (m: ReadyMatch) =>
+      busyPlayers.has(m.player1_id) || busyPlayers.has(m.player2_id) || (!!m.referee_id && busyPlayers.has(m.referee_id));
+    const ready = combined.filter((m) => !isBusy(m));
+    const blocked = combined.filter(isBusy);
     return { ready: this.applyFairOrder(ready), blocked: this.applyFairOrder(blocked) };
   }
 
@@ -283,10 +285,10 @@ export class TablesRepository {
     const busyThisBatch = new Set<string>();
     const queue: ReadyMatch[] = [];
     for (const m of ready) {
-      if (busyThisBatch.has(m.player1_id) || busyThisBatch.has(m.player2_id)) continue;
+      const people = [m.player1_id, m.player2_id, ...(m.referee_id ? [m.referee_id] : [])];
+      if (people.some((id) => busyThisBatch.has(id))) continue;
       queue.push(m);
-      busyThisBatch.add(m.player1_id);
-      busyThisBatch.add(m.player2_id);
+      people.forEach((id) => busyThisBatch.add(id));
     }
     return queue;
   }
@@ -352,6 +354,7 @@ export class TablesRepository {
     type MatchRow = {
       player1_id: string | null;
       player2_id: string | null;
+      referee_id: string | null;
       id_tournament: string;
       id_category: string;
       category_type: string;
@@ -380,7 +383,7 @@ export class TablesRepository {
       const playersRes =
         match_type === "group"
           ? await client.query<MatchRow>(
-              `SELECT gm.player1_id, gm.player2_id, cg.id_tournament, tc.id_category, tc.category_type, tc.category_range
+              `SELECT gm.player1_id, gm.player2_id, gm.referee_id, cg.id_tournament, tc.id_category, tc.category_type, tc.category_range
                FROM group_matches gm
                JOIN category_groups cg ON cg.id_group = gm.id_group
                JOIN tournament_categories tc ON tc.id_category = cg.id_category
@@ -388,7 +391,7 @@ export class TablesRepository {
               [id_match]
             )
           : await client.query<MatchRow>(
-              `SELECT bm.player1_id, bm.player2_id, bm.id_tournament, tc.id_category, tc.category_type, tc.category_range
+              `SELECT bm.player1_id, bm.player2_id, bm.referee_id, bm.id_tournament, tc.id_category, tc.category_type, tc.category_range
                FROM bracket_matches bm
                JOIN tournament_categories tc ON tc.id_category = bm.id_category
                WHERE bm.id_match = $1`,
@@ -430,6 +433,10 @@ export class TablesRepository {
       ) {
         await client.query("ROLLBACK");
         throw new Error("PLAYER_ALREADY_PLAYING");
+      }
+      if (match.referee_id && busyPlayers.has(match.referee_id)) {
+        await client.query("ROLLBACK");
+        throw new Error("REFEREE_BUSY");
       }
 
       // ¿Se está llamando fuera del orden de la cola? (el despacho por

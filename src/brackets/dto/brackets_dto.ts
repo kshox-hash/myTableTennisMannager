@@ -55,6 +55,9 @@ export const BRACKETS_ERRORS = {
   BRACKET_RESULT_ALREADY_ADVANCED: "BRACKET_RESULT_ALREADY_ADVANCED",
   // Se intentó poner de árbitro a uno de los dos jugadores del partido.
   OWN_MATCH_REFEREE: "OWN_MATCH_REFEREE",
+  // El partido ya está en mesa y el árbitro elegido está en otra mesa
+  // (jugando o arbitrando): no puede estar en dos lugares a la vez.
+  REFEREE_BUSY: "REFEREE_BUSY",
 } as const;
 
 export type BracketsError = (typeof BRACKETS_ERRORS)[keyof typeof BRACKETS_ERRORS];

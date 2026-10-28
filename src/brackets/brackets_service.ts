@@ -323,6 +323,7 @@ export class BracketsService {
     const r = await this.repo.setGroupMatchReferee(matchId, refereeId);
     if (r === "not_found") return fail(BRACKETS_ERRORS.MATCH_NOT_FOUND);
     if (r === "own_match") return fail(BRACKETS_ERRORS.OWN_MATCH_REFEREE);
+    if (r === "referee_busy") return fail(BRACKETS_ERRORS.REFEREE_BUSY);
     return ok({ updated: true });
   }
 
@@ -333,6 +334,7 @@ export class BracketsService {
     const r = await this.repo.setBracketMatchReferee(matchId, refereeId);
     if (r === "not_found") return fail(BRACKETS_ERRORS.MATCH_NOT_FOUND);
     if (r === "own_match") return fail(BRACKETS_ERRORS.OWN_MATCH_REFEREE);
+    if (r === "referee_busy") return fail(BRACKETS_ERRORS.REFEREE_BUSY);
     return ok({ updated: true });
   }
 

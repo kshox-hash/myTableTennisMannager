@@ -143,6 +143,9 @@ export class BracketsController {
       if (result.error === BRACKETS_ERRORS.MATCH_NOT_FOUND) {
         return res.status(404).json({ ok: false, message: "Partido no encontrado" });
       }
+      if (result.error === BRACKETS_ERRORS.REFEREE_BUSY) {
+        return res.status(409).json({ ok: false, message: "Esa persona está en otra mesa ahora (jugando o arbitrando)." });
+      }
       if (result.error === BRACKETS_ERRORS.OWN_MATCH_REFEREE) {
         return res.status(400).json({ ok: false, message: "Un jugador no puede arbitrar su propio partido." });
       }
@@ -247,6 +250,9 @@ export class BracketsController {
     if (!result.ok) {
       if (result.error === BRACKETS_ERRORS.MATCH_NOT_FOUND) {
         return res.status(404).json({ ok: false, message: "Partido no encontrado" });
+      }
+      if (result.error === BRACKETS_ERRORS.REFEREE_BUSY) {
+        return res.status(409).json({ ok: false, message: "Esa persona está en otra mesa ahora (jugando o arbitrando)." });
       }
       if (result.error === BRACKETS_ERRORS.OWN_MATCH_REFEREE) {
         return res.status(400).json({ ok: false, message: "Un jugador no puede arbitrar su propio partido." });

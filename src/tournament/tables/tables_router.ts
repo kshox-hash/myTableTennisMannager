@@ -129,7 +129,10 @@ router.patch(
         return res.status(409).json({ ok: false, message: "Esa mesa ya está ocupada por otro partido" });
       }
       if (err instanceof Error && err.message === "PLAYER_ALREADY_PLAYING") {
-        return res.status(409).json({ ok: false, message: "Uno de los dos jugadores ya está jugando en otra mesa" });
+        return res.status(409).json({ ok: false, message: "Uno de los dos jugadores ya está en otra mesa (jugando o arbitrando)" });
+      }
+      if (err instanceof Error && err.message === "REFEREE_BUSY") {
+        return res.status(409).json({ ok: false, message: "El árbitro de este partido está en otra mesa (jugando o arbitrando)" });
       }
       if (err instanceof Error && err.message === "MATCH_NOT_FOUND") {
         return res.status(404).json({ ok: false, message: "Partido no encontrado" });

@@ -146,6 +146,28 @@ export async function claimRefereeToken(rawToken: string, idUser: string): Promi
       return { ok: false, status: 410, message: "Este código venció. Pídele al organizador uno nuevo." };
     }
     const table = tableOf(t.match_type);
+    // Quien está jugando (o arbitrando) en OTRA mesa ahora no puede tomar
+    // este partido: no puede estar en dos mesas a la vez.
+    const busy = await client.query(
+      `WITH tour AS (
+         SELECT ${t.match_type === "group"
+           ? "cg.id_tournament FROM group_matches gm JOIN category_groups cg ON cg.id_group = gm.id_group WHERE gm.id_match = $2"
+           : "id_tournament FROM bracket_matches WHERE id_match = $2"}
+       )
+       SELECT 1 FROM group_matches gm JOIN category_groups cg ON cg.id_group = gm.id_group
+        WHERE cg.id_tournament = (SELECT id_tournament FROM tour) AND gm.table_number IS NOT NULL
+          AND gm.id_match <> $2 AND $1 IN (gm.player1_id, gm.player2_id, gm.referee_id)
+       UNION ALL
+       SELECT 1 FROM bracket_matches bm
+        WHERE bm.id_tournament = (SELECT id_tournament FROM tour) AND bm.table_number IS NOT NULL
+          AND bm.id_match <> $2 AND $1 IN (bm.player1_id, bm.player2_id, bm.referee_id)
+       LIMIT 1`,
+      [idUser, t.id_match]
+    );
+    if ((busy.rowCount ?? 0) > 0) {
+      await client.query("ROLLBACK");
+      return { ok: false, status: 409, message: "Estás en otra mesa ahora. Termina ese partido y vuelve a escanear el código." };
+    }
     const upd = await client.query(
       `UPDATE ${table} SET referee_id = $1
         WHERE id_match = $2 AND status NOT IN ('played', 'walkover', 'bye')
