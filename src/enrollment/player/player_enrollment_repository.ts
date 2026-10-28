@@ -59,6 +59,7 @@ export class EnrollmentsRepository {
           tournament_status: string;
           category_status: string;
           category_phase: string;
+          has_bracket: boolean;
           category_gender: "male" | "female" | "mixed";
           user_gender: "male" | "female" | "other" | null;
           category_type: string;
@@ -84,6 +85,7 @@ export class EnrollmentsRepository {
              t.status AS tournament_status,
              tc.status AS category_status,
              COALESCE(tc.phase, 'enrollment') AS category_phase,
+             EXISTS (SELECT 1 FROM bracket_matches bm WHERE bm.id_category = tc.id_category) AS has_bracket,
              tc.gender AS category_gender,
              u.gender AS user_gender,
              tc.category_type,
@@ -104,7 +106,7 @@ export class EnrollmentsRepository {
 
         const {
           quotas, enrolled_count, already_enrolled, tournament_status,
-          category_status, category_phase, category_gender, user_gender,
+          category_status, category_phase, has_bracket, category_gender, user_gender,
           category_type, category_range, event_date, user_birth_date,
         } = quotaRes.rows[0];
 
@@ -124,7 +126,12 @@ export class EnrollmentsRepository {
           throw new Error("CATEGORY_NOT_OPEN");
         }
 
-        if (category_phase !== "enrollment") {
+        // Al empezar (fase de grupos) la categoría se cierra sola; el
+        // organizador puede reabrirla a mano y entonces se inscribe online
+        // igual (queda sin grupo hasta que el organizador lo ubique). Con la
+        // llave armada ya no entra nadie, aunque la categoría figure abierta.
+        const lateEntry = category_phase === "groups" && !has_bracket;
+        if (category_phase !== "enrollment" && !lateEntry) {
           throw new Error("CATEGORY_ALREADY_STARTED");
         }
 
@@ -191,7 +198,9 @@ export class EnrollmentsRepository {
               idUser: ctx.created_by,
               type: "enrollment_created",
               title: "Nuevo inscrito",
-              message: `${playerName} se inscribió en ${categoryLabel} (${ctx.tournament_name})`,
+              message: lateEntry
+                ? `${playerName} se inscribió en ${categoryLabel} (${ctx.tournament_name}) con los grupos ya armados: ubícalo en un grupo (Grupos → + Agregar jugador).`
+                : `${playerName} se inscribió en ${categoryLabel} (${ctx.tournament_name})`,
               idTournament: payload.id_tournament,
               idCategory: payload.id_category,
             },
@@ -212,8 +221,8 @@ export class EnrollmentsRepository {
               type: "enrollment_confirmed",
               title: "Inscripción confirmada",
               message: `Quedaste inscrito en ${categoryLabel} de ${ctx.tournament_name}.${
-                details ? ` ${details}` : ""
-              }`,
+                lateEntry ? " El campeonato ya empezó: el organizador te asignará un grupo." : ""
+              }${details ? ` ${details}` : ""}`,
               idTournament: payload.id_tournament,
               idCategory: payload.id_category,
             },

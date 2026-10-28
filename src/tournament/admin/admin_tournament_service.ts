@@ -229,6 +229,7 @@ export class AdminTournamentService {
     if (!result.updated) {
       if (result.error === "TOURNAMENT_NOT_FOUND") return fail(ADMIN_TOURNAMENT_ERRORS.TOURNAMENT_NOT_FOUND);
       if (result.error === "CATEGORY_NOT_FOUND") return fail(ADMIN_TOURNAMENT_ERRORS.CATEGORY_NOT_FOUND);
+      if (result.error === "ENROLLMENT_LOCKED") return fail(ADMIN_TOURNAMENT_ERRORS.ENROLLMENT_LOCKED);
       return fail(ADMIN_TOURNAMENT_ERRORS.NOT_TOURNAMENT_OWNER);
     }
 

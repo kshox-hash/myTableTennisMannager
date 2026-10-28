@@ -79,6 +79,7 @@ const INCREMENTAL = [
   "071_celebrations.sql",
   "072_doc_colors.sql",
   "073_account_deletion_password_reset.sql",
+  "074_close_started_categories.sql",
 ];
 
 export async function runMigrations(): Promise<void> {

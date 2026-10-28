@@ -367,6 +367,9 @@ export class AdminTournamentController {
       if (result.error === ADMIN_TOURNAMENT_ERRORS.NOT_TOURNAMENT_OWNER) {
         return res.status(403).json({ ok: false, message: "No eres el organizador de este campeonato" });
       }
+      if (result.error === ADMIN_TOURNAMENT_ERRORS.ENROLLMENT_LOCKED) {
+        return res.status(409).json({ ok: false, message: "Ya se armó la llave: las inscripciones de esta categoría quedan cerradas." });
+      }
       return res.status(400).json({ ok: false, message: result.error });
     }
 

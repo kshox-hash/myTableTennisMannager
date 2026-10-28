@@ -56,9 +56,16 @@ export class TournamentPhaseRepository {
     return res.rows;
   }
 
+  // Al salir de inscripción la categoría se cierra sola (también cuando
+  // arranca por horario programado): en fase de grupos la inscripción online
+  // vuelve a funcionar si el organizador la reabre, así que no puede quedar
+  // abierta "de arrastre". Una categoría cancelada no se toca.
   async setPhase(id_category: string, phase: CategoryPhase): Promise<void> {
     await this.pool.query(
-      `UPDATE tournament_categories SET phase = $1 WHERE id_category = $2`,
+      `UPDATE tournament_categories
+       SET phase = $1,
+           status = CASE WHEN $1 <> 'enrollment' AND status = 'active' THEN 'closed' ELSE status END
+       WHERE id_category = $2`,
       [phase, id_category]
     );
   }

@@ -1437,7 +1437,7 @@ export class AdminTournamentRepository {
     status: "active" | "closed"
   ): Promise<{
     updated: boolean;
-    error?: "TOURNAMENT_NOT_FOUND" | "NOT_TOURNAMENT_OWNER" | "CATEGORY_NOT_FOUND";
+    error?: "TOURNAMENT_NOT_FOUND" | "NOT_TOURNAMENT_OWNER" | "CATEGORY_NOT_FOUND" | "ENROLLMENT_LOCKED";
   }> {
     const client = await this.pool.connect();
     try {
@@ -1455,6 +1455,23 @@ export class AdminTournamentRepository {
       if (!(await this.isOwnerOrOrganizer(client, tournamentId, requestedBy, t.created_by))) {
         await client.query("ROLLBACK");
         return { updated: false, error: "NOT_TOURNAMENT_OWNER" };
+      }
+
+      // Reabrir solo en inscripción o en fase de grupos: con la llave armada
+      // (o la categoría terminada) la inscripción queda cerrada para siempre.
+      if (status === "active") {
+        const cRes = await client.query<{ phase: string; has_bracket: boolean }>(
+          `SELECT COALESCE(phase, 'enrollment') AS phase,
+                  EXISTS (SELECT 1 FROM bracket_matches bm WHERE bm.id_category = tc.id_category) AS has_bracket
+           FROM ${this.tournamentCategoriesTable} tc
+           WHERE tc.id_category = $1 AND tc.id_tournament = $2`,
+          [categoryId, tournamentId]
+        );
+        const c = cRes.rows[0];
+        if (c && (c.has_bracket || (c.phase !== "enrollment" && c.phase !== "groups"))) {
+          await client.query("ROLLBACK");
+          return { updated: false, error: "ENROLLMENT_LOCKED" };
+        }
       }
 
       // No pisa un status 'cancelled' (categoría dada de baja) — este
