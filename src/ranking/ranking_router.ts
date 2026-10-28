@@ -34,10 +34,53 @@ router.get(
   "/",
   authRequired,
   requireRole(["admin", "player"]),
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
     if (!GLOBAL_RANKING_ENABLED) return res.json({ ok: true, data: [] });
-    const data = await repo.getGlobalRanking();
+    // ?organizer=<id>: el ranking de ese organizador (solo sus campeonatos).
+    const data = await repo.getScopedRanking(organizerParam(req.query.organizer));
     return res.json({ ok: true, data: data.map(shapeRankingRow) });
+  })
+);
+
+// Id de organizador del query string (o null = ranking general). Un valor
+// que no es un uuid se ignora en vez de romper la consulta.
+function organizerParam(v: unknown): string | null {
+  return typeof v === "string" && /^[0-9a-f-]{36}$/i.test(v) ? v : null;
+}
+
+// GET /api/v1/ranking/scopes — los rankings que el jugador puede elegir:
+// el general y uno por cada organizador en cuyos campeonatos puntuables
+// (últimos 12 meses) tiene resultado.
+router.get(
+  "/scopes",
+  authRequired,
+  asyncHandler(async (req, res) => {
+    const organizers = await repo.getPlayerScopes(req.user!.id_user);
+    return res.json({ ok: true, data: organizers });
+  })
+);
+
+// GET /api/v1/ranking/tournaments?organizer= — campeonatos que forman ese
+// ranking ("Basado en N campeonatos…").
+router.get(
+  "/tournaments",
+  authRequired,
+  asyncHandler(async (req, res) => {
+    const data = await repo.getScopeTournaments(organizerParam(req.query.organizer));
+    return res.json({ ok: true, data });
+  })
+);
+
+// GET /api/v1/ranking/players/:id_user/breakdown?organizer= — de qué
+// campeonatos salen los puntos de un jugador y en qué ronda quedó.
+router.get(
+  "/players/:id_user/breakdown",
+  authRequired,
+  asyncHandler(async (req, res) => {
+    const id = req.params.id_user;
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ ok: false, message: "Jugador inválido" });
+    const data = await repo.getPlayerBreakdown(id, organizerParam(req.query.organizer));
+    return res.json({ ok: true, data });
   })
 );
 
