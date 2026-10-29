@@ -4,6 +4,7 @@ import { authRequired } from "../middlewares/auth_required_middleware";
 import { requireRole } from "../middlewares/require_role_middleware";
 import { PlayerRepository } from "./player_repository";
 import { dismissCelebration, getCelebrationForCategory, getPendingCelebrations } from "./celebrations";
+import { getLiveSummary } from "./live_summary";
 
 const router = Router();
 const repo   = new PlayerRepository();
@@ -17,6 +18,18 @@ router.get(
     const id_user = (req as any).user?.id_user;
     if (!id_user) return res.status(401).json({ ok: false, message: "Sin usuario en token" });
     const data = await repo.getDashboard(id_user);
+    return res.json({ ok: true, data });
+  })
+);
+
+// GET /api/v1/player/me/live-summary — "En vivo" del Inicio: cómo va cada
+// categoría que estoy jugando (clasificados y eliminados, ronda en juego).
+router.get(
+  "/me/live-summary",
+  authRequired,
+  requireRole(["admin", "player"]),
+  asyncHandler(async (req, res) => {
+    const data = await getLiveSummary(req.user!.id_user);
     return res.json({ ok: true, data });
   })
 );
