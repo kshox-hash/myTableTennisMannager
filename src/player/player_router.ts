@@ -96,7 +96,9 @@ router.get(
     const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
     const offset = req.query.offset ? parseInt(req.query.offset as string, 10) : undefined;
     const id_category = typeof req.query.category === "string" ? req.query.category : undefined;
-    const { rows, total } = await repo.getTournamentMatches(req.params.id_tournament, { status, limit, offset, id_category });
+    // ?stage=group|bracket: solo partidos de grupos o solo de llaves.
+    const stage = req.query.stage === "group" || req.query.stage === "bracket" ? req.query.stage : undefined;
+    const { rows, total } = await repo.getTournamentMatches(req.params.id_tournament, { status, limit, offset, id_category, stage });
     return res.json({ ok: true, data: { matches: rows, total } });
   })
 );
