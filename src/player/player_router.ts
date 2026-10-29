@@ -3,7 +3,7 @@ import { asyncHandler } from "../middlewares/wrap_async_middleware";
 import { authRequired } from "../middlewares/auth_required_middleware";
 import { requireRole } from "../middlewares/require_role_middleware";
 import { PlayerRepository } from "./player_repository";
-import { dismissCelebration, getPendingCelebrations } from "./celebrations";
+import { dismissCelebration, getCelebrationForCategory, getPendingCelebrations } from "./celebrations";
 
 const router = Router();
 const repo   = new PlayerRepository();
@@ -153,6 +153,21 @@ router.get(
   requireRole(["admin", "player"]),
   asyncHandler(async (req, res) => {
     const data = await getPendingCelebrations(req.user!.id_user);
+    return res.json({ ok: true, data });
+  })
+);
+
+// GET /api/v1/player/me/celebrations/category/:id_category — el resumen de
+// una categoría terminada aunque ya se haya visto (volver a abrirlo desde
+// "Logros" o la notificación "¡Eres campeón!").
+router.get(
+  "/me/celebrations/category/:id_category",
+  authRequired,
+  requireRole(["admin", "player"]),
+  asyncHandler(async (req, res) => {
+    if (!/^[0-9a-f-]{36}$/i.test(req.params.id_category)) return res.status(400).json({ ok: false, message: "Categoría inválida" });
+    const data = await getCelebrationForCategory(req.user!.id_user, req.params.id_category);
+    if (!data) return res.status(404).json({ ok: false, message: "No hay resumen para esta categoría" });
     return res.json({ ok: true, data });
   })
 );

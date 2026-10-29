@@ -24,12 +24,14 @@ export type Celebration = {
   podium: { position: number; id_user: string; name: string; avatar_url: string | null }[];
 };
 
+type CelebrationSource = {
+  id_notification: string; id_tournament: string; id_category: string;
+  tournament_name: string; category_type: string; category_range: string;
+};
+
 export async function getPendingCelebrations(idUser: string): Promise<Celebration[]> {
   const pool = DB.getPool();
-  const pending = await pool.query<{
-    id_notification: string; id_tournament: string; id_category: string;
-    tournament_name: string; category_type: string; category_range: string;
-  }>(
+  const pending = await pool.query<CelebrationSource>(
     `SELECT n.id_notification, n.id_tournament, n.id_category,
             t.tournament_name, tc.category_type, tc.category_range
      FROM notifications n
@@ -41,9 +43,33 @@ export async function getPendingCelebrations(idUser: string): Promise<Celebratio
      LIMIT 10`,
     [idUser]
   );
+  return buildCelebrations(idUser, pending.rows);
+}
+
+/** El resumen de UNA categoría terminada, aunque ya se haya visto (para
+ *  volver a abrirlo desde "Logros" o la notificación). null si no jugó ahí
+ *  o la categoría no terminó. */
+export async function getCelebrationForCategory(idUser: string, idCategory: string): Promise<Celebration | null> {
+  const res = await DB.getPool().query<CelebrationSource>(
+    `SELECT COALESCE(
+              (SELECT n.id_notification::text FROM notifications n
+               WHERE n.id_user = $1 AND n.id_category = tc.id_category AND n.type = 'final_position'
+               ORDER BY n.created_at DESC LIMIT 1), '') AS id_notification,
+            tc.id_tournament, tc.id_category, t.tournament_name, tc.category_type, tc.category_range
+     FROM tournament_categories tc
+     JOIN tournaments t ON t.id_tournament = tc.id_tournament
+     WHERE tc.id_category = $2 AND tc.phase = 'finished'`,
+    [idUser, idCategory]
+  );
+  const [c] = await buildCelebrations(idUser, res.rows);
+  return c ?? null;
+}
+
+async function buildCelebrations(idUser: string, sources: CelebrationSource[]): Promise<Celebration[]> {
+  const pool = DB.getPool();
   const repo = new PlayerRepository();
   const out: Celebration[] = [];
-  for (const p of pending.rows) {
+  for (const p of sources) {
     const { standings } = await repo.getCategoryStandings(p.id_tournament, p.id_category);
     const rows = standings as { position: number; id_user: string; player_name: string }[];
     const mine = rows.find((r) => r.id_user === idUser);
