@@ -225,18 +225,23 @@ router.post(
   requireRole("admin"),
   requireTournamentOwnership(),
   asyncHandler(async (req, res) => {
-    const { id_user, id_category, paid } = req.body ?? {};
+    const { id_user, id_category, paid, payment_method } = req.body ?? {};
     if (typeof id_user !== "string" || typeof id_category !== "string" || typeof paid !== "boolean") {
       return res.status(400).json({ ok: false, message: "Faltan campos: id_user, id_category, paid" });
     }
+    // Medio de pago (opcional): efectivo o transferencia. Al quitar el pago se borra.
+    if (payment_method != null && payment_method !== "cash" && payment_method !== "transfer") {
+      return res.status(400).json({ ok: false, message: "payment_method debe ser 'cash' o 'transfer'" });
+    }
+    const method = paid ? (payment_method ?? null) : null;
     const r = await DB.getPool().query(
-      `UPDATE enrollments SET paid = $4, paid_at = CASE WHEN $4 THEN now() ELSE NULL END
+      `UPDATE enrollments SET paid = $4, paid_at = CASE WHEN $4 THEN now() ELSE NULL END, payment_method = $5
         WHERE id_tournament = $1 AND id_user = $2 AND id_category = $3 AND status = 'active'
         RETURNING id_enrollment`,
-      [req.params.id_tournament, id_user, id_category, paid]
+      [req.params.id_tournament, id_user, id_category, paid, method]
     );
     if ((r.rowCount ?? 0) === 0) return res.status(404).json({ ok: false, message: "No se encontró inscripción activa" });
-    return res.json({ ok: true, data: { paid } });
+    return res.json({ ok: true, data: { paid, payment_method: method } });
   })
 );
 

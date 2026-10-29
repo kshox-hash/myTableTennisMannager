@@ -1224,6 +1224,7 @@ export class AdminTournamentRepository {
           e.enrolled_at,
           e.checked_in,
           e.paid,
+          e.payment_method,
 
           u.email,
           u.first_name,

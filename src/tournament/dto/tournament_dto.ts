@@ -205,6 +205,8 @@ export type EnrollmentRow = {
   status: "active" | "cancelled";
   enrolled_at: string;
   checked_in: boolean;
+  paid?: boolean;
+  payment_method?: "cash" | "transfer" | null;
 
   email: string;
   first_name: string | null;
