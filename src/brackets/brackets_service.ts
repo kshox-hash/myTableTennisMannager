@@ -87,7 +87,8 @@ export class BracketsService {
   async previewGroups(
     tournamentId: string,
     categoryId: string,
-    splitFours: number[] = []
+    splitFours: number[] = [],
+    groupSizeMode: "normal" | "fours" = "normal"
   ): Promise<Result<GroupsPreview, BracketsError>> {
     const alreadyExist = await this.repo.groupsExist(tournamentId, categoryId);
     if (alreadyExist) return fail(BRACKETS_ERRORS.GROUPS_ALREADY_EXIST);
@@ -96,7 +97,8 @@ export class BracketsService {
     if (players.length < 2) return fail(BRACKETS_ERRORS.NOT_ENOUGH_PLAYERS);
 
     const singleGroup = await this.repo.isRoundRobinCategory(categoryId);
-    const preferFours = await this.repo.isGoldCategory(categoryId);
+    // Categoría Oro: siempre de a 4, sin importar lo que elija el admin.
+    const preferFours = (await this.repo.isGoldCategory(categoryId)) || groupSizeMode === "fours";
     const generated = generateGroupsFromPlayers(players, { bestOfGroups: 3, singleGroup, splitFours, preferFours });
 
     const names = await this.repo.getUserNames(generated.members.map((m) => m.id_user));
@@ -175,7 +177,8 @@ export class BracketsService {
       pointsPerSet: input.points_per_set ?? 11,
       singleGroup: await this.repo.isRoundRobinCategory(categoryId),
       splitFours: input.split_fours ?? [],
-      preferFours: await this.repo.isGoldCategory(categoryId),
+      // Categoría Oro: siempre de a 4, sin importar lo que elija el admin.
+      preferFours: (await this.repo.isGoldCategory(categoryId)) || input.group_size_mode === "fours",
     });
 
     if (groupOrder) {
@@ -240,7 +243,8 @@ export class BracketsService {
       bestOfGroups: input.best_of_sets ?? 3,
       pointsPerSet: input.points_per_set ?? 11,
       singleGroup: await this.repo.isRoundRobinCategory(categoryId),
-      preferFours: await this.repo.isGoldCategory(categoryId),
+      // Categoría Oro: siempre de a 4, sin importar lo que elija el admin.
+      preferFours: (await this.repo.isGoldCategory(categoryId)) || input.group_size_mode === "fours",
     });
 
     const qualifiersPerGroup = await this.repo.getCategoryQualifiersPerGroup(categoryId);

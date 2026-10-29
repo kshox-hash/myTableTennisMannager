@@ -59,6 +59,13 @@ function parseSplitFours(value: unknown): number[] {
   return raw.map((v) => Number(v)).filter((n) => Number.isInteger(n) && n >= 0 && n < 64);
 }
 
+// Cómo armar los grupos (body o query): "fours" fuerza grupos de 4; cualquier
+// otro valor (o ausente) deja el comportamiento normal (prioriza grupos de
+// 3). Las categorías Oro siempre arman de a 4 e ignoran esto (ver isGoldCategory).
+function parseGroupSizeMode(value: unknown): "normal" | "fours" {
+  return value === "fours" ? "fours" : "normal";
+}
+
 export class TournamentPhaseController {
   constructor(private service: TournamentPhaseService) {}
 
@@ -97,8 +104,18 @@ export class TournamentPhaseController {
     const groupOrder = parseGroupOrder(req.body.group_order);
     const playerIds = parsePlayerIds(req.body.player_ids);
     const splitFours = parseSplitFours(req.body.split_fours);
+    const groupSizeMode = parseGroupSizeMode(req.body.group_size_mode);
 
-    const result = await this.service.advanceToGroups(id_category, id_tournament, bestOfSets, groupOrder, playerIds, splitFours, pointsPerSet);
+    const result = await this.service.advanceToGroups(
+      id_category,
+      id_tournament,
+      bestOfSets,
+      groupOrder,
+      playerIds,
+      splitFours,
+      pointsPerSet,
+      groupSizeMode
+    );
 
     if (!result.ok) {
       if (result.error === PHASE_ERRORS.CATEGORY_NOT_FOUND)
@@ -121,7 +138,12 @@ export class TournamentPhaseController {
   previewGroups = async (req: Request, res: Response) => {
     const { id_tournament, id_category } = req.params;
 
-    const result = await this.service.previewGroups(id_category, id_tournament, parseSplitFours(req.query.split_fours));
+    const result = await this.service.previewGroups(
+      id_category,
+      id_tournament,
+      parseSplitFours(req.query.split_fours),
+      parseGroupSizeMode(req.query.group_size_mode)
+    );
 
     if (!result.ok) {
       if (result.error === PHASE_ERRORS.CATEGORY_NOT_FOUND)

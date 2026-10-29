@@ -76,7 +76,8 @@ export class TournamentPhaseService {
     groupOrder?: GroupOrderInput,
     expectedPlayerIds?: string[],
     splitFours: number[] = [],
-    pointsPerSet: 11 | 21 = 11
+    pointsPerSet: 11 | 21 = 11,
+    groupSizeMode: "normal" | "fours" = "normal"
   ) {
     const cat = await this.repo.getCategoryPhase(id_category);
     if (!cat) return { ok: false as const, error: PHASE_ERRORS.CATEGORY_NOT_FOUND };
@@ -85,7 +86,7 @@ export class TournamentPhaseService {
     const result = await this.bracketsService.generateGroups(
       id_tournament,
       id_category,
-      { best_of_sets: bestOfSets, points_per_set: pointsPerSet, split_fours: splitFours },
+      { best_of_sets: bestOfSets, points_per_set: pointsPerSet, split_fours: splitFours, group_size_mode: groupSizeMode },
       groupOrder,
       expectedPlayerIds
     );
@@ -106,12 +107,17 @@ export class TournamentPhaseService {
   // Previsualiza la composición de los grupos (sin persistir) para la
   // pantalla de fixture donde el admin elige el orden de juego antes de
   // confirmar generar los grupos de verdad.
-  async previewGroups(id_category: string, id_tournament: string, splitFours: number[] = []) {
+  async previewGroups(
+    id_category: string,
+    id_tournament: string,
+    splitFours: number[] = [],
+    groupSizeMode: "normal" | "fours" = "normal"
+  ) {
     const cat = await this.repo.getCategoryPhase(id_category);
     if (!cat) return { ok: false as const, error: PHASE_ERRORS.CATEGORY_NOT_FOUND };
     if (cat.phase !== "enrollment") return { ok: false as const, error: PHASE_ERRORS.WRONG_PHASE };
 
-    return this.bracketsService.previewGroups(id_tournament, id_category, splitFours);
+    return this.bracketsService.previewGroups(id_tournament, id_category, splitFours, groupSizeMode);
   }
 
   // Avanzar manualmente de groups → bracket (genera llaves)
