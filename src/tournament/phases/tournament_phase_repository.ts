@@ -62,9 +62,12 @@ export class TournamentPhaseRepository {
   // abierta "de arrastre". Una categoría cancelada no se toca.
   async setPhase(id_category: string, phase: CategoryPhase): Promise<void> {
     await this.pool.query(
+      // $1::text en las dos partes: usado como columna y como texto a la vez,
+      // Postgres no podía deducir su tipo ("tipos de dato inconsistentes") y
+      // TODO cambio de fase fallaba DESPUÉS de crear grupos/llave.
       `UPDATE tournament_categories
-       SET phase = $1,
-           status = CASE WHEN $1 <> 'enrollment' AND status = 'active' THEN 'closed' ELSE status END
+       SET phase = $1::text,
+           status = CASE WHEN $1::text <> 'enrollment' AND status = 'active' THEN 'closed' ELSE status END
        WHERE id_category = $2`,
       [phase, id_category]
     );

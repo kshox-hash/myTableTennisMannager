@@ -1,7 +1,7 @@
 import { notifyFinalPositions } from "../../notifications/player_outcomes";
 import { TournamentPhaseRepository, type PhaseConfig } from "./tournament_phase_repository";
 import { BracketsService } from "../../brackets/brackets_service";
-import type { BracketSlotAssignmentInput, GroupOrderInput } from "../../brackets/dto/brackets_dto";
+import { BRACKETS_ERRORS, type BracketSlotAssignmentInput, type GroupOrderInput } from "../../brackets/dto/brackets_dto";
 
 export const PHASE_ERRORS = {
   CATEGORY_NOT_FOUND:    "CATEGORY_NOT_FOUND",
@@ -51,7 +51,15 @@ export class TournamentPhaseService {
       groupOrder,
       expectedPlayerIds
     );
-    if (!result.ok) return result;
+    if (!result.ok) {
+      // Recuperación: los grupos quedaron creados pero la fase no avanzó
+      // (falló el cambio de fase): se completa en vez de trabar la categoría.
+      if (result.error === BRACKETS_ERRORS.GROUPS_ALREADY_EXIST) {
+        await this.repo.setPhase(id_category, "groups");
+        return { ok: true as const, data: null };
+      }
+      return result;
+    }
 
     await this.repo.setPhase(id_category, "groups");
     return { ok: true as const, data: result.data };
@@ -93,7 +101,16 @@ export class TournamentPhaseService {
       { best_of_sets: opts.bestOfSets ?? 5 },
       opts.slotAssignment
     );
-    if (!result.ok) return result;
+    if (!result.ok) {
+      // Recuperación: la llave quedó creada pero la fase siguió en "groups"
+      // (falló el cambio de fase): se completa en vez de responder "ya
+      // existe" y dejar la pestaña Llave trabada.
+      if (result.error === BRACKETS_ERRORS.BRACKET_ALREADY_EXISTS) {
+        await this.repo.setPhase(id_category, "bracket");
+        return { ok: true as const, data: null };
+      }
+      return result;
+    }
 
     await this.repo.setPhase(id_category, "bracket");
     return { ok: true as const, data: result.data };
