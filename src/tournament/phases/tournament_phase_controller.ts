@@ -2,9 +2,15 @@ import type { Request, Response } from "express";
 import { TournamentPhaseService, PHASE_ERRORS } from "./tournament_phase_service";
 import type { BracketSlotAssignmentInput, GroupOrderInput } from "../../brackets/dto/brackets_dto";
 
-function parseBestOfSets(value: unknown, fallback: 3 | 5 | 7): 3 | 5 | 7 {
+function parseBestOfSets(value: unknown, fallback: 1 | 3 | 5 | 7): 1 | 3 | 5 | 7 {
   const n = parseInt(String(value ?? ""), 10);
-  return n === 3 || n === 5 || n === 7 ? n : fallback;
+  return n === 1 || n === 3 || n === 5 || n === 7 ? n : fallback;
+}
+
+// "1 set a 21 puntos": el otro valor posible además del estándar de 11.
+function parsePointsPerSet(value: unknown, fallback: 11 | 21): 11 | 21 {
+  const n = parseInt(String(value ?? ""), 10);
+  return n === 21 ? 21 : fallback;
 }
 
 // Validación mínima del sorteo que se manda a confirmar: un arreglo de
@@ -87,11 +93,12 @@ export class TournamentPhaseController {
   startGroups = async (req: Request, res: Response) => {
     const { id_tournament, id_category } = req.params;
     const bestOfSets = parseBestOfSets(req.body.best_of_sets, 5);
+    const pointsPerSet = parsePointsPerSet(req.body.points_per_set, 11);
     const groupOrder = parseGroupOrder(req.body.group_order);
     const playerIds = parsePlayerIds(req.body.player_ids);
     const splitFours = parseSplitFours(req.body.split_fours);
 
-    const result = await this.service.advanceToGroups(id_category, id_tournament, bestOfSets, groupOrder, playerIds, splitFours);
+    const result = await this.service.advanceToGroups(id_category, id_tournament, bestOfSets, groupOrder, playerIds, splitFours, pointsPerSet);
 
     if (!result.ok) {
       if (result.error === PHASE_ERRORS.CATEGORY_NOT_FOUND)
@@ -135,11 +142,13 @@ export class TournamentPhaseController {
   startBracket = async (req: Request, res: Response) => {
     const { id_tournament, id_category } = req.params;
     const bestOfSets = parseBestOfSets(req.body.best_of_sets, 5);
+    const pointsPerSet = parsePointsPerSet(req.body.points_per_set, 11);
     const force      = req.body.force === true;
     const slotAssignment = parseSlotAssignment(req.body.slot_assignment);
 
     const result = await this.service.advanceToBracket(id_category, id_tournament, {
       bestOfSets,
+      pointsPerSet,
       force,
       slotAssignment,
     });

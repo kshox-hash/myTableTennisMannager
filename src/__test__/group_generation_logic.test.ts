@@ -1,5 +1,6 @@
 import {
   calculateGroupPlan,
+  calculateGroupPlanPreferFours,
   sortPlayersForGrouping,
   buildSerpentineGroupOrder,
   assignPlayersToGroups,
@@ -48,6 +49,39 @@ describe("calculateGroupPlan", () => {
 
   it("resto 2 con un solo grupo base (5 jugadores) -> grupo nuevo de 2, no hay 'últimos dos' para agrandar", () => {
     expect(calculateGroupPlan(5)).toEqual([3, 2]);
+  });
+});
+
+describe("calculateGroupPlanPreferFours (categorías Oro)", () => {
+  it("rechaza menos de 2 jugadores", () => {
+    expect(() => calculateGroupPlanPreferFours(1)).toThrow();
+  });
+
+  it("casos mínimos", () => {
+    expect(calculateGroupPlanPreferFours(2)).toEqual([2]);
+    expect(calculateGroupPlanPreferFours(3)).toEqual([3]);
+    expect(calculateGroupPlanPreferFours(4)).toEqual([4]);
+  });
+
+  it("sin resto -> todos de 4", () => {
+    expect(calculateGroupPlanPreferFours(8)).toEqual([4, 4]);
+    expect(calculateGroupPlanPreferFours(16)).toEqual([4, 4, 4, 4]);
+  });
+
+  it("resto 1 -> un 4 menos, más un 3 y un 2 (3+2 = 4+1)", () => {
+    expect(calculateGroupPlanPreferFours(5)).toEqual([3, 2]);
+    expect(calculateGroupPlanPreferFours(9)).toEqual([4, 3, 2]);
+    expect(calculateGroupPlanPreferFours(13)).toEqual([4, 4, 3, 2]);
+  });
+
+  it("resto 2 -> grupo de 2 aparte", () => {
+    expect(calculateGroupPlanPreferFours(6)).toEqual([4, 2]);
+    expect(calculateGroupPlanPreferFours(10)).toEqual([4, 4, 2]);
+  });
+
+  it("resto 3 -> grupo de 3 aparte", () => {
+    expect(calculateGroupPlanPreferFours(7)).toEqual([4, 3]);
+    expect(calculateGroupPlanPreferFours(11)).toEqual([4, 4, 3]);
   });
 });
 
@@ -158,6 +192,24 @@ describe("generateGroupsFromPlayers", () => {
     }
     expect(matchesByGroup.get("group_1")).toBe(3); // grupo de 3
     expect(matchesByGroup.get("group_2")).toBe(6); // grupo de 4
+  });
+
+  it("preferFours sin resto -> todos de 4, sin pase directo", () => {
+    const players = Array.from({ length: 8 }, (_, i) => player(`p${i}`, { ranking_points: 100 - i }));
+    const result = generateGroupsFromPlayers(players, { preferFours: true });
+
+    expect(result.groups.map((g) => g.target_size)).toEqual([4, 4]);
+    expect(result.members).toHaveLength(8);
+    expect(result.directAdvancePlayers).toEqual([]);
+  });
+
+  it("preferFours con resto 1 (9 jugadores) -> 4,4 + el peor ubicado pasa directo a la llave", () => {
+    const players = Array.from({ length: 9 }, (_, i) => player(`p${i}`, { ranking_points: 100 - i }));
+    const result = generateGroupsFromPlayers(players, { preferFours: true });
+
+    expect(result.groups.map((g) => g.target_size)).toEqual([4, 4]);
+    expect(result.members).toHaveLength(8);
+    expect(result.directAdvancePlayers).toEqual(["p8"]); // peor ranking_points del lote
   });
 });
 

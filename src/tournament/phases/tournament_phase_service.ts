@@ -1,6 +1,8 @@
 import { notifyFinalPositions } from "../../notifications/player_outcomes";
 import { TournamentPhaseRepository, type PhaseConfig } from "./tournament_phase_repository";
 import { BracketsService } from "../../brackets/brackets_service";
+import { BracketsRepository } from "../../brackets/brackets_repository";
+import { AdminTournamentRepository } from "../admin/admin_tournament_repository";
 import { BRACKETS_ERRORS, type BracketSlotAssignmentInput, type GroupOrderInput } from "../../brackets/dto/brackets_dto";
 
 export const PHASE_ERRORS = {
@@ -11,10 +13,45 @@ export const PHASE_ERRORS = {
 } as const;
 
 export class TournamentPhaseService {
+  // bracketsRepo/adminRepo son opcionales (con default propio) para no
+  // romper instanciaciones existentes de TournamentPhaseService — solo
+  // hacen falta para el formato "Oro y Plata" (populateSilverBracket).
   constructor(
     private repo: TournamentPhaseRepository,
-    private bracketsService: BracketsService
+    private bracketsService: BracketsService,
+    private bracketsRepo: BracketsRepository = new BracketsRepository(),
+    private adminRepo: AdminTournamentRepository = new AdminTournamentRepository()
   ) {}
+
+  // Formato "Oro y Plata": si `goldCategoryId` tiene una categoría Plata
+  // vinculada (silver_category_id), la puebla con los no clasificados de
+  // sus grupos y genera su llave directo (sin pasar por fase de grupos).
+  // Se llama una sola vez, justo después de que Oro queda en
+  // phase='bracket' (ver advanceToBracket) — no bloquea ni revierte el
+  // avance de Oro si algo falla acá, solo se registra en consola.
+  private async populateSilverBracket(goldCategoryId: string, id_tournament: string): Promise<void> {
+    try {
+      const gold = await this.repo.getCategoryPhase(goldCategoryId);
+      if (!gold?.silver_category_id) return;
+
+      const nonQualifiers = await this.bracketsRepo.loadGroupNonQualifiers(id_tournament, goldCategoryId);
+      if (nonQualifiers.length < 2) return; // sin al menos 2, no hay llave de Plata posible
+
+      await this.adminRepo.bulkEnrollDirectAdvance(
+        id_tournament,
+        gold.silver_category_id,
+        nonQualifiers.map((p) => p.id_user)
+      );
+      const result = await this.bracketsService.generateBracket(id_tournament, gold.silver_category_id, { best_of_sets: 5 });
+      if (result.ok || result.error === BRACKETS_ERRORS.BRACKET_ALREADY_EXISTS) {
+        await this.repo.setPhase(gold.silver_category_id, "bracket");
+      } else {
+        console.error("[TournamentPhaseService.populateSilverBracket] generateBracket falló:", result.error);
+      }
+    } catch (error) {
+      console.error("[TournamentPhaseService.populateSilverBracket] Error:", error);
+    }
+  }
 
   // Obtener estado de todas las categorías de un torneo
   async getTournamentPhases(id_tournament: string) {
@@ -35,10 +72,11 @@ export class TournamentPhaseService {
   async advanceToGroups(
     id_category: string,
     id_tournament: string,
-    bestOfSets: 3 | 5 | 7 = 3,
+    bestOfSets: 1 | 3 | 5 | 7 = 3,
     groupOrder?: GroupOrderInput,
     expectedPlayerIds?: string[],
-    splitFours: number[] = []
+    splitFours: number[] = [],
+    pointsPerSet: 11 | 21 = 11
   ) {
     const cat = await this.repo.getCategoryPhase(id_category);
     if (!cat) return { ok: false as const, error: PHASE_ERRORS.CATEGORY_NOT_FOUND };
@@ -47,7 +85,7 @@ export class TournamentPhaseService {
     const result = await this.bracketsService.generateGroups(
       id_tournament,
       id_category,
-      { best_of_sets: bestOfSets, split_fours: splitFours },
+      { best_of_sets: bestOfSets, points_per_set: pointsPerSet, split_fours: splitFours },
       groupOrder,
       expectedPlayerIds
     );
@@ -80,7 +118,7 @@ export class TournamentPhaseService {
   async advanceToBracket(
     id_category: string,
     id_tournament: string,
-    opts: { bestOfSets?: 3 | 5 | 7; force?: boolean; slotAssignment?: BracketSlotAssignmentInput }
+    opts: { bestOfSets?: 1 | 3 | 5 | 7; pointsPerSet?: 11 | 21; force?: boolean; slotAssignment?: BracketSlotAssignmentInput }
   ) {
     const cat = await this.repo.getCategoryPhase(id_category);
     if (!cat) return { ok: false as const, error: PHASE_ERRORS.CATEGORY_NOT_FOUND };
@@ -98,7 +136,7 @@ export class TournamentPhaseService {
     const result = await this.bracketsService.generateBracket(
       id_tournament,
       id_category,
-      { best_of_sets: opts.bestOfSets ?? 5 },
+      { best_of_sets: opts.bestOfSets ?? 5, points_per_set: opts.pointsPerSet ?? 11 },
       opts.slotAssignment
     );
     if (!result.ok) {
@@ -107,12 +145,14 @@ export class TournamentPhaseService {
       // existe" y dejar la pestaña Llave trabada.
       if (result.error === BRACKETS_ERRORS.BRACKET_ALREADY_EXISTS) {
         await this.repo.setPhase(id_category, "bracket");
+        await this.populateSilverBracket(id_category, id_tournament);
         return { ok: true as const, data: null };
       }
       return result;
     }
 
     await this.repo.setPhase(id_category, "bracket");
+    await this.populateSilverBracket(id_category, id_tournament);
     return { ok: true as const, data: result.data };
   }
 

@@ -29,6 +29,10 @@ export type GeneratedGroup = {
   group_kind: "normal" | "manual" | "playoff_two";
   /** Clasificados de este grupo si no es el de la categoría (grupos divididos: 2). */
   qualifiers_override?: number;
+  /** De qué grupo del plan base sale (para "Dividir en 2 de 2" / "Unir"). */
+  base_index: number;
+  /** Si viene de dividir un grupo de 4 en dos de 2. */
+  is_split: boolean;
 };
 
 export type GeneratedGroupMember = {
@@ -62,7 +66,8 @@ export type GeneratedMatch = {
   stage: MatchStage;
   round_number: number;
   match_number: number;
-  best_of_sets: 3 | 5 | 7;
+  best_of_sets: 1 | 3 | 5 | 7;
+  points_per_set: 11 | 21;
   player1_id: string;
   player2_id: string;
   status: MatchStatus;
@@ -74,6 +79,9 @@ export type GeneratedGroupsResult = {
   members: GeneratedGroupMember[];
   standings: GeneratedStanding[];
   matches: GeneratedMatch[];
+  /** Categoría Oro (preferFours): jugador que sobró tras armar grupos de 4
+   *  y pasa directo a la llave sin jugar fase de grupos (ver generateGroupsFromPlayers). */
+  directAdvancePlayers: string[];
 };
 
 type InternalGroupBucket = {
@@ -87,11 +95,14 @@ type InternalGroupBucket = {
 };
 
 type GenerateGroupsOptions = {
-  bestOfGroups?: 3 | 5 | 7;
+  bestOfGroups?: 1 | 3 | 5 | 7;
+  pointsPerSet?: 11 | 21;
   /** Grupo único: todos los jugadores en un solo grupo (todos contra todos). */
   singleGroup?: boolean;
   /** Índices (del plan base) de grupos de 4 a dividir en dos grupos de 2. */
   splitFours?: number[];
+  /** Categoría Oro (ver silver_category_id): fuerza grupos de 4. */
+  preferFours?: boolean;
 };
 
 /**
@@ -181,18 +192,59 @@ export function calculateGroupPlan(totalPlayers: number): Array<2 | 3 | 4> {
 }
 
 /**
+ * Igual que calculateGroupPlan, pero priorizando grupos de 4 en vez de 3 —
+ * para categorías Oro (ver silver_category_id): con qualifiers_per_group=2,
+ * un grupo de 4 deja siempre 2 arriba (Oro) y 2 abajo (Plata). El remanente
+ * (cuando el total no es múltiplo de 4) se absorbe con como máximo un grupo
+ * de 3 y/o uno de 2, nunca agrandando o encogiendo los grupos de 4.
+ *
+ * - sobran 0 => todos de 4
+ * - sobran 1 => un 4 menos, + un grupo de 3 y uno de 2 (3+2 = 4+1)
+ * - sobran 2 => + un grupo de 2
+ * - sobran 3 => + un grupo de 3
+ */
+export function calculateGroupPlanPreferFours(totalPlayers: number): Array<2 | 3 | 4> {
+  if (totalPlayers < 2) {
+    throw new Error("Se requieren al menos 2 jugadores para generar grupos");
+  }
+
+  if (totalPlayers === 2) return [2];
+  if (totalPlayers === 3) return [3];
+  if (totalPlayers === 4) return [4];
+
+  const baseGroups = Math.floor(totalPlayers / 4);
+  const remainder = totalPlayers % 4;
+
+  if (remainder === 0) {
+    return Array(baseGroups).fill(4) as Array<2 | 3 | 4>;
+  }
+
+  if (remainder === 1) {
+    const groups = Array(baseGroups - 1).fill(4) as Array<2 | 3 | 4>;
+    groups.push(3, 2);
+    return groups;
+  }
+
+  const groups = Array(baseGroups).fill(4) as Array<2 | 3 | 4>;
+  groups.push(remainder === 2 ? 2 : 3);
+  return groups;
+}
+
+/**
  * Plan de grupos con divisiones elegidas por el organizador: cada índice de
  * `splitFours` (posición en el plan base) que sea un grupo de 4 se reemplaza
  * por dos grupos de 2 — más rápido (2 partidos en vez de 6) y, en esos
  * grupos, clasifican los dos (ver qualifiers_override).
  * `source[i]` dice de qué grupo del plan base sale cada grupo final, y
  * `split[i]` si viene de una división.
+ * `preferFours`: ver calculateGroupPlanPreferFours (categorías Oro).
  */
 export function buildGroupPlan(
   totalPlayers: number,
-  splitFours: number[] = []
+  splitFours: number[] = [],
+  preferFours = false
 ): { plan: Array<2 | 3 | 4>; source: number[]; split: boolean[] } {
-  const base = calculateGroupPlan(totalPlayers);
+  const base = preferFours ? calculateGroupPlanPreferFours(totalPlayers) : calculateGroupPlan(totalPlayers);
   const toSplit = new Set(splitFours);
   const plan: Array<2 | 3 | 4> = [];
   const source: number[] = [];
@@ -403,7 +455,8 @@ export function assignPlayersToGroups(
 export function generateRoundRobinMatches(
   group: InternalGroupBucket,
   groupIndex: number,
-  bestOfSets: 3 | 5 | 7
+  bestOfSets: 1 | 3 | 5 | 7,
+  pointsPerSet: 11 | 21 = 11
 ): GeneratedMatch[] {
   const matches: GeneratedMatch[] = [];
   let matchNumber = 1;
@@ -421,6 +474,7 @@ export function generateRoundRobinMatches(
         round_number: 1,
         match_number: matchNumber,
         best_of_sets: bestOfSets,
+        points_per_set: pointsPerSet,
         player1_id: group.players[i].id_user,
         player2_id: group.players[j].id_user,
         status: "scheduled",
@@ -477,14 +531,31 @@ export function generateGroupsFromPlayers(
   }
 
   const bestOfSets = options?.bestOfGroups ?? 3;
+  const pointsPerSet = options?.pointsPerSet ?? 11;
+  const preferFours = options?.preferFours ?? false;
 
   const sortedPlayers = sortPlayersForGrouping(rawPlayers);
+
+  // Categoría Oro (preferFours): si sobra exactamente 1 jugador después de
+  // armar todos los grupos de 4 posibles, ese jugador no puede jugar un
+  // grupo de 1 (no hay contra quién) — pasa directo a la llave de Oro sin
+  // jugar fase de grupos, como un pase directo más (ver
+  // BracketsRepository.markDirectAdvance). Se saca al último del orden
+  // competitivo (peor ranking/semilla) para no sacar de los grupos reales a
+  // alguien mejor ubicado.
+  let directAdvancePlayers: CompetitionPlayerInput[] = [];
+  let groupingPlayers = sortedPlayers;
+  if (preferFours && !options?.singleGroup && sortedPlayers.length > 4 && sortedPlayers.length % 4 === 1) {
+    directAdvancePlayers = sortedPlayers.slice(-1);
+    groupingPlayers = sortedPlayers.slice(0, -1);
+  }
+
   // Grupo único (competition_format = round_robin): todos en un grupo.
   // target_size no tiene tope en la base (solo >= 0).
   const built = options?.singleGroup
-    ? { plan: [sortedPlayers.length] as Array<2 | 3 | 4>, split: [false] }
-    : buildGroupPlan(sortedPlayers.length, options?.splitFours ?? []);
-  const buckets = assignPlayersToGroups(sortedPlayers, built.plan);
+    ? { plan: [groupingPlayers.length] as Array<2 | 3 | 4>, source: [0], split: [false] }
+    : buildGroupPlan(groupingPlayers.length, options?.splitFours ?? [], preferFours);
+  const buckets = assignPlayersToGroups(groupingPlayers, built.plan);
 
   const groups: GeneratedGroup[] = buckets.map((group, i) => ({
     temp_group_id: group.temp_group_id,
@@ -493,6 +564,8 @@ export function generateGroupsFromPlayers(
     sort_order: group.sort_order,
     status: group.status,
     group_kind: group.group_kind,
+    base_index: built.source[i],
+    is_split: built.split[i],
     // Grupos de 2 (los que salen de dividir uno de 4, o el que sobra al
     // armar los grupos): un solo partido y clasifican los dos.
     ...(built.split[i] || group.target_size === 2 ? { qualifiers_override: 2 } : {}),
@@ -507,7 +580,7 @@ export function generateGroupsFromPlayers(
   );
 
   const matches: GeneratedMatch[] = buckets.flatMap((group, index) =>
-    generateRoundRobinMatches(group, index, bestOfSets)
+    generateRoundRobinMatches(group, index, bestOfSets, pointsPerSet)
   );
 
   return {
@@ -515,6 +588,7 @@ export function generateGroupsFromPlayers(
     members,
     standings,
     matches,
+    directAdvancePlayers: directAdvancePlayers.map((p) => p.id_user),
   };
 }
 
@@ -527,7 +601,8 @@ export function generateGroupsFromPlayers(
  */
 export function buildManualGroups(
   groups: CompetitionPlayerInput[][],
-  bestOfSets: 3 | 5 | 7 = 3
+  bestOfSets: 1 | 3 | 5 | 7 = 3,
+  pointsPerSet: 11 | 21 = 11
 ): GeneratedGroupsResult {
   if (!Array.isArray(groups) || groups.length === 0) {
     throw new Error("Se requiere al menos un grupo");
@@ -549,16 +624,19 @@ export function buildManualGroups(
   }));
 
   return {
-    groups: buckets.map((group) => ({
+    groups: buckets.map((group, i) => ({
       temp_group_id: group.temp_group_id,
       group_name: group.group_name,
       target_size: group.target_size,
       sort_order: group.sort_order,
       status: group.status,
       group_kind: group.group_kind,
+      base_index: i,
+      is_split: false,
     })),
     members: buckets.flatMap((group) => buildMembers(group, "manual")),
     standings: buckets.flatMap((group) => buildStandings(group)),
-    matches: buckets.flatMap((group, index) => generateRoundRobinMatches(group, index, bestOfSets)),
+    matches: buckets.flatMap((group, index) => generateRoundRobinMatches(group, index, bestOfSets, pointsPerSet)),
+    directAdvancePlayers: [],
   };
 }

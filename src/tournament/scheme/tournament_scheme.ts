@@ -57,7 +57,9 @@ export const createTournamentSchema = z.object({
   // Nivel para el puntaje ITTF del ranking (ver ranking/ittf_points.ts).
   ranking_level: z.enum(["local", "regional", "nacional"]).optional(),
   num_tables: z.number().int().min(1).max(50).optional(),
-  default_best_of_sets: z.union([z.literal(3), z.literal(5), z.literal(7)]).optional(),
+  default_best_of_sets: z.union([z.literal(1), z.literal(3), z.literal(5), z.literal(7)]).optional(),
+  // "1 set a 21 puntos": el otro valor posible, junto con best_of_sets=1.
+  default_points_per_set: z.union([z.literal(11), z.literal(21)]).optional(),
   event_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isValidCalendarDate, { message: "Fecha inválida" }),
   event_time: z
     .string()
@@ -88,6 +90,12 @@ export const createTournamentSchema = z.object({
         // Día y hora de inicio (campeonatos de varios días).
         play_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isValidCalendarDate, { message: "Fecha inválida" }).nullable().optional(),
         start_time: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/).refine(isValidClockTime, { message: "Hora inválida" }).nullable().optional(),
+        // Formato "Oro y Plata": crea además una categoría Plata hermana,
+        // que se puebla sola con los no clasificados de los grupos de esta
+        // categoría (ver TournamentPhaseService.populateSilverBracket).
+        // Solo tiene efecto al INSERTAR la categoría (id_category ausente);
+        // no es una edición retroactiva.
+        createSilverPair: z.boolean().optional(),
       })
     )
     .optional()
@@ -104,7 +112,8 @@ export const updateTournamentSchema = z.object({
   // Nivel para el puntaje ITTF del ranking (ver ranking/ittf_points.ts).
   ranking_level: z.enum(["local", "regional", "nacional"]).optional(),
   num_tables: z.number().int().min(1).max(50).optional(),
-  default_best_of_sets: z.union([z.literal(3), z.literal(5), z.literal(7)]).optional(),
+  default_best_of_sets: z.union([z.literal(1), z.literal(3), z.literal(5), z.literal(7)]).optional(),
+  default_points_per_set: z.union([z.literal(11), z.literal(21)]).optional(),
   event_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isValidCalendarDate, { message: "Fecha inválida" }).optional(),
   event_time: z
     .string()
@@ -133,6 +142,8 @@ export const updateTournamentSchema = z.object({
         // Día y hora de inicio (campeonatos de varios días).
         play_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isValidCalendarDate, { message: "Fecha inválida" }).nullable().optional(),
         start_time: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/).refine(isValidClockTime, { message: "Hora inválida" }).nullable().optional(),
+        // Ver createTournamentSchema — misma regla, solo aplica al insertar.
+        createSilverPair: z.boolean().optional(),
       })
     )
     .optional()

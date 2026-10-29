@@ -32,7 +32,7 @@ import {
 const repo         = new BracketsRepository();
 const service      = new BracketsService(repo);
 const phaseRepo    = new TournamentPhaseRepository();
-const phaseService = new TournamentPhaseService(phaseRepo, service);
+const phaseService = new TournamentPhaseService(phaseRepo, service, repo);
 const controller   = new BracketsController(service, phaseService);
 
 const router = Router();

@@ -1,4 +1,4 @@
-import { generateGroupsFromPlayers, buildManualGroups, buildGroupPlan } from "../group_generation_logic";
+import { generateGroupsFromPlayers, buildManualGroups } from "../group_generation_logic";
 import {
   drawBracketSlotsForGroups,
   buildBracketWithPreRound,
@@ -29,30 +29,32 @@ import { type Result, ok, fail } from "../core/constants/result";
 
 // Si vienen los puntajes por set, deben ser consistentes con los sets ganados declarados
 // (ningún set puede terminar empatado, y la cuenta de sets ganados por cada uno debe calzar).
-// Un set de tenis de mesa se gana con 11 puntos, salvo que quede 10-10 (o
-// más), caso en el que se gana por una diferencia de 2 puntos (deuce). Por
+// Un set de tenis de mesa se gana con 11 puntos (o 21, formato "1 set a 21"
+// — ver points_per_set), salvo que quede a un punto del empate (10-10 u
+// 20-20), caso en el que se gana por una diferencia de 2 puntos (deuce). Por
 // ejemplo 11-9 es válido, pero 11-10 no lo es: el set debía seguir hasta
 // 12-10, 13-11, etc.
-function isLegalSetScore(p1: number, p2: number): boolean {
+function isLegalSetScore(p1: number, p2: number, pointsToWin: 11 | 21 = 11): boolean {
   if (p1 === p2) return false;
   const winner = Math.max(p1, p2);
   const loser = Math.min(p1, p2);
-  if (winner < 11) return false;
-  if (winner === 11) return loser <= 9;
+  if (winner < pointsToWin) return false;
+  if (winner === pointsToWin) return loser <= pointsToWin - 2;
   return loser === winner - 2;
 }
 
 function setScoresMatchAggregate(
   setScores: Array<{ p1: number; p2: number }> | undefined,
   setsPlayer1: number,
-  setsPlayer2: number
+  setsPlayer2: number,
+  pointsToWin: 11 | 21 = 11
 ): boolean {
   if (!setScores || setScores.length === 0) return true;
 
   let p1Wins = 0;
   let p2Wins = 0;
   for (const s of setScores) {
-    if (!isLegalSetScore(s.p1, s.p2)) return false;
+    if (!isLegalSetScore(s.p1, s.p2, pointsToWin)) return false;
     if (s.p1 > s.p2) p1Wins++;
     else p2Wins++;
   }
@@ -94,9 +96,8 @@ export class BracketsService {
     if (players.length < 2) return fail(BRACKETS_ERRORS.NOT_ENOUGH_PLAYERS);
 
     const singleGroup = await this.repo.isRoundRobinCategory(categoryId);
-    const generated = generateGroupsFromPlayers(players, { bestOfGroups: 3, singleGroup, splitFours });
-    // De qué grupo base sale cada grupo (para "Dividir en 2 de 2" / "Unir").
-    const built = singleGroup ? null : buildGroupPlan(players.length, splitFours);
+    const preferFours = await this.repo.isGoldCategory(categoryId);
+    const generated = generateGroupsFromPlayers(players, { bestOfGroups: 3, singleGroup, splitFours, preferFours });
 
     const names = await this.repo.getUserNames(generated.members.map((m) => m.id_user));
     const nameFields = (idUser: string) => {
@@ -110,13 +111,13 @@ export class BracketsService {
     };
 
     return ok({
-      groups: generated.groups.map((g, i) => ({
+      groups: generated.groups.map((g) => ({
         group_name: g.group_name,
         sort_order: g.sort_order,
         target_size: g.target_size,
         group_kind: g.group_kind,
-        base_index: built ? built.source[i] : 0,
-        is_split: built ? built.split[i] : false,
+        base_index: g.base_index,
+        is_split: g.is_split,
         members: generated.members
           .filter((m) => m.temp_group_id === g.temp_group_id)
           .map((m) => ({
@@ -129,6 +130,12 @@ export class BracketsService {
         matches: generated.matches
           .filter((m) => m.temp_group_id === g.temp_group_id)
           .map((m) => ({ match_number: m.match_number, player1_id: m.player1_id, player2_id: m.player2_id })),
+      })),
+      // Categoría Oro: jugador que sobró al armar grupos de 4 — no juega
+      // grupo, pasa directo a la llave (ver generateGroupsFromPlayers).
+      direct_advance_players: generated.directAdvancePlayers.map((idUser) => ({
+        id_user: idUser,
+        ...nameFields(idUser),
       })),
     });
   }
@@ -165,8 +172,10 @@ export class BracketsService {
 
     const generated = generateGroupsFromPlayers(players, {
       bestOfGroups: input.best_of_sets ?? 3,
+      pointsPerSet: input.points_per_set ?? 11,
       singleGroup: await this.repo.isRoundRobinCategory(categoryId),
       splitFours: input.split_fours ?? [],
+      preferFours: await this.repo.isGoldCategory(categoryId),
     });
 
     if (groupOrder) {
@@ -187,10 +196,15 @@ export class BracketsService {
     const persisted = await this.repo.persistGroups(tournamentId, categoryId, generated, qualifiersPerGroup);
     if (!persisted.persisted) return fail(BRACKETS_ERRORS.GROUPS_ALREADY_EXIST);
 
+    // Categoría Oro: el jugador que sobró al armar grupos de 4 (ver
+    // generateGroupsFromPlayers) no juega grupo — pasa directo a la llave.
+    await this.repo.markDirectAdvance(tournamentId, categoryId, generated.directAdvancePlayers);
+
+    const directAdvanceIds = new Set(generated.directAdvancePlayers);
     const names = await this.repo.getTournamentCategoryNames(tournamentId, categoryId);
     if (names) {
       await this.repo.notifications.createForMany(
-        players.map((p) => p.id_user),
+        players.filter((p) => !directAdvanceIds.has(p.id_user)).map((p) => p.id_user),
         {
           type: "groups_started",
           title: "Arrancó la fase de grupos",
@@ -224,16 +238,23 @@ export class BracketsService {
 
     const generated = generateGroupsFromPlayers(players, {
       bestOfGroups: input.best_of_sets ?? 3,
+      pointsPerSet: input.points_per_set ?? 11,
       singleGroup: await this.repo.isRoundRobinCategory(categoryId),
+      preferFours: await this.repo.isGoldCategory(categoryId),
     });
 
     const qualifiersPerGroup = await this.repo.getCategoryQualifiersPerGroup(categoryId);
     await this.repo.regenerateGroups(tournamentId, categoryId, generated, qualifiersPerGroup);
 
+    // Categoría Oro: el jugador que sobró al armar grupos de 4 (ver
+    // generateGroupsFromPlayers) no juega grupo — pasa directo a la llave.
+    await this.repo.markDirectAdvance(tournamentId, categoryId, generated.directAdvancePlayers);
+
+    const directAdvanceIds = new Set(generated.directAdvancePlayers);
     const names = await this.repo.getTournamentCategoryNames(tournamentId, categoryId);
     if (names) {
       await this.repo.notifications.createForMany(
-        players.map((p) => p.id_user),
+        players.filter((p) => !directAdvanceIds.has(p.id_user)).map((p) => p.id_user),
         {
           type: "groups_started",
           title: "Se rearmaron los grupos",
@@ -256,7 +277,7 @@ export class BracketsService {
   async setGroupsManual(
     tournamentId: string,
     categoryId: string,
-    input: { groups: string[][]; bestOfSets?: 3 | 5 | 7 }
+    input: { groups: string[][]; bestOfSets?: 1 | 3 | 5 | 7; pointsPerSet?: 11 | 21 }
   ): Promise<Result<CategoryGroupsView, BracketsError>> {
     const exists = await this.repo.groupsExist(tournamentId, categoryId);
     if (!exists) return fail(BRACKETS_ERRORS.GROUP_NOT_FOUND);
@@ -284,7 +305,7 @@ export class BracketsService {
     }
 
     const groupBuckets = input.groups.map((ids) => ids.map((id) => playerById.get(id)!));
-    const generated = buildManualGroups(groupBuckets, input.bestOfSets ?? 3);
+    const generated = buildManualGroups(groupBuckets, input.bestOfSets ?? 3, input.pointsPerSet ?? 11);
 
     const qualifiersPerGroup = await this.repo.getCategoryQualifiersPerGroup(categoryId);
     await this.repo.regenerateGroups(tournamentId, categoryId, generated, qualifiersPerGroup);
@@ -414,7 +435,7 @@ export class BracketsService {
       if (winnerSets !== setsToWin || loserSets >= setsToWin) {
         return fail(BRACKETS_ERRORS.INVALID_SET_COUNT);
       }
-      if (!setScoresMatchAggregate(set_scores, sets_player1, sets_player2)) {
+      if (!setScoresMatchAggregate(set_scores, sets_player1, sets_player2, match.points_per_set)) {
         return fail(BRACKETS_ERRORS.INVALID_SET_COUNT);
       }
     }
@@ -686,7 +707,8 @@ export class BracketsService {
     const exists = await this.repo.bracketExists(tournamentId, categoryId);
     if (exists) return fail(BRACKETS_ERRORS.BRACKET_ALREADY_EXISTS);
 
-    const bestOfSets = (input.best_of_sets ?? 5) as 3 | 5 | 7;
+    const bestOfSets = (input.best_of_sets ?? 5) as 1 | 3 | 5 | 7;
+    const pointsPerSet = (input.points_per_set ?? 11) as 11 | 21;
 
     // Semilla final: primero clasificados de grupo, luego pases directos.
     const seededPlayers = await this.loadSeededPlayers(tournamentId, categoryId);
@@ -721,7 +743,7 @@ export class BracketsService {
         .sort((a, b) => a.seed - b.seed);
     }
 
-    const generated = buildBracketWithPreRound(rankedRealPlayers, bestOfSets);
+    const generated = buildBracketWithPreRound(rankedRealPlayers, bestOfSets, pointsPerSet);
     await this.repo.persistBracket(tournamentId, categoryId, generated, requestedBy);
     await this.repo.markGroupQualifiers(tournamentId, categoryId);
 
@@ -838,7 +860,7 @@ export class BracketsService {
       if (winnerSets !== setsToWin || loserSets >= setsToWin) {
         return fail(BRACKETS_ERRORS.INVALID_SET_COUNT);
       }
-      if (!setScoresMatchAggregate(set_scores, sets_player1, sets_player2)) {
+      if (!setScoresMatchAggregate(set_scores, sets_player1, sets_player2, match.points_per_set)) {
         return fail(BRACKETS_ERRORS.INVALID_SET_COUNT);
       }
     }

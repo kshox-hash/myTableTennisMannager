@@ -29,7 +29,7 @@ async function resolveTournamentFromCategory(req: Request): Promise<string | nul
 const bracketsRepo    = new BracketsRepository();
 const bracketsService = new BracketsService(bracketsRepo);
 const phaseRepo       = new TournamentPhaseRepository();
-const phaseService    = new TournamentPhaseService(phaseRepo, bracketsService);
+const phaseService    = new TournamentPhaseService(phaseRepo, bracketsService, bracketsRepo);
 const controller      = new TournamentPhaseController(phaseService);
 
 // GET estado de fases de todas las categorías de un torneo

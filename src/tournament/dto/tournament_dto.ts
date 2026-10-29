@@ -72,6 +72,13 @@ export type TournamentCategoryDTO = {
   is_paid?: boolean;
   // Solo en el detalle para jugador: por qué no puede inscribirse (null = puede).
   ineligible_reason?: "GENDER_REQUIRED" | "GENDER_MISMATCH" | "BIRTH_DATE_REQUIRED" | "AGE_NOT_ELIGIBLE" | null;
+  // Formato "Oro y Plata" — solo tiene efecto al crear la categoría (ver
+  // TournamentPhaseService.populateSilverBracket).
+  createSilverPair?: boolean;
+  // Presente en la categoría Oro una vez creado el par: id de su Plata.
+  silver_category_id?: string | null;
+  // Presente en la categoría Plata: id de su Oro (vista inversa, calculada).
+  gold_category_id?: string | null;
 };
 
 export type TournamentCreateDTO = {
@@ -106,6 +113,8 @@ export type TournamentCreateDTO = {
   // categoría por categoría (juveniles mejor de 3, máster mejor de 5,
   // etc.), esto es solo el punto de partida.
   default_best_of_sets?: number;
+  // "1 set a 21 puntos": el otro valor posible, junto con best_of_sets=1.
+  default_points_per_set?: number;
 
   event_date: string;
   event_time?: string | null;
@@ -126,6 +135,7 @@ export type TournamentUpdateDTO = {
   ranking_level?: "local" | "regional" | "nacional";
   num_tables?: number;
   default_best_of_sets?: number;
+  default_points_per_set?: number;
 
   event_date?: string;
   event_time?: string | null;
@@ -151,6 +161,7 @@ export interface ITournament {
   ranking_level: "local" | "regional" | "nacional";
   num_tables: number;
   default_best_of_sets: number;
+  default_points_per_set: number;
 
   event_date: string;
   event_time: string | null;
@@ -182,6 +193,7 @@ export type AdminTournamentRow = {
   ranking_level: "local" | "regional" | "nacional";
   num_tables: number;
   default_best_of_sets: number;
+  default_points_per_set: number;
 
   event_date: string | null;
   event_time: string | null;
@@ -246,6 +258,8 @@ export type AdminCategoryRow = {
   qualifiers_per_group: number;
   priority: number;
   seeding_in_progress: boolean;
+  silver_category_id?: string | null;
+  gold_category_id?: string | null;
 };
 
 // Players by category for admin

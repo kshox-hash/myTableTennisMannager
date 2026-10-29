@@ -78,6 +78,7 @@ export class BracketsController {
     const result = await this.service.setGroupsManual(tournamentId, categoryId, {
       groups: req.body.groups,
       bestOfSets: req.body.best_of_sets,
+      pointsPerSet: req.body.points_per_set,
     });
 
     if (!result.ok) {

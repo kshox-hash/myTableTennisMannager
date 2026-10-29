@@ -2,7 +2,10 @@ import { z } from "zod";
 
 export const generateGroupsSchema = z
   .object({
-    best_of_sets: z.union([z.literal(3), z.literal(5), z.literal(7)]).optional(),
+    best_of_sets: z.union([z.literal(1), z.literal(3), z.literal(5), z.literal(7)]).optional(),
+    // "1 set a 21 puntos": solo tiene sentido junto con best_of_sets=1, pero
+    // no se valida la combinación acá — el default (11) cubre todo lo demás.
+    points_per_set: z.union([z.literal(11), z.literal(21)]).optional(),
     split_fours: z.array(z.number().int().min(0)).max(64).optional(),
   })
   .strict();
@@ -35,7 +38,8 @@ export const liveScoreSchema = z
 
 export const generateBracketSchema = z
   .object({
-    best_of_sets: z.union([z.literal(3), z.literal(5), z.literal(7)]).optional(),
+    best_of_sets: z.union([z.literal(1), z.literal(3), z.literal(5), z.literal(7)]).optional(),
+    points_per_set: z.union([z.literal(11), z.literal(21)]).optional(),
   })
   .strict();
 
@@ -54,7 +58,8 @@ export const setMatchRefereeSchema = z
 export const setGroupsManualSchema = z
   .object({
     groups: z.array(z.array(z.string().uuid()).min(2).max(4)).min(1),
-    best_of_sets: z.union([z.literal(3), z.literal(5), z.literal(7)]).optional(),
+    best_of_sets: z.union([z.literal(1), z.literal(3), z.literal(5), z.literal(7)]).optional(),
+    points_per_set: z.union([z.literal(11), z.literal(21)]).optional(),
   })
   .strict();
 

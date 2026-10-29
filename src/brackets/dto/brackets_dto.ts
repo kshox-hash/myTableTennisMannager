@@ -116,7 +116,8 @@ export type GroupMatchRow = {
   stage: "group";
   round_number: number;
   match_number: number;
-  best_of_sets: 3 | 5 | 7;
+  best_of_sets: 1 | 3 | 5 | 7;
+  points_per_set: 11 | 21;
   player1_id: string;
   player2_id: string;
   winner_id: string | null;
@@ -175,8 +176,18 @@ export type GroupsPreviewGroup = {
   matches: GroupsPreviewMatch[];
 };
 
+// Categoría Oro: jugador que sobra al armar grupos de 4 y pasa directo a
+// la llave, sin jugar fase de grupos (ver group_generation_logic.ts).
+export type GroupsPreviewDirectAdvancePlayer = {
+  id_user: string;
+  first_name: string | null;
+  last_name: string | null;
+  email: string;
+};
+
 export type GroupsPreview = {
   groups: GroupsPreviewGroup[];
+  direct_advance_players: GroupsPreviewDirectAdvancePlayer[];
 };
 
 // Orden de juego elegido por el admin: nombres de grupo (GR-1, GR-2, GR-3...)
@@ -199,7 +210,8 @@ export type BracketMatchRow = {
   winner_id: string | null;
   sets_player1: number;
   sets_player2: number;
-  best_of_sets: 3 | 5 | 7;
+  best_of_sets: 1 | 3 | 5 | 7;
+  points_per_set: 11 | 21;
   is_bye: boolean;
   status: "pending" | "ready" | "played" | "walkover" | "bye";
   played_at: string | null;

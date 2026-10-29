@@ -21,7 +21,8 @@ export type TempBracketMatch = {
   winner_id: string | null;
   is_bye: boolean;
   status: "pending" | "ready" | "bye";
-  best_of_sets: 3 | 5 | 7;
+  best_of_sets: 1 | 3 | 5 | 7;
+  points_per_set: 11 | 21;
   // Cuál de los dos cupos (1 o 2) nunca va a llenarse porque esa mitad del
   // cuadro no tiene ningún jugador real (rama muerta por datos incompletos).
   // Se usa en tiempo de ejecución para que, cuando se juegue el partido real
@@ -391,7 +392,8 @@ export function drawBracketSlotsForGroups(entries: GroupSeededEntry[]): DrawnSlo
  */
 export function buildBracketFromSlots(
   drawnIndexed: DrawnSlot[],
-  bestOfSets: 3 | 5 | 7 = 5
+  bestOfSets: 1 | 3 | 5 | 7 = 5,
+  pointsPerSet: 11 | 21 = 11
 ): GeneratedBracketResult {
   const drawn = drawnIndexed.map((x) => x.player);
   const drawnSeeds = drawnIndexed.map((x) => x.seed);
@@ -419,6 +421,7 @@ export function buildBracketFromSlots(
         is_bye: false,
         status: "pending",
         best_of_sets: bestOfSets,
+        points_per_set: pointsPerSet,
         dead_slot: null,
         seed1: null,
         seed2: null,
@@ -524,7 +527,8 @@ export function buildBracketFromSlots(
  */
 export function buildBracketWithPreRound(
   rankedRealPlayers: DrawnSlot[],
-  bestOfSets: 3 | 5 | 7 = 5
+  bestOfSets: 1 | 3 | 5 | 7 = 5,
+  pointsPerSet: 11 | 21 = 11
 ): GeneratedBracketResult {
   const n = rankedRealPlayers.length;
   const floor = prevPowerOf2(n);
@@ -532,7 +536,7 @@ export function buildBracketWithPreRound(
   if (floor === n) {
     // Ya es una potencia de 2 exacta: no hace falta pre-llave, mismo camino
     // de siempre (cero BYEs de por sí).
-    return buildBracketFromSlots(rankedRealPlayers, bestOfSets);
+    return buildBracketFromSlots(rankedRealPlayers, bestOfSets, pointsPerSet);
   }
 
   const surplus = n - floor;
@@ -584,6 +588,7 @@ export function buildBracketWithPreRound(
       is_bye: false,
       status: "ready",
       best_of_sets: bestOfSets,
+      points_per_set: pointsPerSet,
       dead_slot: null,
       seed1: p1.seed,
       seed2: p2.seed,
@@ -609,6 +614,7 @@ export function buildBracketWithPreRound(
         is_bye: false,
         status: "pending",
         best_of_sets: bestOfSets,
+        points_per_set: pointsPerSet,
         dead_slot: null,
         seed1: null,
         seed2: null,
@@ -691,8 +697,9 @@ export function buildBracketWithPreRound(
  */
 export function generateElimBracket(
   seededPlayers: Array<string | null>,
-  bestOfSets: 3 | 5 | 7 = 5
+  bestOfSets: 1 | 3 | 5 | 7 = 5,
+  pointsPerSet: 11 | 21 = 11
 ): GeneratedBracketResult {
   const drawn = drawBracketSlots(seededPlayers);
-  return buildBracketFromSlots(drawn, bestOfSets);
+  return buildBracketFromSlots(drawn, bestOfSets, pointsPerSet);
 }

@@ -7,7 +7,7 @@ export function startPhaseScheduler(intervalMs = 30_000) {
   const phaseRepo       = new TournamentPhaseRepository();
   const bracketsRepo    = new BracketsRepository();
   const bracketsService = new BracketsService(bracketsRepo);
-  const phaseService    = new TournamentPhaseService(phaseRepo, bracketsService);
+  const phaseService    = new TournamentPhaseService(phaseRepo, bracketsService, bracketsRepo);
 
   // Una vez al arrancar: categorías con la final jugada que quedaron "en
   // curso" y celebraciones que faltan.

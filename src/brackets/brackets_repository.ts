@@ -73,6 +73,51 @@ export class BracketsRepository {
     return res.rows[0]?.competition_format === "round_robin";
   }
 
+  // Categoría Oro (tiene una Plata hermana): sus grupos se arman siempre de
+  // a 4 (2 clasifican a la llave de Oro, 2 pasan a Plata) — ver
+  // buildGroupPlan(..., preferFours).
+  async isGoldCategory(categoryId: string): Promise<boolean> {
+    const res = await this.pool.query<{ silver_category_id: string | null }>(
+      `SELECT silver_category_id FROM tournament_categories WHERE id_category = $1`,
+      [categoryId]
+    );
+    return res.rows[0]?.silver_category_id != null;
+  }
+
+  // Jugador que sobró al armar grupos de 4 en una categoría Oro (ver
+  // group_generation_logic.ts generateGroupsFromPlayers): queda enrolado en
+  // la MISMA categoría pero sin jugar grupo — pasa directo a la llave
+  // (loadSeededPlayers ya suma loadDirectEntryPlayers a los clasificados de
+  // grupo al armar el sorteo).
+  async markDirectAdvance(tournamentId: string, categoryId: string, userIds: string[]): Promise<void> {
+    if (userIds.length === 0) return;
+    await this.pool.query(
+      `UPDATE enrollments SET qualification_type = 'direct_advance', checked_in = true
+       WHERE id_tournament = $1 AND id_category = $2 AND id_user = ANY($3::uuid[])`,
+      [tournamentId, categoryId, userIds]
+    );
+    const ctxRes = await this.pool.query<{ tournament_name: string; category_type: string; category_range: string }>(
+      `SELECT t.tournament_name, tc.category_type, tc.category_range
+       FROM tournaments t
+       JOIN tournament_categories tc ON tc.id_category = $1
+       WHERE t.id_tournament = $2`,
+      [categoryId, tournamentId]
+    );
+    const ctx = ctxRes.rows[0];
+    if (ctx) {
+      for (const userId of userIds) {
+        await this.notifications.create({
+          idUser: userId,
+          type: "enrollment_confirmed",
+          title: "Pasas directo a la llave",
+          message: `No quedaste en ningún grupo (sobraste al armar grupos de 4) de ${ctx.category_type} ${ctx.category_range} (${ctx.tournament_name}): pasas directo a la llave, sin jugar fase de grupos.`,
+          idTournament: tournamentId,
+          idCategory: categoryId,
+        });
+      }
+    }
+  }
+
   // Deshacer un resultado de un grupo único ya cerrado lo vuelve a abrir.
   async reopenRoundRobinCategory(categoryId: string): Promise<void> {
     await this.pool.query(
@@ -201,11 +246,11 @@ export class BracketsRepository {
       await client.query(
         `INSERT INTO group_matches
            (id_group, id_tournament, id_category, stage, round_number, match_number,
-            best_of_sets, player1_id, player2_id, status, source_note)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+            best_of_sets, points_per_set, player1_id, player2_id, status, source_note)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
         [
           id_group, tournamentId, categoryId, match.stage, match.round_number,
-          match.match_number, match.best_of_sets, match.player1_id,
+          match.match_number, match.best_of_sets, match.points_per_set, match.player1_id,
           match.player2_id, match.status, match.source_note,
         ]
       );
@@ -312,7 +357,7 @@ export class BracketsRepository {
       ),
       this.pool.query<GroupMatchRow>(
         `SELECT gm.id_match, gm.id_group, gm.stage, gm.round_number, gm.match_number,
-                gm.best_of_sets, gm.player1_id, gm.player2_id, gm.winner_id,
+                gm.best_of_sets, gm.points_per_set, gm.player1_id, gm.player2_id, gm.winner_id,
                 gm.sets_player1, gm.sets_player2, gm.status, gm.source_note, gm.table_number,
                 gm.played_table_number, gm.set_scores, gm.result_reason, gm.referee_id
          FROM group_matches gm
@@ -334,7 +379,7 @@ export class BracketsRepository {
   async findMatch(matchId: string): Promise<GroupMatchRow | null> {
     const res = await this.pool.query<GroupMatchRow>(
       `SELECT id_match, id_group, id_tournament, id_category, stage, round_number, match_number,
-              best_of_sets, player1_id, player2_id, winner_id,
+              best_of_sets, points_per_set, player1_id, player2_id, winner_id,
               sets_player1, sets_player2, status, source_note, set_scores, result_reason, played_table_number
        FROM group_matches WHERE id_match = $1`,
       [matchId]
@@ -922,6 +967,51 @@ export class BracketsRepository {
     );
   }
 
+  // Formato "Oro y Plata" (ver TournamentPhaseService.populateSilverBracket):
+  // los que NO clasificaron de cada grupo — mismo ranking/desempate que
+  // loadGroupQualifiers, pero el corte invertido. No hace falta un tope
+  // superior aparte: rank_in_group nunca pasa de la cantidad real de
+  // jugadores del grupo.
+  async loadGroupNonQualifiers(
+    tournamentId: string,
+    categoryId: string
+  ): Promise<Array<{ id_user: string; group_name: string; rank_in_group: number; id_club: string | null }>> {
+    const query = `
+      WITH ranked AS (
+        SELECT
+          gs.id_user,
+          cg.group_name,
+          ROW_NUMBER() OVER (
+            PARTITION BY gs.id_group
+            ORDER BY gs.won DESC,
+                     (gs.sets_for - gs.sets_against) DESC,
+                     (gs.points_for - gs.points_against) DESC,
+                     gs.id_user ASC
+          ) AS rank_in_group,
+          cg.sort_order AS group_sort_order,
+          cg.qualifiers_per_group AS qualifiers_per_group
+        FROM group_standings gs
+        JOIN category_groups cg ON cg.id_group = gs.id_group
+        WHERE cg.id_tournament = $1 AND cg.id_category = $2
+      )
+      SELECT ranked.id_user, ranked.group_name, ranked.rank_in_group, u.id_club
+      FROM ranked
+      JOIN users u ON u.id_user = ranked.id_user
+      WHERE rank_in_group > qualifiers_per_group
+      ORDER BY rank_in_group ASC, group_sort_order ASC;
+    `;
+
+    const res = await this.pool.query(query, [tournamentId, categoryId]);
+    return res.rows.map(
+      (r: { id_user: string; group_name: string; rank_in_group: string | number; id_club: string | null }) => ({
+        id_user: r.id_user,
+        group_name: r.group_name,
+        rank_in_group: Number(r.rank_in_group),
+        id_club: r.id_club,
+      })
+    );
+  }
+
   // Marca en group_standings quién clasificó al cuadro, con el mismo criterio
   // de desempate/orden y el mismo corte por grupo que loadGroupQualifiers.
   async markGroupQualifiers(tournamentId: string, categoryId: string): Promise<void> {
@@ -1007,13 +1097,13 @@ export class BracketsRepository {
              (id_tournament, id_category, round, match_number,
               player1_id, player2_id,
               next_round, next_match_number, next_match_slot,
-              winner_id, is_bye, best_of_sets, status, dead_slot, seed1, seed2)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+              winner_id, is_bye, best_of_sets, points_per_set, status, dead_slot, seed1, seed2)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
           [
             tournamentId, categoryId, match.round, match.match_number,
             match.player1_id, match.player2_id,
             match.next_round, match.next_match_number, match.next_match_slot,
-            match.winner_id, match.is_bye, match.best_of_sets, match.status,
+            match.winner_id, match.is_bye, match.best_of_sets, match.points_per_set, match.status,
             match.dead_slot, match.seed1, match.seed2,
           ]
         );
@@ -1031,7 +1121,7 @@ export class BracketsRepository {
     const res = await this.pool.query<BracketMatchRow>(
       `SELECT id_match, id_tournament, id_category, round, match_number,
               player1_id, player2_id, next_round, next_match_number, next_match_slot,
-              winner_id, sets_player1, sets_player2, best_of_sets,
+              winner_id, sets_player1, sets_player2, best_of_sets, points_per_set,
               is_bye, status, played_at::text, set_scores, result_reason, table_number, played_table_number,
               referee_id, dead_slot, seed1, seed2
        FROM bracket_matches
@@ -1046,7 +1136,7 @@ export class BracketsRepository {
     const res = await this.pool.query<BracketMatchRow>(
       `SELECT id_match, id_tournament, id_category, round, match_number,
               player1_id, player2_id, next_round, next_match_number, next_match_slot,
-              winner_id, sets_player1, sets_player2, best_of_sets,
+              winner_id, sets_player1, sets_player2, best_of_sets, points_per_set,
               is_bye, status, played_at::text, set_scores, result_reason, dead_slot
        FROM bracket_matches WHERE id_match = $1`,
       [matchId]

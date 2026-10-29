@@ -35,6 +35,7 @@ type TournamentRow = {
   ranking_level: "local" | "regional" | "nacional";
   num_tables: number | string;
   default_best_of_sets: number | string;
+  default_points_per_set: number | string;
   event_date: string | Date | null;
   event_time: string | null;
   end_date?: string | Date | null;
@@ -54,10 +55,12 @@ type CategoryRow = {
   status: string;
   qualifiers_per_group: number | string;
   priority: number | string;
+  format?: "singles" | "doubles";
   competition_format?: "groups_bracket" | "round_robin";
   play_date?: string | Date | null;
   start_time?: string | null;
   created_at?: string | Date | null;
+  silver_category_id?: string | null;
 };
 
 type TournamentWithCategoryRow = {
@@ -75,6 +78,7 @@ type TournamentWithCategoryRow = {
   ranking_level: "local" | "regional" | "nacional";
   num_tables: number | string;
   default_best_of_sets: number | string;
+  default_points_per_set: number | string;
   event_date: string | Date | null;
   event_time: string | null;
   end_date?: string | Date | null;
@@ -224,6 +228,7 @@ export class AdminTournamentRepository {
       competition_format: row.competition_format ?? "groups_bracket",
       play_date: this.formatDate(row.play_date ?? null),
       start_time: this.formatTime(row.start_time ?? null),
+      silver_category_id: row.silver_category_id ?? null,
     };
   }
 
@@ -246,6 +251,7 @@ export class AdminTournamentRepository {
       ranking_level: tournamentRow.ranking_level ?? "local",
       num_tables: Number(tournamentRow.num_tables ?? 4),
       default_best_of_sets: Number(tournamentRow.default_best_of_sets ?? 3),
+      default_points_per_set: Number(tournamentRow.default_points_per_set ?? 11),
       event_date: this.formatDate(tournamentRow.event_date),
       event_time: this.formatTime(tournamentRow.event_time),
       end_date: this.formatDate(tournamentRow.end_date ?? null),
@@ -270,6 +276,7 @@ export class AdminTournamentRepository {
       ranking_level: row.ranking_level ?? "local",
       num_tables: Number(row.num_tables ?? 4),
       default_best_of_sets: Number(row.default_best_of_sets ?? 3),
+      default_points_per_set: Number(row.default_points_per_set ?? 11),
       event_date: this.formatDate(row.event_date),
       event_time: this.formatTime(row.event_time),
       end_date: this.formatDate(row.end_date ?? null),
@@ -294,6 +301,7 @@ export class AdminTournamentRepository {
       ranking_level: row.ranking_level ?? "local",
       num_tables: Number(row.num_tables ?? 4),
       default_best_of_sets: Number(row.default_best_of_sets ?? 3),
+      default_points_per_set: Number(row.default_points_per_set ?? 11),
       event_date: row.event_date ? this.formatDate(row.event_date) : null,
       event_time: row.event_time ? this.formatTime(row.event_time) : null,
       end_date: this.formatDate(row.end_date ?? null),
@@ -365,11 +373,12 @@ export class AdminTournamentRepository {
           is_ranked,
           num_tables,
           default_best_of_sets,
+          default_points_per_set,
           contact_phone,
           ranking_level
         )
       VALUES
-        ($1, $2, $3, $4, $5, $6::date, $7::time, $8, $9, $10, $11, $12, $13, $14, $15)
+        ($1, $2, $3, $4, $5, $6::date, $7::time, $8, $9, $10, $11, $12, $13, $14, $15, $16)
       RETURNING *;
     `;
 
@@ -387,6 +396,7 @@ export class AdminTournamentRepository {
       payload.is_ranked ?? true,
       payload.num_tables ?? 4,
       payload.default_best_of_sets ?? 3,
+      payload.default_points_per_set ?? 11,
       payload.contact_phone?.trim() || null,
       payload.ranking_level ?? "local",
     ];
@@ -455,6 +465,37 @@ export class AdminTournamentRepository {
     return res.rows;
   }
 
+  // Formato "Oro y Plata": crea la categoría Plata hermana de `gold` (mismo
+  // tipo/género/formato/qualifiers_per_group, rango "<rango> · Plata",
+  // siempre competition_format='groups_bracket' — nunca corre su propia
+  // fase de grupos, se puebla sola con los no clasificados de `gold`, ver
+  // TournamentPhaseService.populateSilverBracket) y liga ambas filas.
+  private async createSilverSibling(client: PoolClient, tournamentId: string, gold: CategoryRow): Promise<string> {
+    const silverRes = await client.query<{ id_category: string }>(
+      `INSERT INTO ${this.tournamentCategoriesTable}
+         (id_tournament, category_type, category_range, gender, inscription_price, quotas, status, qualifiers_per_group, priority, format, competition_format, play_date, start_time)
+       VALUES ($1, $2, $3, $4, 0, NULL, 'active', $5, $6, $7, 'groups_bracket', $8::date, $9::time)
+       RETURNING id_category`,
+      [
+        tournamentId,
+        gold.category_type,
+        `${gold.category_range} · Plata`,
+        gold.gender,
+        gold.qualifiers_per_group,
+        gold.priority,
+        gold.format ?? "singles",
+        gold.play_date ?? null,
+        gold.start_time ?? null,
+      ]
+    );
+    const silverId = silverRes.rows[0].id_category;
+    await client.query(
+      `UPDATE ${this.tournamentCategoriesTable} SET silver_category_id = $1 WHERE id_category = $2`,
+      [silverId, gold.id_category]
+    );
+    return silverId;
+  }
+
   // -----------------------
   // ADMIN: CREATE TOURNAMENT
   // -----------------------
@@ -468,6 +509,11 @@ export class AdminTournamentRepository {
           tournamentRow.id_tournament,
           payload.categories
         );
+        for (const [index, cat] of (payload.categories ?? []).entries()) {
+          if (cat.createSilverPair) {
+            categoryRows[index].silver_category_id = await this.createSilverSibling(client, tournamentRow.id_tournament, categoryRows[index]);
+          }
+        }
         const endDate = await this.recomputeEndDate(client, tournamentRow.id_tournament);
 
         return this.mapTournamentRowToITournament({ ...tournamentRow, end_date: endDate }, categoryRows);
@@ -563,6 +609,10 @@ export class AdminTournamentRepository {
       if (payload.default_best_of_sets !== undefined) {
         fields.push(`default_best_of_sets = $${i++}`);
         values.push(payload.default_best_of_sets);
+      }
+      if (payload.default_points_per_set !== undefined) {
+        fields.push(`default_points_per_set = $${i++}`);
+        values.push(payload.default_points_per_set);
       }
       if (payload.event_date !== undefined) {
         fields.push(`event_date = $${i++}::date`);
@@ -738,10 +788,11 @@ export class AdminTournamentRepository {
           ]
         );
       } else {
-        await client.query(
+        const insertedRes = await client.query<{ id_category: string }>(
           `INSERT INTO ${this.tournamentCategoriesTable}
              (id_tournament, category_type, category_range, gender, inscription_price, quotas, status, qualifiers_per_group, priority, format, competition_format, play_date, start_time)
-           VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, $8, $9, $10, $11::date, $12::time)`,
+           VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, $8, $9, $10, $11::date, $12::time)
+           RETURNING id_category`,
           [
             tournamentId,
             cat.category_type.trim(),
@@ -757,6 +808,23 @@ export class AdminTournamentRepository {
             cat.start_time ?? null,
           ]
         );
+        if (cat.createSilverPair) {
+          await this.createSilverSibling(client, tournamentId, {
+            id_category: insertedRes.rows[0].id_category,
+            id_tournament: tournamentId,
+            category_type: cat.category_type.trim(),
+            category_range: cat.category_range.trim(),
+            gender: cat.gender,
+            inscription_price: cat.inscription_price,
+            quotas: cat.quotas ?? null,
+            status: "active",
+            qualifiers_per_group: cat.qualifiers_per_group ?? 2,
+            priority: cat.priority ?? 1,
+            format: cat.format === "doubles" ? "doubles" : "singles",
+            play_date: cat.play_date ?? null,
+            start_time: cat.start_time ?? null,
+          });
+        }
       }
     }
 
@@ -910,7 +978,7 @@ export class AdminTournamentRepository {
         `SELECT
            t.id_tournament, t.tournament_name, t.description, t.created_by,
            t.allow_mixed, t.allow_olympic, t.address, t.contact_phone, t.region, t.visibility, t.is_ranked, t.ranking_level,
-           t.num_tables, t.default_best_of_sets,
+           t.num_tables, t.default_best_of_sets, t.default_points_per_set,
            t.event_date, t.event_time, t.end_date, t.day_hours, t.created_at,
            c.id_category, c.category_type, c.category_range, c.gender,
            c.inscription_price, c.quotas, c.status, c.phase, c.priority, c.play_date, c.start_time,
@@ -994,7 +1062,7 @@ export class AdminTournamentRepository {
       `SELECT
          t.id_tournament, t.tournament_name, t.description, t.created_by,
          t.allow_mixed, t.allow_olympic, t.address, t.contact_phone, t.region, t.visibility, t.is_ranked, t.ranking_level,
-         t.num_tables, t.default_best_of_sets,
+         t.num_tables, t.default_best_of_sets, t.default_points_per_set,
          t.event_date, t.event_time, t.end_date, t.day_hours, t.created_at,
          t.status AS tournament_status, t.kind AS tournament_kind,
          c.id_category, c.category_type, c.category_range, c.gender,
@@ -1133,6 +1201,7 @@ export class AdminTournamentRepository {
           t.ranking_level,
           t.num_tables,
           t.default_best_of_sets,
+          t.default_points_per_set,
           t.event_date,
           t.event_time,
           t.end_date,
@@ -1279,13 +1348,17 @@ export class AdminTournamentRepository {
         c.seeding_in_progress,
         c.play_date,
         c.start_time,
+        c.silver_category_id,
+        gold.id_category AS gold_category_id,
         COUNT(e.id_enrollment) FILTER (WHERE e.status = 'active')::int AS enrolled_count
       FROM ${this.tournamentCategoriesTable} c
       LEFT JOIN ${this.enrollmentsTable} e
         ON e.id_category = c.id_category
        AND e.id_tournament = c.id_tournament
+      LEFT JOIN ${this.tournamentCategoriesTable} gold
+        ON gold.silver_category_id = c.id_category
       WHERE c.id_tournament = $1
-      GROUP BY c.id_category
+      GROUP BY c.id_category, gold.id_category
       ORDER BY c.priority ASC, c.category_type ASC, c.category_range ASC, c.gender ASC;
     `;
 
@@ -1419,6 +1492,58 @@ export class AdminTournamentRepository {
       if (error?.code === "23505") throw new Error("PLAYER_ALREADY_ENROLLED");
       if (error?.code === "23503") throw new Error("INVALID_IDS");
       throw error;
+    }
+  }
+
+  // Formato "Oro y Plata" (ver TournamentPhaseService.populateSilverBracket):
+  // inscribe de una sola vez a los no clasificados de Oro en la categoría
+  // Plata, como pase directo (qualification_type='direct_advance',
+  // checked_in=true — lo que después lee loadDirectEntryPlayers para
+  // sembrar la llave de Plata sin pasar por fase de grupos). Mismo ON
+  // CONFLICT que adminAddPlayer, por si se vuelve a llamar (idempotente).
+  async bulkEnrollDirectAdvance(tournamentId: string, categoryId: string, userIds: string[]): Promise<void> {
+    if (userIds.length === 0) return;
+
+    const values: string[] = [];
+    const placeholders: string[] = [];
+    userIds.forEach((userId, i) => {
+      const base = i * 3;
+      placeholders.push(`($${base + 1}, $${base + 2}, $${base + 3}, 'direct_advance')`);
+      values.push(userId, tournamentId, categoryId);
+    });
+
+    await this.pool.query(
+      `INSERT INTO ${this.enrollmentsTable} (id_user, id_tournament, id_category, qualification_type)
+       VALUES ${placeholders.join(",")}
+       ON CONFLICT (id_user, id_tournament, id_category)
+       DO UPDATE SET
+         status = 'active',
+         enrolled_at = NOW(),
+         qualification_type = EXCLUDED.qualification_type,
+         seed = NULL,
+         checked_in = true`,
+      values
+    );
+
+    const ctxRes = await this.pool.query<{ tournament_name: string; category_type: string; category_range: string }>(
+      `SELECT t.tournament_name, tc.category_type, tc.category_range
+       FROM tournaments t
+       JOIN tournament_categories tc ON tc.id_category = $1
+       WHERE t.id_tournament = $2`,
+      [categoryId, tournamentId]
+    );
+    const ctx = ctxRes.rows[0];
+    if (ctx) {
+      for (const userId of userIds) {
+        await this.notifications.create({
+          idUser: userId,
+          type: "enrollment_confirmed",
+          title: "Pasaste a la llave de Plata",
+          message: `No clasificaste directo, pero pasaste a jugar ${ctx.category_type} ${ctx.category_range} (${ctx.tournament_name})`,
+          idTournament: tournamentId,
+          idCategory: categoryId,
+        });
+      }
     }
   }
 
