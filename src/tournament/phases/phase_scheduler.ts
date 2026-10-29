@@ -9,6 +9,10 @@ export function startPhaseScheduler(intervalMs = 30_000) {
   const bracketsService = new BracketsService(bracketsRepo);
   const phaseService    = new TournamentPhaseService(phaseRepo, bracketsService);
 
+  // Una vez al arrancar: categorías con la final jugada que quedaron "en
+  // curso" y celebraciones que faltan.
+  void phaseService.repairFinishedCategories();
+
   setInterval(async () => {
     try {
       await phaseService.processScheduled();

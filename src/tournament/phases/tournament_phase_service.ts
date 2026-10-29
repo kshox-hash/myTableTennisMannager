@@ -167,6 +167,25 @@ export class TournamentPhaseService {
     await this.advanceToBracket(id_category, id_tournament, { force: true });
   }
 
+  // Al arrancar el servidor: termina las categorías con la final jugada que
+  // quedaron "en curso" y manda las celebraciones que faltan (idempotente:
+  // notifyFinalPositions no repite a quien ya avisó).
+  async repairFinishedCategories(): Promise<void> {
+    try {
+      const { toFinish, toNotify } = await this.repo.categoriesToRepair();
+      for (const id of toFinish) {
+        await this.repo.setPhase(id, "finished");
+        await notifyFinalPositions(id);
+      }
+      for (const id of toNotify) await notifyFinalPositions(id);
+      if (toFinish.length || toNotify.length) {
+        console.log(`[phases] reparadas: ${toFinish.length} terminadas, ${toNotify.length} con celebración pendiente`);
+      }
+    } catch (err) {
+      console.error("[phases] repairFinishedCategories", err);
+    }
+  }
+
   // Llamado tras registrar resultado de partido de llave (auto-finish)
   async checkBracketAutoFinish(id_category: string) {
     const cat = await this.repo.getCategoryPhase(id_category);

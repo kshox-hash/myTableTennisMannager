@@ -107,17 +107,43 @@ export class TournamentPhaseRepository {
   }
 
   // Verifica si todos los partidos de llaves tienen resultado
+  // La categoría termina cuando la FINAL (el partido de la última ronda)
+  // tiene ganador. Antes se exigía que TODOS los partidos de la llave lo
+  // tuvieran: un lugar vacío de pre-llave o un BYE sin cerrar dejaba la
+  // categoría "en curso" para siempre, sin podio ni celebración.
   async allBracketMatchesFinished(id_category: string): Promise<boolean> {
-    const res = await this.pool.query<{ total: string; finished: string }>(
-      `SELECT
-         COUNT(*)                                    AS total,
-         COUNT(*) FILTER (WHERE winner_id IS NOT NULL) AS finished
-       FROM bracket_matches
-       WHERE id_category = $1`,
+    const res = await this.pool.query<{ winner_id: string | null }>(
+      `SELECT winner_id FROM bracket_matches
+       WHERE id_category = $1
+         AND round = (SELECT MAX(round) FROM bracket_matches WHERE id_category = $1)
+       ORDER BY match_number ASC
+       LIMIT 1`,
       [id_category]
     );
-    const { total, finished } = res.rows[0];
-    return parseInt(total) > 0 && total === finished;
+    return res.rows[0]?.winner_id != null;
+  }
+
+  // Reparación al arrancar: categorías con la final jugada que quedaron "en
+  // curso" (p. ej. por el error del cambio de fase) y categorías terminadas
+  // en los últimos 60 días cuyos jugadores no recibieron su celebración.
+  async categoriesToRepair(): Promise<{ toFinish: string[]; toNotify: string[] }> {
+    const fin = await this.pool.query<{ id_category: string }>(
+      `SELECT tc.id_category FROM tournament_categories tc
+       WHERE tc.phase = 'bracket'
+         AND EXISTS (
+           SELECT 1 FROM bracket_matches bm
+           WHERE bm.id_category = tc.id_category AND bm.winner_id IS NOT NULL
+             AND bm.round = (SELECT MAX(round) FROM bracket_matches b2 WHERE b2.id_category = tc.id_category)
+         )`
+    );
+    const notify = await this.pool.query<{ id_category: string }>(
+      `SELECT tc.id_category FROM tournament_categories tc
+       JOIN tournaments t ON t.id_tournament = tc.id_tournament
+       WHERE tc.phase = 'finished' AND NOT COALESCE(tc.finished_early, false)
+         AND COALESCE(t.event_date, t.created_at::date) >= CURRENT_DATE - INTERVAL '60 days'
+         AND NOT EXISTS (SELECT 1 FROM notifications n WHERE n.id_category = tc.id_category AND n.type = 'final_position')`
+    );
+    return { toFinish: fin.rows.map((r) => r.id_category), toNotify: notify.rows.map((r) => r.id_category) };
   }
 
   // Para el job: categorías con inicio programado que aún no arrancaron
