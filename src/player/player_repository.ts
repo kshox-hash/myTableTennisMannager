@@ -167,7 +167,10 @@ export class PlayerRepository {
          LEFT JOIN clubs oppcl ON oppcl.id_club = opp.id_club
          WHERE (bm.player1_id = ANY($1::uuid[]) OR bm.player2_id = ANY($1::uuid[]))
            AND bm.winner_id IS NULL
-           AND bm.player1_id IS NOT NULL AND bm.player2_id IS NOT NULL
+           -- Sin rival todavía (espera al ganador de otro partido) también
+           -- cuenta: si no, el jugador veía "no tienes partido programado"
+           -- aunque ya esté en la llave.
+           AND bm.is_bye = FALSE
            AND t.status <> 'cancelled'
          ORDER BY tc.id_category, bm.table_number DESC NULLS LAST`,
         [ids]
@@ -219,7 +222,7 @@ export class PlayerRepository {
       m.queue_blocked = false;
       m.self_pending = false;
       m.blocking_table_number = null;
-      if (m.table_number === null) {
+      if (m.table_number === null && m.opponent_id) {
         const q = queuesByTournament.get(m.id_tournament);
         if (q) {
           const idx = q.queue.findIndex((qm) => qm.id_match === m.id_match);
