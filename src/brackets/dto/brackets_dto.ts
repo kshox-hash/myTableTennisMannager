@@ -129,6 +129,7 @@ export type GroupMatchRow = {
   played_table_number: number | null;
   set_scores: SetScore[] | null;
   referee_id: string | null;
+  referee_name?: string | null;
 };
 
 export type CategoryGroupsView = {
@@ -219,6 +220,7 @@ export type BracketMatchRow = {
   table_number: number | null;
   played_table_number: number | null;
   referee_id: string | null;
+  referee_name?: string | null;
   dead_slot: 1 | 2 | null;
   seed1: number | null;
   seed2: number | null;

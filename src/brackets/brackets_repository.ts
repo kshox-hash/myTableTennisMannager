@@ -17,6 +17,12 @@ import type {
   BracketsError,
 } from "./dto/brackets_dto";
 
+// El árbitro puede no jugar en el campeonato (se agrega por correo): su nombre no
+// está entre los jugadores de la categoría y hay que traerlo aparte.
+const REFEREE_NAME_SQL = (alias: string) =>
+  `(SELECT COALESCE(NULLIF(TRIM(COALESCE(r.first_name, '') || ' ' || COALESCE(r.last_name, '')), ''), r.email)
+    FROM users r WHERE r.id_user = ${alias}.referee_id)`;
+
 export class BracketsRepository {
   private pool: Pool;
   notifications: NotificationsRepository;
@@ -373,7 +379,8 @@ export class BracketsRepository {
         `SELECT gm.id_match, gm.id_group, gm.stage, gm.round_number, gm.match_number,
                 gm.best_of_sets, gm.points_per_set, gm.player1_id, gm.player2_id, gm.winner_id,
                 gm.sets_player1, gm.sets_player2, gm.status, gm.source_note, gm.table_number,
-                gm.played_table_number, gm.set_scores, gm.result_reason, gm.referee_id
+                gm.played_table_number, gm.set_scores, gm.result_reason, gm.referee_id,
+                ${REFEREE_NAME_SQL("gm")} AS referee_name
          FROM group_matches gm
          JOIN category_groups cg ON cg.id_group = gm.id_group
          WHERE cg.id_tournament = $1 AND cg.id_category = $2
@@ -1136,7 +1143,7 @@ export class BracketsRepository {
               player1_id, player2_id, next_round, next_match_number, next_match_slot,
               winner_id, sets_player1, sets_player2, best_of_sets, points_per_set,
               is_bye, status, played_at::text, set_scores, result_reason, table_number, played_table_number,
-              referee_id, dead_slot, seed1, seed2
+              referee_id, ${REFEREE_NAME_SQL("bracket_matches")} AS referee_name, dead_slot, seed1, seed2
        FROM bracket_matches
        WHERE id_tournament = $1 AND id_category = $2
        ORDER BY round ASC, match_number ASC`,
