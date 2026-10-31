@@ -2075,6 +2075,25 @@ export class BracketsRepository {
     return "ok";
   }
 
+  // Corrige el formato de una categoría ya armada: mejor de N, sets a 11. Lo
+  // jugado no se toca: esos resultados quedarían fuera de regla.
+  async setPendingMatchesBestOf(tournamentId: string, categoryId: string, bestOfSets: number): Promise<number> {
+    const groups = await this.pool.query(
+      `UPDATE group_matches gm SET best_of_sets = $1, points_per_set = 11
+         FROM category_groups cg
+        WHERE cg.id_group = gm.id_group AND cg.id_tournament = $2 AND cg.id_category = $3
+          AND (gm.best_of_sets <> $1 OR gm.points_per_set <> 11) AND gm.status NOT IN ('played', 'walkover')`,
+      [bestOfSets, tournamentId, categoryId]
+    );
+    const bracket = await this.pool.query(
+      `UPDATE bracket_matches SET best_of_sets = $1, points_per_set = 11
+        WHERE id_tournament = $2 AND id_category = $3
+          AND (best_of_sets <> $1 OR points_per_set <> 11) AND status NOT IN ('played', 'walkover', 'bye')`,
+      [bestOfSets, tournamentId, categoryId]
+    );
+    return (groups.rowCount ?? 0) + (bracket.rowCount ?? 0);
+  }
+
   async setBracketMatchReferee(matchId: string, refereeId: string | null): Promise<"ok" | "not_found" | "own_match" | "referee_busy"> {
     const cur = await this.pool.query<{ player1_id: string | null; player2_id: string | null; table_number: number | null; id_tournament: string }>(
       `SELECT player1_id, player2_id, table_number, id_tournament FROM bracket_matches WHERE id_match = $1`,

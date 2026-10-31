@@ -357,6 +357,10 @@ export class BracketsService {
     return ok({ updated: true });
   }
 
+  async setMatchesBestOf(tournamentId: string, categoryId: string, bestOfSets: number): Promise<number> {
+    return this.repo.setPendingMatchesBestOf(tournamentId, categoryId, bestOfSets);
+  }
+
   async setBracketMatchReferee(
     matchId: string,
     refereeId: string | null

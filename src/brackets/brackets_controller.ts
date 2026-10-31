@@ -134,6 +134,16 @@ export class BracketsController {
     return res.json({ ok: true, data: result.data });
   };
 
+  // PATCH /api/v1/bracket/tournaments/:id_tournament/categories/:id_category/best-of
+  setMatchesBestOf = async (req: Request, res: Response) => {
+    const updated = await this.service.setMatchesBestOf(
+      req.params.id_tournament?.trim(),
+      req.params.id_category?.trim(),
+      req.body.best_of_sets
+    );
+    return res.json({ ok: true, data: { updated } });
+  };
+
   // PATCH /api/v1/bracket/matches/:id_match/referee
   setGroupMatchReferee = async (req: Request, res: Response) => {
     const matchId = req.params.id_match?.trim();

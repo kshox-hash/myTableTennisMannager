@@ -53,6 +53,13 @@ export const updateGroupQualifiersSchema = z
   })
   .strict();
 
+// Corregir el formato de los partidos que faltan por jugar.
+export const setMatchesBestOfSchema = z
+  .object({
+    best_of_sets: z.union([z.literal(3), z.literal(5), z.literal(7)]),
+  })
+  .strict();
+
 export const setMatchRefereeSchema = z
   .object({
     referee_id: z.string().uuid("referee_id inválido").nullable(),

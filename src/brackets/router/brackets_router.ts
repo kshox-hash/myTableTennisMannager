@@ -20,6 +20,7 @@ import {
   generateBracketSchema,
   updateGroupQualifiersSchema,
   setMatchRefereeSchema,
+  setMatchesBestOfSchema,
   moveGroupMemberSchema,
   setGroupsManualSchema,
   addPlayerToGroupSchema,
@@ -91,6 +92,17 @@ router.get(
   "/tournaments/:id_tournament/categories/:id_category",
   authRequired,
   asyncHandler(controller.getGroups)
+);
+
+// Corregir el formato (mejor de 3, 5 o 7) de los partidos sin jugar
+// PATCH /api/v1/bracket/tournaments/:id_tournament/categories/:id_category/best-of
+router.patch(
+  "/tournaments/:id_tournament/categories/:id_category/best-of",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(),
+  validateBody(setMatchesBestOfSchema),
+  asyncHandler(controller.setMatchesBestOf)
 );
 
 // Rearmar los grupos de cero con todos los inscritos actuales (solo si nadie jugó todavía)

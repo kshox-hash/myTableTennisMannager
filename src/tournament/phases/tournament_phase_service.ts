@@ -29,7 +29,11 @@ export class TournamentPhaseService {
   // Se llama una sola vez, justo después de que Oro queda en
   // phase='bracket' (ver advanceToBracket) — no bloquea ni revierte el
   // avance de Oro si algo falla acá, solo se registra en consola.
-  private async populateSilverBracket(goldCategoryId: string, id_tournament: string): Promise<void> {
+  private async populateSilverBracket(
+    goldCategoryId: string,
+    id_tournament: string,
+    format: { bestOfSets?: 1 | 3 | 5 | 7; pointsPerSet?: 11 | 21 }
+  ): Promise<void> {
     try {
       const gold = await this.repo.getCategoryPhase(goldCategoryId);
       if (!gold?.silver_category_id) return;
@@ -42,7 +46,10 @@ export class TournamentPhaseService {
         gold.silver_category_id,
         silverPlayers.map((p) => p.id_user)
       );
-      const result = await this.bracketsService.generateBracket(id_tournament, gold.silver_category_id, { best_of_sets: 5 });
+      const result = await this.bracketsService.generateBracket(id_tournament, gold.silver_category_id, {
+        best_of_sets: format.bestOfSets ?? 5,
+        points_per_set: format.pointsPerSet ?? 11,
+      });
       if (result.ok || result.error === BRACKETS_ERRORS.BRACKET_ALREADY_EXISTS) {
         await this.repo.setPhase(gold.silver_category_id, "bracket");
       } else {
@@ -151,14 +158,14 @@ export class TournamentPhaseService {
       // existe" y dejar la pestaña Llave trabada.
       if (result.error === BRACKETS_ERRORS.BRACKET_ALREADY_EXISTS) {
         await this.repo.setPhase(id_category, "bracket");
-        await this.populateSilverBracket(id_category, id_tournament);
+        await this.populateSilverBracket(id_category, id_tournament, opts);
         return { ok: true as const, data: null };
       }
       return result;
     }
 
     await this.repo.setPhase(id_category, "bracket");
-    await this.populateSilverBracket(id_category, id_tournament);
+    await this.populateSilverBracket(id_category, id_tournament, opts);
     return { ok: true as const, data: result.data };
   }
 
