@@ -982,11 +982,10 @@ export class BracketsRepository {
   }
 
   // Formato "Oro y Plata" (ver TournamentPhaseService.populateSilverBracket):
-  // los que NO clasificaron de cada grupo — mismo ranking/desempate que
-  // loadGroupQualifiers, pero el corte invertido. No hace falta un tope
-  // superior aparte: rank_in_group nunca pasa de la cantidad real de
-  // jugadores del grupo.
-  async loadGroupNonQualifiers(
+  // el primero que queda fuera en cada grupo (el 3° con 2 clasificados), sea
+  // de 3 o de 4; el 4° queda eliminado. Mismo ranking/desempate que
+  // loadGroupQualifiers.
+  async loadGroupSilverPlayers(
     tournamentId: string,
     categoryId: string
   ): Promise<Array<{ id_user: string; group_name: string; rank_in_group: number; id_club: string | null }>> {
@@ -1011,7 +1010,7 @@ export class BracketsRepository {
       SELECT ranked.id_user, ranked.group_name, ranked.rank_in_group, u.id_club
       FROM ranked
       JOIN users u ON u.id_user = ranked.id_user
-      WHERE rank_in_group > qualifiers_per_group
+      WHERE rank_in_group = qualifiers_per_group + 1
       ORDER BY rank_in_group ASC, group_sort_order ASC;
     `;
 

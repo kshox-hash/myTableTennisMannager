@@ -468,7 +468,7 @@ export class AdminTournamentRepository {
   // Formato "Oro y Plata": crea la categoría Plata hermana de `gold` (mismo
   // tipo/género/formato/qualifiers_per_group, rango "<rango> · Plata",
   // siempre competition_format='groups_bracket' — nunca corre su propia
-  // fase de grupos, se puebla sola con los no clasificados de `gold`, ver
+  // fase de grupos, se puebla sola con el 3° de cada grupo de `gold`, ver
   // TournamentPhaseService.populateSilverBracket) y liga ambas filas.
   private async createSilverSibling(client: PoolClient, tournamentId: string, gold: CategoryRow): Promise<string> {
     const silverRes = await client.query<{ id_category: string }>(
@@ -1525,7 +1525,7 @@ export class AdminTournamentRepository {
   }
 
   // Formato "Oro y Plata" (ver TournamentPhaseService.populateSilverBracket):
-  // inscribe de una sola vez a los no clasificados de Oro en la categoría
+  // inscribe de una sola vez a los terceros de Oro en la categoría
   // Plata, como pase directo (qualification_type='direct_advance',
   // checked_in=true — lo que después lee loadDirectEntryPlayers para
   // sembrar la llave de Plata sin pasar por fase de grupos). Mismo ON

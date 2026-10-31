@@ -91,7 +91,7 @@ export const createTournamentSchema = z.object({
         play_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isValidCalendarDate, { message: "Fecha inválida" }).nullable().optional(),
         start_time: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/).refine(isValidClockTime, { message: "Hora inválida" }).nullable().optional(),
         // Formato "Oro y Plata": crea además una categoría Plata hermana,
-        // que se puebla sola con los no clasificados de los grupos de esta
+        // que se puebla sola con el 3° de cada grupo de esta
         // categoría (ver TournamentPhaseService.populateSilverBracket).
         // Solo tiene efecto al INSERTAR la categoría (id_category ausente);
         // no es una edición retroactiva.

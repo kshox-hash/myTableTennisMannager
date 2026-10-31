@@ -24,8 +24,8 @@ export class TournamentPhaseService {
   ) {}
 
   // Formato "Oro y Plata": si `goldCategoryId` tiene una categoría Plata
-  // vinculada (silver_category_id), la puebla con los no clasificados de
-  // sus grupos y genera su llave directo (sin pasar por fase de grupos).
+  // vinculada (silver_category_id), la puebla con el 3° de cada
+  // grupo y genera su llave directo (sin pasar por fase de grupos).
   // Se llama una sola vez, justo después de que Oro queda en
   // phase='bracket' (ver advanceToBracket) — no bloquea ni revierte el
   // avance de Oro si algo falla acá, solo se registra en consola.
@@ -34,13 +34,13 @@ export class TournamentPhaseService {
       const gold = await this.repo.getCategoryPhase(goldCategoryId);
       if (!gold?.silver_category_id) return;
 
-      const nonQualifiers = await this.bracketsRepo.loadGroupNonQualifiers(id_tournament, goldCategoryId);
-      if (nonQualifiers.length < 2) return; // sin al menos 2, no hay llave de Plata posible
+      const silverPlayers = await this.bracketsRepo.loadGroupSilverPlayers(id_tournament, goldCategoryId);
+      if (silverPlayers.length < 2) return; // sin al menos 2, no hay llave de Plata posible
 
       await this.adminRepo.bulkEnrollDirectAdvance(
         id_tournament,
         gold.silver_category_id,
-        nonQualifiers.map((p) => p.id_user)
+        silverPlayers.map((p) => p.id_user)
       );
       const result = await this.bracketsService.generateBracket(id_tournament, gold.silver_category_id, { best_of_sets: 5 });
       if (result.ok || result.error === BRACKETS_ERRORS.BRACKET_ALREADY_EXISTS) {
