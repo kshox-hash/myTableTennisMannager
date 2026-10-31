@@ -37,6 +37,11 @@ export class SeedingRepository {
   // (getOrganizerRanking, la misma que alimenta "Mi Ranking") y se pega acá
   // en JS, para no duplicar esa unión de group_matches+bracket_matches
   // dentro de esta consulta.
+  //
+  // Solo los que juegan grupos: mismo filtro que loadPlayersForCategory. Si no
+  // coincide, quien pasó directo a la llave o está marcado "No llegó" viaja
+  // en player_ids pero no en el armado real, y confirmar falla siempre con
+  // GROUPS_OUT_OF_DATE aunque se vuelva a previsualizar.
   async getSeeds(id_tournament: string, id_category: string, rankingSource: RankingSource = "general"): Promise<SeedRow[]> {
     if (rankingSource === "interno") {
       return this.getSeedsWithOrganizerRanking(id_tournament, id_category);
@@ -59,6 +64,8 @@ export class SeedingRepository {
        WHERE e.id_tournament = $1
          AND e.id_category   = $2
          AND e.status = 'active'
+         AND e.qualification_type = 'group'
+         AND e.checked_in = true
        ORDER BY e.seed ASC NULLS LAST, u.last_name ASC, u.first_name ASC`,
       [id_tournament, id_category]
     );
@@ -90,6 +97,8 @@ export class SeedingRepository {
        WHERE e.id_tournament = $1
          AND e.id_category   = $2
          AND e.status = 'active'
+         AND e.qualification_type = 'group'
+         AND e.checked_in = true
        ORDER BY e.seed ASC NULLS LAST, u.last_name ASC, u.first_name ASC`,
       [id_tournament, id_category]
     );
