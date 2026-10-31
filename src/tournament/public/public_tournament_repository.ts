@@ -862,6 +862,8 @@ export class PublicTournamentRepository {
        FROM tournament_categories c
        LEFT JOIN enrollments e ON e.id_category = c.id_category
        WHERE c.id_tournament = $1
+         AND NOT (COALESCE(c.phase, 'enrollment') = 'enrollment'
+           AND EXISTS (SELECT 1 FROM tournament_categories gold WHERE gold.silver_category_id = c.id_category))
        GROUP BY c.id_category
        ORDER BY c.category_type ASC, c.category_range ASC, c.gender ASC`,
       [id_tournament]

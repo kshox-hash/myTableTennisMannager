@@ -60,6 +60,7 @@ export class EnrollmentsRepository {
           category_status: string;
           category_phase: string;
           has_bracket: boolean;
+          is_silver: boolean;
           category_gender: "male" | "female" | "mixed";
           user_gender: "male" | "female" | "other" | null;
           category_type: string;
@@ -86,6 +87,7 @@ export class EnrollmentsRepository {
              tc.status AS category_status,
              COALESCE(tc.phase, 'enrollment') AS category_phase,
              EXISTS (SELECT 1 FROM bracket_matches bm WHERE bm.id_category = tc.id_category) AS has_bracket,
+             EXISTS (SELECT 1 FROM tournament_categories gold WHERE gold.silver_category_id = tc.id_category) AS is_silver,
              tc.gender AS category_gender,
              u.gender AS user_gender,
              tc.category_type,
@@ -106,7 +108,7 @@ export class EnrollmentsRepository {
 
         const {
           quotas, enrolled_count, already_enrolled, tournament_status,
-          category_status, category_phase, has_bracket, category_gender, user_gender,
+          category_status, category_phase, has_bracket, is_silver, category_gender, user_gender,
           category_type, category_range, event_date, user_birth_date,
         } = quotaRes.rows[0];
 
@@ -122,7 +124,9 @@ export class EnrollmentsRepository {
           throw new Error("TOURNAMENT_CANCELLED");
         }
 
-        if (category_status !== "active") {
+        // Plata se llena sola con los terceros de su Oro: nadie entra a mano
+        // (quedaría inscrito pero fuera de la llave).
+        if (category_status !== "active" || is_silver) {
           throw new Error("CATEGORY_NOT_OPEN");
         }
 

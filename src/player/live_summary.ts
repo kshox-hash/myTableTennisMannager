@@ -6,7 +6,9 @@ import DB from "../db/db_configuration";
 //    no perdieron en la llave;
 //  - eliminados: los que no pasaron su grupo y los que perdieron en la
 //    llave (lo más reciente primero), con dónde quedaron ("Grupo 3",
-//    "Cuartos de final").
+//    "Cuartos de final"). El 3° de una categoría Oro figura "Pasó a Plata".
+// Quien entra directo a la llave (Plata no tiene grupos) cuenta como
+// clasificado mientras no pierda.
 // En la llave dice además qué ronda se está jugando.
 // Nunca devuelve categorías terminadas: para eso está la celebración.
 
@@ -51,9 +53,10 @@ export async function getLiveSummary(id_user: string): Promise<LiveSummary[]> {
   const cats = await pool().query<{
     id_tournament: string; tournament_name: string; id_category: string;
     category_type: string; category_range: string; phase: "groups" | "bracket";
+    silver_category_id: string | null;
   }>(
     `SELECT DISTINCT t.id_tournament, t.tournament_name, tc.id_category,
-            tc.category_type, tc.category_range, tc.phase
+            tc.category_type, tc.category_range, tc.phase, tc.silver_category_id
        FROM tournament_categories tc
        JOIN tournaments t ON t.id_tournament = tc.id_tournament
       WHERE t.status = 'active'
@@ -72,7 +75,7 @@ export async function getLiveSummary(id_user: string): Promise<LiveSummary[]> {
 
   const out: LiveSummary[] = [];
   for (const c of cats.rows) {
-    const [groups, standings, losers, rounds] = await Promise.all([
+    const [groups, standings, losers, rounds, bracketPlayers, silverPlayers] = await Promise.all([
       // Grupos con todos sus partidos jugados, el último en terminar primero.
       pool().query<{ id_group: string; group_name: string; qualifiers: number }>(
         `SELECT cg.id_group, cg.group_name, COALESCE(cg.qualifiers_per_group, 2) AS qualifiers
@@ -113,6 +116,20 @@ export async function getLiveSummary(id_user: string): Promise<LiveSummary[]> {
            FROM bracket_matches WHERE id_category = $1`,
         [c.id_category]
       ),
+      pool().query<{ id_user: string; name: string }>(
+        `SELECT DISTINCT p.id_user, ${name("u")} AS name
+           FROM (
+             SELECT player1_id AS id_user FROM bracket_matches WHERE id_category = $1
+             UNION
+             SELECT player2_id FROM bracket_matches WHERE id_category = $1
+           ) p
+           JOIN users u ON u.id_user = p.id_user`,
+        [c.id_category]
+      ),
+      pool().query<{ id_user: string }>(
+        `SELECT id_user FROM enrollments WHERE id_category = $1 AND status = 'active'`,
+        [c.silver_category_id]
+      ),
     ]);
     const maxRound = rounds.rows[0]?.max_round ?? null;
     const label = (round: number) => (maxRound == null ? "" : roundLabel(2 ** (maxRound - round + 1)));
@@ -120,6 +137,7 @@ export async function getLiveSummary(id_user: string): Promise<LiveSummary[]> {
 
     const bracketDrawn = standings.rows.some((s) => s.qualified_to_bracket);
     const lostInBracket = new Set(losers.rows.map((l) => l.id_user));
+    const inSilver = new Set(silverPlayers.rows.map((p) => p.id_user));
     const classified: Person[] = [];
     const eliminated: (Person & { stage: string })[] = losers.rows.map((l) => ({ ...person(l.id_user, l.name), stage: label(l.round) }));
     for (const g of groups.rows) {
@@ -128,9 +146,15 @@ export async function getLiveSummary(id_user: string): Promise<LiveSummary[]> {
         // Pasan: los marcados al generar la llave; antes, los primeros
         // qualifiers_per_group del grupo terminado.
         const passes = bracketDrawn ? s.qualified_to_bracket : i < g.qualifiers;
-        if (!passes) eliminated.push({ ...person(s.id_user, s.name), stage: `Grupo ${g.group_name.replace(/^GR-?/i, "")}` });
-        else if (!lostInBracket.has(s.id_user)) classified.push(person(s.id_user, s.name));
+        if (!passes) {
+          const stage = inSilver.has(s.id_user) ? "Pasó a Plata" : `Grupo ${g.group_name.replace(/^GR-?/i, "")}`;
+          eliminated.push({ ...person(s.id_user, s.name), stage });
+        } else if (!lostInBracket.has(s.id_user)) classified.push(person(s.id_user, s.name));
       });
+    }
+    const listed = new Set(classified.map((p) => p.id_user));
+    for (const p of bracketPlayers.rows) {
+      if (!lostInBracket.has(p.id_user) && !listed.has(p.id_user)) classified.push(person(p.id_user, p.name));
     }
 
     out.push({

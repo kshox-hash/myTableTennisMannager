@@ -101,6 +101,11 @@ type TournamentWithCategoryRow = {
   start_time?: string | null;
 };
 
+// Listados del jugador: la Plata aparece recién cuando Oro la llena al pasar a
+// la llave. Antes es una categoría vacía que nadie debe ver para inscribirse.
+const HIDE_EMPTY_SILVER = `AND NOT (COALESCE(c.phase, 'enrollment') = 'enrollment'
+  AND EXISTS (SELECT 1 FROM tournament_categories gold WHERE gold.silver_category_id = c.id_category))`;
+
 export class AdminTournamentRepository {
   private pool: Pool;
   private notifications: NotificationsRepository;
@@ -959,7 +964,7 @@ export class AdminTournamentRepository {
     // ya estaba disponible sin el join.
     const needsCategoryJoin = q.length > 0;
     const categoryJoin = needsCategoryJoin
-      ? `LEFT JOIN ${this.tournamentCategoriesTable} c ON c.id_tournament = t.id_tournament`
+      ? `LEFT JOIN ${this.tournamentCategoriesTable} c ON c.id_tournament = t.id_tournament ${HIDE_EMPTY_SILVER}`
       : "";
 
     try {
@@ -1026,7 +1031,7 @@ export class AdminTournamentRepository {
                        COALESCE(org.organizer_last_name, org.last_name, '')), '') AS organizer_name,
            COALESCE(org.organizer_avatar_url, org.avatar_url) AS organizer_avatar_url
          FROM ${this.tournamentsTable} t
-         LEFT JOIN ${this.tournamentCategoriesTable} c ON c.id_tournament = t.id_tournament
+         LEFT JOIN ${this.tournamentCategoriesTable} c ON c.id_tournament = t.id_tournament ${HIDE_EMPTY_SILVER}
          LEFT JOIN users org ON org.id_user = t.created_by
          WHERE t.id_tournament = ANY($1::uuid[])
          ORDER BY t.event_date DESC NULLS LAST, t.created_at DESC,
@@ -1106,7 +1111,7 @@ export class AdminTournamentRepository {
              WHERE e.id_category = c.id_category AND e.status = 'active' AND (e.id_user = $2 OR e.id_user IN (SELECT dt.id_user FROM doubles_teams dt WHERE dt.id_player_1 = $2 OR dt.id_player_2 = $2)) AND e.paid
            ) AS is_paid
        FROM ${this.tournamentsTable} t
-       LEFT JOIN ${this.tournamentCategoriesTable} c ON c.id_tournament = t.id_tournament
+       LEFT JOIN ${this.tournamentCategoriesTable} c ON c.id_tournament = t.id_tournament ${HIDE_EMPTY_SILVER}
        WHERE t.id_tournament = $1
        ORDER BY c.category_type ASC, c.category_range ASC, c.gender ASC`,
       [id_tournament, userId ?? null]
