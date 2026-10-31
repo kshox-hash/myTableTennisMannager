@@ -73,6 +73,12 @@ function sumRallyPoints(
   );
 }
 
+// 21 puntos solo existe en "1 set a 21". Los campeonatos pueden traer 21 guardado
+// aunque jueguen a mejor de 3, y eso no debe llegar a sus partidos.
+function pointsFor(bestOfSets: number, pointsPerSet?: 11 | 21): 11 | 21 {
+  return bestOfSets === 1 ? (pointsPerSet ?? 11) : 11;
+}
+
 export class BracketsService {
   constructor(private repo: BracketsRepository) {}
 
@@ -179,7 +185,7 @@ export class BracketsService {
 
     const generated = generateGroupsFromPlayers(players, {
       bestOfGroups: input.best_of_sets ?? 3,
-      pointsPerSet: input.points_per_set ?? 11,
+      pointsPerSet: pointsFor(input.best_of_sets ?? 3, input.points_per_set),
       singleGroup: await this.repo.isRoundRobinCategory(categoryId),
       splitFours: input.split_fours ?? [],
       preferFours: await this.prefersFours(categoryId, input.group_size_mode),
@@ -245,7 +251,7 @@ export class BracketsService {
 
     const generated = generateGroupsFromPlayers(players, {
       bestOfGroups: input.best_of_sets ?? 3,
-      pointsPerSet: input.points_per_set ?? 11,
+      pointsPerSet: pointsFor(input.best_of_sets ?? 3, input.points_per_set),
       singleGroup: await this.repo.isRoundRobinCategory(categoryId),
       preferFours: input.group_size_mode
         ? input.group_size_mode === "fours"
@@ -314,7 +320,7 @@ export class BracketsService {
     }
 
     const groupBuckets = input.groups.map((ids) => ids.map((id) => playerById.get(id)!));
-    const generated = buildManualGroups(groupBuckets, input.bestOfSets ?? 3, input.pointsPerSet ?? 11);
+    const generated = buildManualGroups(groupBuckets, input.bestOfSets ?? 3, pointsFor(input.bestOfSets ?? 3, input.pointsPerSet));
 
     const qualifiersPerGroup = await this.repo.getCategoryQualifiersPerGroup(categoryId);
     await this.repo.regenerateGroups(tournamentId, categoryId, generated, qualifiersPerGroup);
@@ -721,7 +727,7 @@ export class BracketsService {
     if (exists) return fail(BRACKETS_ERRORS.BRACKET_ALREADY_EXISTS);
 
     const bestOfSets = (input.best_of_sets ?? 5) as 1 | 3 | 5 | 7;
-    const pointsPerSet = (input.points_per_set ?? 11) as 11 | 21;
+    const pointsPerSet = pointsFor(bestOfSets, input.points_per_set);
 
     // Semilla final: primero clasificados de grupo, luego pases directos.
     const seededPlayers = await this.loadSeededPlayers(tournamentId, categoryId);
