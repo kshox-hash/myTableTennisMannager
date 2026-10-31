@@ -116,11 +116,11 @@ export class UserService {
   }
 
   // Búsqueda de jugadores (admin) — para inscribirlos manualmente en una categoría.
-  async searchPlayers(q: string): Promise<Result<UserSearchRow[], "QUERY_TOO_SHORT">> {
+  async searchPlayers(q: string, forReferee = false): Promise<Result<UserSearchRow[], "QUERY_TOO_SHORT">> {
     const trimmed = q.trim();
     if (trimmed.length < 2) return fail("QUERY_TOO_SHORT");
 
-    const data = await this.repo.searchPlayers(trimmed);
+    const data = await this.repo.searchPlayers(trimmed, 20, forReferee);
     return ok(data);
   }
 

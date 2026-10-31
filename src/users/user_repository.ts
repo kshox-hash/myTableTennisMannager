@@ -155,7 +155,9 @@ export class UserRepository {
   }
 
   // Búsqueda de jugadores por email/nombre — usada por el admin para inscribir manualmente.
-  async searchPlayers(q: string, limit = 20): Promise<UserSearchRow[]> {
+  // forReferee: un árbitro puede ser cualquier cuenta del sistema (también un
+  // organizador), pero debe poder entrar a la app: sin jugadores creados a mano.
+  async searchPlayers(q: string, limit = 20, forReferee = false): Promise<UserSearchRow[]> {
     const query = `
       SELECT
         u.id_user,
@@ -166,7 +168,8 @@ export class UserRepository {
       FROM users u
       JOIN roles r ON r.id_role = u.id_role
       LEFT JOIN clubs cl ON cl.id_club = u.id_club
-      WHERE r.name = 'player'
+      WHERE (r.name = 'player' OR $3)
+        AND NOT ($3 AND u.email LIKE 'sin-registro+%@myttm.local')
         AND u.is_team = false
         AND (
           u.email ILIKE $1
@@ -178,7 +181,7 @@ export class UserRepository {
       LIMIT $2;
     `;
 
-    const res = await this.pool.query<UserSearchRow>(query, [`%${q}%`, limit]);
+    const res = await this.pool.query<UserSearchRow>(query, [`%${q}%`, limit, forReferee]);
     return res.rows;
   }
 

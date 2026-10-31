@@ -43,7 +43,7 @@ export class UserController {
   // GET /api/v1/users/admin/search?q= — admin busca jugadores por email/nombre
   adminSearchPlayers = async (req: Request, res: Response) => {
     const q = typeof req.query.q === "string" ? req.query.q : "";
-    const result = await this.service.searchPlayers(q);
+    const result = await this.service.searchPlayers(q, req.query.scope === "referee");
 
     if (!result.ok) {
       return res.status(400).json({ ok: false, message: "La búsqueda debe tener al menos 2 caracteres" });
