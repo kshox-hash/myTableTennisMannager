@@ -84,6 +84,20 @@ export class BracketsRepository {
     return res.rows[0]?.silver_category_id != null;
   }
 
+  // Rearmar una categoría Oro respeta cómo estaba armada: Oro y Plata también
+  // se puede activar con grupos de 3 ya confirmados, y rearmar no debe
+  // pasarlos a grupos de 4.
+  async groupsMostlyFours(categoryId: string): Promise<boolean> {
+    const res = await this.pool.query<{ fours: number; threes: number }>(
+      `SELECT count(*) FILTER (WHERE target_size = 4)::int AS fours,
+              count(*) FILTER (WHERE target_size = 3)::int AS threes
+       FROM category_groups WHERE id_category = $1`,
+      [categoryId]
+    );
+    const row = res.rows[0];
+    return !!row && row.fours >= row.threes;
+  }
+
   // Jugador que sobró al armar grupos de 4 en una categoría Oro (ver
   // group_generation_logic.ts generateGroupsFromPlayers): queda enrolado en
   // la MISMA categoría pero sin jugar grupo — pasa directo a la llave

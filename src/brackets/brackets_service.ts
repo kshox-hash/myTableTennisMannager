@@ -78,6 +78,12 @@ export class BracketsService {
 
   // ─── GRUPOS ──────────────────────────────────────────────
 
+  // Lo que elige el admin manda. Sin elección, Oro arma de a 4 (con 2
+  // clasificados deja 2 arriba y 2 abajo) y el resto prioriza grupos de 3.
+  private async prefersFours(categoryId: string, mode?: "normal" | "fours"): Promise<boolean> {
+    return mode ? mode === "fours" : this.repo.isGoldCategory(categoryId);
+  }
+
   // Previsualiza la composición de los grupos (algoritmo real de
   // ranking/serpentina) SIN persistir nada — para la pantalla de fixture
   // donde el admin elige el orden de juego antes de confirmar. El algoritmo
@@ -88,7 +94,7 @@ export class BracketsService {
     tournamentId: string,
     categoryId: string,
     splitFours: number[] = [],
-    groupSizeMode: "normal" | "fours" = "normal"
+    groupSizeMode?: "normal" | "fours"
   ): Promise<Result<GroupsPreview, BracketsError>> {
     const alreadyExist = await this.repo.groupsExist(tournamentId, categoryId);
     if (alreadyExist) return fail(BRACKETS_ERRORS.GROUPS_ALREADY_EXIST);
@@ -97,8 +103,7 @@ export class BracketsService {
     if (players.length < 2) return fail(BRACKETS_ERRORS.NOT_ENOUGH_PLAYERS);
 
     const singleGroup = await this.repo.isRoundRobinCategory(categoryId);
-    // Categoría Oro: siempre de a 4, sin importar lo que elija el admin.
-    const preferFours = (await this.repo.isGoldCategory(categoryId)) || groupSizeMode === "fours";
+    const preferFours = await this.prefersFours(categoryId, groupSizeMode);
     const generated = generateGroupsFromPlayers(players, { bestOfGroups: 3, singleGroup, splitFours, preferFours });
 
     const names = await this.repo.getUserNames(generated.members.map((m) => m.id_user));
@@ -177,8 +182,7 @@ export class BracketsService {
       pointsPerSet: input.points_per_set ?? 11,
       singleGroup: await this.repo.isRoundRobinCategory(categoryId),
       splitFours: input.split_fours ?? [],
-      // Categoría Oro: siempre de a 4, sin importar lo que elija el admin.
-      preferFours: (await this.repo.isGoldCategory(categoryId)) || input.group_size_mode === "fours",
+      preferFours: await this.prefersFours(categoryId, input.group_size_mode),
     });
 
     if (groupOrder) {
@@ -243,8 +247,9 @@ export class BracketsService {
       bestOfGroups: input.best_of_sets ?? 3,
       pointsPerSet: input.points_per_set ?? 11,
       singleGroup: await this.repo.isRoundRobinCategory(categoryId),
-      // Categoría Oro: siempre de a 4, sin importar lo que elija el admin.
-      preferFours: (await this.repo.isGoldCategory(categoryId)) || input.group_size_mode === "fours",
+      preferFours: input.group_size_mode
+        ? input.group_size_mode === "fours"
+        : (await this.repo.isGoldCategory(categoryId)) && (await this.repo.groupsMostlyFours(categoryId)),
     });
 
     const qualifiersPerGroup = await this.repo.getCategoryQualifiersPerGroup(categoryId);

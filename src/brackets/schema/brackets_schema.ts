@@ -8,8 +8,8 @@ export const generateGroupsSchema = z
     points_per_set: z.union([z.literal(11), z.literal(21)]).optional(),
     split_fours: z.array(z.number().int().min(0)).max(64).optional(),
     // Cómo armar los grupos: "normal" (prioriza grupos de 3, el de siempre)
-    // o "fours" (prioriza grupos de 4). Las categorías Oro (ver
-    // silver_category_id) siempre arman de a 4 e ignoran este campo.
+    // o "fours" (prioriza grupos de 4). Sin este campo, las categorías Oro
+    // (ver silver_category_id) arman de a 4 y el resto usa "normal".
     group_size_mode: z.enum(["normal", "fours"]).optional(),
   })
   .strict();

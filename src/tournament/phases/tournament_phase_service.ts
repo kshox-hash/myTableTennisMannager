@@ -77,7 +77,7 @@ export class TournamentPhaseService {
     expectedPlayerIds?: string[],
     splitFours: number[] = [],
     pointsPerSet: 11 | 21 = 11,
-    groupSizeMode: "normal" | "fours" = "normal"
+    groupSizeMode?: "normal" | "fours"
   ) {
     const cat = await this.repo.getCategoryPhase(id_category);
     if (!cat) return { ok: false as const, error: PHASE_ERRORS.CATEGORY_NOT_FOUND };
@@ -111,7 +111,7 @@ export class TournamentPhaseService {
     id_category: string,
     id_tournament: string,
     splitFours: number[] = [],
-    groupSizeMode: "normal" | "fours" = "normal"
+    groupSizeMode?: "normal" | "fours"
   ) {
     const cat = await this.repo.getCategoryPhase(id_category);
     if (!cat) return { ok: false as const, error: PHASE_ERRORS.CATEGORY_NOT_FOUND };

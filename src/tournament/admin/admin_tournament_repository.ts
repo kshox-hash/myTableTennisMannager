@@ -740,7 +740,7 @@ export class AdminTournamentRepository {
     tournamentId: string,
     categories: TournamentCategoryDTO[]
   ): Promise<void> {
-    const existingRes = await client.query<CategoryRow & { enrolled_count: number }>(
+    const existingRes = await client.query<CategoryRow & { enrolled_count: number; phase: string | null }>(
       `SELECT c.*, COUNT(e.id_enrollment) FILTER (WHERE e.status = 'active')::int AS enrolled_count
        FROM ${this.tournamentCategoriesTable} c
        LEFT JOIN ${this.enrollmentsTable} e
@@ -766,7 +766,22 @@ export class AdminTournamentRepository {
             [cat.play_date ?? null, cat.start_time ?? null, cat.id_category]
           );
         }
-        if (Number(existing.enrolled_count) > 0) continue; // categoría con inscritos: inmutable
+        // Oro y Plata se puede activar en una categoría que ya existe, aunque
+        // tenga inscritos o grupos confirmados, hasta antes de pasar a la llave:
+        // populateSilverBracket corre una sola vez, en ese momento. No aplica a
+        // grupo único ni a la propia Plata.
+        const activateSilver =
+          !!cat.createSilverPair &&
+          !existing.silver_category_id &&
+          (existing.phase ?? "enrollment") !== "bracket" &&
+          existing.phase !== "finished" &&
+          existing.competition_format !== "round_robin" &&
+          !existingRes.rows.some((row) => row.silver_category_id === existing.id_category);
+
+        if (Number(existing.enrolled_count) > 0) {
+          if (activateSilver) await this.createSilverSibling(client, tournamentId, existing);
+          continue; // categoría con inscritos: inmutable
+        }
 
         await client.query(
           `UPDATE ${this.tournamentCategoriesTable}
@@ -787,6 +802,19 @@ export class AdminTournamentRepository {
             cat.competition_format === "round_robin" ? "round_robin" : "groups_bracket",
           ]
         );
+        if (activateSilver) {
+          await this.createSilverSibling(client, tournamentId, {
+            ...existing,
+            category_type: cat.category_type.trim(),
+            category_range: cat.category_range.trim(),
+            gender: cat.gender,
+            qualifiers_per_group: cat.qualifiers_per_group ?? 2,
+            priority: cat.priority ?? 1,
+            format: cat.format === "doubles" ? "doubles" : "singles",
+            play_date: cat.play_date ?? null,
+            start_time: cat.start_time ?? null,
+          });
+        }
       } else {
         const insertedRes = await client.query<{ id_category: string }>(
           `INSERT INTO ${this.tournamentCategoriesTable}
@@ -1349,6 +1377,7 @@ export class AdminTournamentRepository {
         c.play_date,
         c.start_time,
         c.silver_category_id,
+        c.phase,
         gold.id_category AS gold_category_id,
         COUNT(e.id_enrollment) FILTER (WHERE e.status = 'active')::int AS enrolled_count
       FROM ${this.tournamentCategoriesTable} c

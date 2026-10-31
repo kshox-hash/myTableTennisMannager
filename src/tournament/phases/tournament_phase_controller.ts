@@ -59,11 +59,10 @@ function parseSplitFours(value: unknown): number[] {
   return raw.map((v) => Number(v)).filter((n) => Number.isInteger(n) && n >= 0 && n < 64);
 }
 
-// Cómo armar los grupos (body o query): "fours" fuerza grupos de 4; cualquier
-// otro valor (o ausente) deja el comportamiento normal (prioriza grupos de
-// 3). Las categorías Oro siempre arman de a 4 e ignoran esto (ver isGoldCategory).
-function parseGroupSizeMode(value: unknown): "normal" | "fours" {
-  return value === "fours" ? "fours" : "normal";
+// Cómo armar los grupos (body o query): "fours" prioriza grupos de 4 y
+// "normal" grupos de 3. Ausente: lo decide BracketsService.prefersFours.
+function parseGroupSizeMode(value: unknown): "normal" | "fours" | undefined {
+  return value === "fours" || value === "normal" ? value : undefined;
 }
 
 export class TournamentPhaseController {
