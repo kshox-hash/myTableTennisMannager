@@ -17,15 +17,21 @@ export const ITTF_POINTS: Record<RankingLevel, Record<number, number>> = {
   nacional: { 1: 1000, 2: 700, 4: 350, 8: 175, 16: 90, 32: 15 },
 };
 
-// Oro y Plata son rankings separados: "oro" es el ranking principal (todas las
-// categorías menos las Plata) y es el único que usa el sembrado; "plata", solo
-// las categorías Plata. "all" no separa: para ver lo ganado en un campeonato.
-export type RankingCopa = "oro" | "plata" | "all";
+// Tablas del ranking: "general" suma todas las categorías, con Plata a un cuarto
+// (es la copa de quienes no clasificaron); "oro" y "plata", solo las de esa copa
+// y con sus puntos completos. "sembrado" es todo menos Plata: las cabezas de serie
+// no usan esos puntos. "all" trae lo ganado en cada categoría, sin rebajar.
+export type RankingCopa = "general" | "oro" | "plata" | "sembrado" | "all";
+
+export const SILVER_GENERAL_DIVISOR = 4;
+
+const isSilver = "EXISTS (SELECT 1 FROM tournament_categories gold WHERE gold.silver_category_id = tc.id_category)";
 
 function copaSql(copa: RankingCopa): string {
-  if (copa === "all") return "";
-  const isSilver = "EXISTS (SELECT 1 FROM tournament_categories gold WHERE gold.silver_category_id = tc.id_category)";
-  return `AND ${copa === "plata" ? "" : "NOT "}${isSilver}`;
+  if (copa === "oro") return "AND tc.silver_category_id IS NOT NULL";
+  if (copa === "plata") return `AND ${isSilver}`;
+  if (copa === "sembrado") return `AND NOT ${isSilver}`;
+  return "";
 }
 
 // Ventana del ranking: últimos 12 meses (como el ranking mundial).
@@ -97,7 +103,8 @@ export function ittfPointsByCategorySql(scope = "TRUE", windowed = true, copa: R
         AND NOT EXISTS (SELECT 1 FROM bracket_matches b WHERE b.id_category = cg.id_category)
     ),
     per_category AS (
-      SELECT r.id_user, r.id_tournament, r.id_category, ${pointsCase("t.ranking_level", "r.draw_size")} AS points
+      SELECT r.id_user, r.id_tournament, r.id_category,
+             ${copa === "general" ? `CASE WHEN ${isSilver} THEN ROUND((${pointsCase("t.ranking_level", "r.draw_size")}) / ${SILVER_GENERAL_DIVISOR}.0) ELSE ${pointsCase("t.ranking_level", "r.draw_size")} END` : pointsCase("t.ranking_level", "r.draw_size")} AS points
       FROM reached r
       JOIN tournaments t ON t.id_tournament = r.id_tournament
       JOIN tournament_categories tc ON tc.id_category = r.id_category
@@ -114,7 +121,7 @@ export function ittfPointsByCategorySql(scope = "TRUE", windowed = true, copa: R
 }
 
 /** SELECT (id_user, ranking_points): total de cada jugador con puntos. */
-export function ittfTotalsSql(scope = "TRUE", copa: RankingCopa = "oro"): string {
+export function ittfTotalsSql(scope = "TRUE", copa: RankingCopa = "sembrado"): string {
   return `
     SELECT id_user, SUM(points)::int AS ranking_points
     FROM (${ittfPointsByTournamentSql(scope, true, copa)}) per_t

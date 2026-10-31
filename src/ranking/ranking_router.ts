@@ -42,9 +42,9 @@ router.get(
   })
 );
 
-// ?copa=plata: el ranking de Plata; cualquier otro valor, el principal (Oro).
-function copaParam(v: unknown): "oro" | "plata" {
-  return v === "plata" ? "plata" : "oro";
+// ?copa=oro|plata: solo esa copa; sin el parámetro, el General.
+function copaParam(v: unknown): "oro" | "plata" | "general" {
+  return v === "oro" || v === "plata" ? v : "general";
 }
 
 // Id de organizador del query string (o null = ranking general). Un valor

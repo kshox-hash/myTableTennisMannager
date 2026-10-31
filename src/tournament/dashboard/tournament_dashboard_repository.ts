@@ -36,10 +36,12 @@ export type PlayerPointsRow = {
   matches_played: number;
   matches_won:    number;
   points:         number;
+  copa?: "oro" | "plata";
 };
 
 export type PointsSummary = {
   is_ranked: boolean;
+  has_silver: boolean;
   players:   PlayerPointsRow[];
 };
 
@@ -145,16 +147,27 @@ export class TournamentDashboardRepository {
     if (tRes.rowCount === 0) return null;
     const isRanked = tRes.rows[0].is_ranked;
 
+    // Copa de Oro: la pestaña Puntos muestra también su Plata, en una sola lista
+    // y con Plata a un cuarto (el mismo criterio del ranking General).
+    const silverId = id_category
+      ? (await this.pool.query<{ silver_category_id: string | null }>(
+          `SELECT silver_category_id FROM tournament_categories WHERE id_category = $1`,
+          [id_category]
+        )).rows[0]?.silver_category_id ?? null
+      : null;
+    const categoryIds = id_category ? [id_category, ...(silverId ? [silverId] : [])] : null;
+
     const res = await this.pool.query<{
       id_user: string;
       name: string;
       matches_played: string;
       matches_won: string;
       points: number;
+      in_silver: boolean;
     }>(
       `WITH pts AS (${
          id_category
-           ? `SELECT id_user, points FROM (${ittfPointsByCategorySql("t.id_tournament = $1", false)}) pc WHERE pc.id_category = $2`
+           ? `SELECT id_user, MAX(points) AS points FROM (${ittfPointsByCategorySql("t.id_tournament = $1", false, silverId ? "general" : "all")}) pc WHERE pc.id_category = ANY($2::uuid[]) GROUP BY id_user`
            : ittfPointsByTournamentSql("t.id_tournament = $1", false)
        }),
        tm AS (
@@ -162,12 +175,12 @@ export class TournamentDashboardRepository {
          FROM group_matches gm
          JOIN category_groups cg ON cg.id_group = gm.id_group
          WHERE cg.id_tournament = $1 AND gm.winner_id IS NOT NULL
-           ${id_category ? "AND cg.id_category = $2" : ""}
+           ${id_category ? "AND cg.id_category = ANY($2::uuid[])" : ""}
          UNION ALL
          SELECT bm.player1_id, bm.player2_id, bm.winner_id
          FROM bracket_matches bm
          WHERE bm.id_tournament = $1 AND bm.winner_id IS NOT NULL
-           ${id_category ? "AND bm.id_category = $2" : ""}
+           ${id_category ? "AND bm.id_category = ANY($2::uuid[])" : ""}
        ),
        players AS (
          SELECT p1 AS id_user FROM tm WHERE p1 IS NOT NULL
@@ -179,12 +192,13 @@ export class TournamentDashboardRepository {
          COALESCE(NULLIF(TRIM(u.last_name || ' ' || u.first_name), ''), u.email) AS name,
          (SELECT COUNT(*) FROM tm WHERE tm.p1 = p.id_user OR tm.p2 = p.id_user) AS matches_played,
          (SELECT COUNT(*) FROM tm WHERE tm.winner_id = p.id_user) AS matches_won,
-         COALESCE((SELECT pts.points FROM pts WHERE pts.id_user = p.id_user), 0) AS points
+         COALESCE((SELECT pts.points FROM pts WHERE pts.id_user = p.id_user), 0) AS points,
+         EXISTS (SELECT 1 FROM enrollments e WHERE e.id_user = p.id_user AND e.status = 'active' AND e.id_category = ${silverId ? "$3" : "NULL"}::uuid) AS in_silver
        FROM players p
        JOIN users u ON u.id_user = p.id_user
        WHERE u.is_team = false
        ORDER BY points DESC, matches_won DESC, matches_played DESC, name ASC`,
-      id_category ? [id_tournament, id_category] : [id_tournament]
+      categoryIds ? [id_tournament, categoryIds, ...(silverId ? [silverId] : [])] : [id_tournament]
     );
 
     const players: PlayerPointsRow[] = res.rows.map((r) => {
@@ -195,9 +209,10 @@ export class TournamentDashboardRepository {
         matches_played: Number(r.matches_played),
         matches_won: matchesWon,
         points: isRanked ? Number(r.points) : 0,
+        ...(silverId ? { copa: r.in_silver ? ("plata" as const) : ("oro" as const) } : {}),
       };
     });
 
-    return { is_ranked: isRanked, players };
+    return { is_ranked: isRanked, has_silver: !!silverId, players };
   }
 }

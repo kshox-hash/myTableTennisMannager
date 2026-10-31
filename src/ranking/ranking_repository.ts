@@ -1,7 +1,7 @@
 import type { Pool } from "pg";
 import DB from "../db/db_configuration";
 
-import { ittfTotalsSql, ittfPointsByTournamentSql, ittfPointsByCategorySql, ITTF_POINTS, type RankingCopa, type RankingLevel } from "./ittf_points";
+import { ittfTotalsSql, ittfPointsByTournamentSql, ittfPointsByCategorySql, ITTF_POINTS, SILVER_GENERAL_DIVISOR, type RankingCopa, type RankingLevel } from "./ittf_points";
 
 // Puntaje viejo (3 por victoria, acumulado en player_stats.ranking_points).
 // Ya no se usa: el ranking se calcula con la tabla ITTF por ronda alcanzada
@@ -100,7 +100,7 @@ export class RankingRepository {
   // Ranking privado de UN administrador: mismos puntos ITTF que el general,
   // pero solo de los campeonatos que él creó (created_by). matches_played/won
   // cuentan todos sus partidos (también los de torneos no puntuables).
-  async getOrganizerRanking(idAdmin: string, limit = 200, copa: RankingCopa = "oro"): Promise<RankingRow[]> {
+  async getOrganizerRanking(idAdmin: string, limit = 200, copa: RankingCopa = "sembrado"): Promise<RankingRow[]> {
     const q = `
       WITH admin_tournaments AS (
         SELECT id_tournament, is_ranked FROM tournaments WHERE created_by = $1
@@ -145,7 +145,7 @@ export class RankingRepository {
       -- v1 dobles: los "usuarios equipo" quedan afuera de este ranking
       -- por-organizador (el ranking nacional sí los reparte bien, via
       -- player_stats). Pendiente: expandir la pareja a sus 2 jugadores acá.
-      WHERE u.is_team = false ${copa === "plata" ? "AND a.points > 0" : ""}
+      WHERE u.is_team = false ${copa === "oro" || copa === "plata" ? "AND a.points > 0" : ""}
       ORDER BY ranking_position ASC
       LIMIT $2;
     `;
@@ -163,8 +163,7 @@ export class RankingRepository {
   // solo los que él creó. Mismo cálculo ITTF y misma ventana de 12 meses.
 
   /** Ranking (solo jugadores con puntos) del general o de un organizador. */
-  async getScopedRanking(organizerId: string | null, limit = 200, copa: RankingCopa = "oro"): Promise<RankingRow[]> {
-    if (!organizerId && copa === "oro") return this.getGlobalRanking(limit);
+  async getScopedRanking(organizerId: string | null, limit = 200, copa: RankingCopa = "general"): Promise<RankingRow[]> {
     const q = `
       WITH pts AS (${ittfTotalsSql(organizerId ? "t.created_by = $2" : "TRUE", copa)}),
       ranked AS (
@@ -208,7 +207,7 @@ export class RankingRepository {
   }
 
   /** Campeonatos que forman el ranking (general o de un organizador). */
-  async getScopeTournaments(organizerId: string | null, copa: RankingCopa = "oro"): Promise<{ id_tournament: string; tournament_name: string; event_date: string | null; ranking_level: string }[]> {
+  async getScopeTournaments(organizerId: string | null, copa: RankingCopa = "general"): Promise<{ id_tournament: string; tournament_name: string; event_date: string | null; ranking_level: string }[]> {
     const scope = organizerId ? "t.created_by = $1" : "TRUE";
     const q = `
       SELECT t.id_tournament, t.tournament_name, t.event_date::text AS event_date, t.ranking_level
@@ -222,11 +221,12 @@ export class RankingRepository {
 
   /** De dónde salen los puntos de un jugador: su mejor categoría en cada
    *  campeonato, con la ronda alcanzada. */
-  async getPlayerBreakdown(idUser: string, organizerId: string | null, copa: RankingCopa = "oro") {
+  async getPlayerBreakdown(idUser: string, organizerId: string | null, copa: RankingCopa = "general") {
     const scope = organizerId ? "t.created_by = $2" : "TRUE";
     const q = `
       SELECT pc.id_tournament, pc.id_category, pc.points, t.tournament_name, t.event_date::text AS event_date,
-             t.ranking_level, tc.category_type, tc.category_range
+             t.ranking_level, tc.category_type, tc.category_range,
+             EXISTS (SELECT 1 FROM tournament_categories gold WHERE gold.silver_category_id = pc.id_category) AS is_silver
       FROM (${ittfPointsByCategorySql(scope, true, copa)}) pc
       JOIN tournaments t ON t.id_tournament = pc.id_tournament
       JOIN tournament_categories tc ON tc.id_category = pc.id_category
@@ -244,7 +244,7 @@ export class RankingRepository {
       ranking_level: r.ranking_level,
       category: [r.category_type, r.category_range].filter((x: string) => x && x !== "General").join(" "),
       points: Number(r.points),
-      round: roundLabel(r.ranking_level, Number(r.points)),
+      round: roundLabel(r.ranking_level, Number(r.points), copa === "general" && r.is_silver),
     }));
   }
 }
@@ -252,9 +252,9 @@ export class RankingRepository {
 const ROUND_LABEL: Record<number, string> = { 1: "Campeón", 2: "Final", 4: "Semifinal", 8: "Cuartos", 16: "Octavos", 32: "16avos", 64: "32avos" };
 
 /** Ronda alcanzada a partir de los puntos (cada nivel tiene un valor por ronda). */
-function roundLabel(level: string, points: number): string {
+function roundLabel(level: string, points: number, reduced = false): string {
   const table = ITTF_POINTS[level as RankingLevel];
   if (!table || points <= 0) return "Participación";
-  const size = Object.entries(table).find(([, p]) => p === points)?.[0];
+  const size = Object.entries(table).find(([, p]) => (reduced ? Math.round(p / SILVER_GENERAL_DIVISOR) : p) === points)?.[0];
   return size ? ROUND_LABEL[Number(size)] ?? "Llave" : "Llave";
 }
