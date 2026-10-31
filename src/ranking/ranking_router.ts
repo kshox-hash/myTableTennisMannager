@@ -37,10 +37,15 @@ router.get(
   asyncHandler(async (req, res) => {
     if (!GLOBAL_RANKING_ENABLED) return res.json({ ok: true, data: [] });
     // ?organizer=<id>: el ranking de ese organizador (solo sus campeonatos).
-    const data = await repo.getScopedRanking(organizerParam(req.query.organizer));
+    const data = await repo.getScopedRanking(organizerParam(req.query.organizer), 200, copaParam(req.query.copa));
     return res.json({ ok: true, data: data.map(shapeRankingRow) });
   })
 );
+
+// ?copa=plata: el ranking de Plata; cualquier otro valor, el principal (Oro).
+function copaParam(v: unknown): "oro" | "plata" {
+  return v === "plata" ? "plata" : "oro";
+}
 
 // Id de organizador del query string (o null = ranking general). Un valor
 // que no es un uuid se ignora en vez de romper la consulta.
@@ -66,7 +71,7 @@ router.get(
   "/tournaments",
   authRequired,
   asyncHandler(async (req, res) => {
-    const data = await repo.getScopeTournaments(organizerParam(req.query.organizer));
+    const data = await repo.getScopeTournaments(organizerParam(req.query.organizer), copaParam(req.query.copa));
     return res.json({ ok: true, data });
   })
 );
@@ -79,7 +84,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const id = req.params.id_user;
     if (!/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ ok: false, message: "Jugador inválido" });
-    const data = await repo.getPlayerBreakdown(id, organizerParam(req.query.organizer));
+    const data = await repo.getPlayerBreakdown(id, organizerParam(req.query.organizer), copaParam(req.query.copa));
     return res.json({ ok: true, data });
   })
 );
@@ -107,7 +112,7 @@ router.get(
   authRequired,
   requireRole("admin"),
   asyncHandler(async (req, res) => {
-    const data = await repo.getOrganizerRanking(req.user!.id_user);
+    const data = await repo.getOrganizerRanking(req.user!.id_user, 200, copaParam(req.query.copa));
     return res.json({ ok: true, data: data.map(shapeRankingRow) });
   })
 );
@@ -121,7 +126,7 @@ router.get(
   asyncHandler(async (req, res) => {
     if (!GLOBAL_RANKING_ENABLED) return res.json({ ok: true, data: [] });
     const limit = req.query.limit ? Math.min(200, Math.max(1, Number(req.query.limit))) : 100;
-    const data = await repo.getGlobalRanking(limit);
+    const data = await repo.getScopedRanking(null, limit, copaParam(req.query.copa));
     return res.json({ ok: true, data: data.map(shapeRankingRow) });
   })
 );

@@ -17,6 +17,17 @@ export const ITTF_POINTS: Record<RankingLevel, Record<number, number>> = {
   nacional: { 1: 1000, 2: 700, 4: 350, 8: 175, 16: 90, 32: 15 },
 };
 
+// Oro y Plata son rankings separados: "oro" es el ranking principal (todas las
+// categorías menos las Plata) y es el único que usa el sembrado; "plata", solo
+// las categorías Plata. "all" no separa: para ver lo ganado en un campeonato.
+export type RankingCopa = "oro" | "plata" | "all";
+
+function copaSql(copa: RankingCopa): string {
+  if (copa === "all") return "";
+  const isSilver = "EXISTS (SELECT 1 FROM tournament_categories gold WHERE gold.silver_category_id = tc.id_category)";
+  return `AND ${copa === "plata" ? "" : "NOT "}${isSilver}`;
+}
+
 // Ventana del ranking: últimos 12 meses (como el ranking mundial).
 export const RANKING_WINDOW = "12 months";
 
@@ -43,16 +54,16 @@ function pointsCase(levelCol: string, sizeCol: string): string {
  * `scope` es una condición SQL extra sobre `t` (tournaments), p. ej.
  * "t.created_by = $1". `windowed` limita a los últimos 12 meses.
  */
-export function ittfPointsByTournamentSql(scope = "TRUE", windowed = true): string {
+export function ittfPointsByTournamentSql(scope = "TRUE", windowed = true, copa: RankingCopa = "all"): string {
   return `
     SELECT id_user, id_tournament, MAX(points)::int AS points
-    FROM (${ittfPointsByCategorySql(scope, windowed)}) per_category
+    FROM (${ittfPointsByCategorySql(scope, windowed, copa)}) per_category
     GROUP BY id_user, id_tournament
   `;
 }
 
 /** Igual, pero un resultado por categoría (id_user, id_tournament, id_category, points). */
-export function ittfPointsByCategorySql(scope = "TRUE", windowed = true): string {
+export function ittfPointsByCategorySql(scope = "TRUE", windowed = true, copa: RankingCopa = "all"): string {
   return `
     WITH cat AS (
       SELECT id_tournament, id_category, MAX(round) AS max_round
@@ -94,6 +105,7 @@ export function ittfPointsByCategorySql(scope = "TRUE", windowed = true): string
       WHERE t.is_ranked AND t.status <> 'cancelled'
         AND tc.phase = 'finished' AND NOT COALESCE(tc.finished_early, false)
         AND NOT u.is_team
+        ${copaSql(copa)}
         ${windowed ? `AND COALESCE(t.event_date, t.created_at::date) >= CURRENT_DATE - INTERVAL '${RANKING_WINDOW}'` : ""}
         AND (${scope})
     )
@@ -102,10 +114,10 @@ export function ittfPointsByCategorySql(scope = "TRUE", windowed = true): string
 }
 
 /** SELECT (id_user, ranking_points): total de cada jugador con puntos. */
-export function ittfTotalsSql(scope = "TRUE"): string {
+export function ittfTotalsSql(scope = "TRUE", copa: RankingCopa = "oro"): string {
   return `
     SELECT id_user, SUM(points)::int AS ranking_points
-    FROM (${ittfPointsByTournamentSql(scope)}) per_t
+    FROM (${ittfPointsByTournamentSql(scope, true, copa)}) per_t
     GROUP BY id_user
     HAVING SUM(points) > 0
   `;
