@@ -19,6 +19,13 @@ const notifications = new NotificationsRepository(DB.getPool());
 // "admin", pero un admin normal no puede pasar este de "superadmin").
 router.use(authRequired, requireRole("superadmin"));
 
+const playersQuerySchema = z.object({
+  q: z.string().trim().max(100).default(""),
+  filter: z.enum(["all", "enrolled"]).default("all"),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
 const roleSchema = z.object({
   role: z.enum(["admin", "player"]),
 });
@@ -173,6 +180,22 @@ router.get(
   asyncHandler(async (_req, res) => {
     const rows = await repo.getTopClubsByMembers();
     return res.json({ ok: true, data: rows });
+  })
+);
+
+// GET /api/v1/superadmin/players?q=&filter=all|enrolled&limit=&offset=
+router.get(
+  "/players",
+  asyncHandler(async (req, res) => {
+    const p = playersQuerySchema.safeParse(req.query);
+    if (!p.success) return res.status(400).json({ ok: false, message: "Parámetros inválidos" });
+    const data = await repo.listPlayers({
+      q: p.data.q,
+      enrolledOnly: p.data.filter === "enrolled",
+      limit: p.data.limit,
+      offset: p.data.offset,
+    });
+    return res.json({ ok: true, data });
   })
 );
 

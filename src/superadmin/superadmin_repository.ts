@@ -13,6 +13,19 @@ export type AdminSummaryRow = {
   last_activity_at: string | null;
 };
 
+export type PlayerListRow = {
+  id_user: string;
+  email: string;
+  first_name: string | null;
+  last_name: string | null;
+  country: string | null;
+  region: string | null;
+  created_at: string;
+  club_name: string | null;
+  tournaments: string[];
+  total: number;
+};
+
 export type UserSearchRow = {
   id_user: string;
   email: string;
@@ -98,6 +111,43 @@ export class SuperadminRepository {
       [`%${q}%`, limit]
     );
     return res.rows;
+  }
+
+  // Personas registradas, las más nuevas primero. Una pareja de dobles se
+  // inscribe como usuario equipo (migración 044): sus campeonatos se le
+  // cuentan a los dos jugadores reales, que son quienes aparecen acá.
+  async listPlayers(params: {
+    q: string;
+    enrolledOnly: boolean;
+    limit: number;
+    offset: number;
+  }): Promise<{ players: PlayerListRow[]; total: number }> {
+    const res = await this.pool.query<PlayerListRow>(
+      `SELECT u.id_user, u.email, u.first_name, u.last_name, u.country, u.region, u.created_at,
+              c.name AS club_name,
+              COALESCE(en.names, '{}') AS tournaments,
+              COUNT(*) OVER()::int AS total
+       FROM users u
+       LEFT JOIN clubs c ON c.id_club = u.id_club
+       LEFT JOIN LATERAL (
+         SELECT array_agg(DISTINCT t.tournament_name) AS names
+         FROM enrollments e
+         JOIN tournaments t ON t.id_tournament = e.id_tournament
+         LEFT JOIN doubles_teams dt ON dt.id_user = e.id_user
+         WHERE e.status = 'active' AND t.status = 'active'
+           AND (e.id_user = u.id_user OR dt.id_player_1 = u.id_user OR dt.id_player_2 = u.id_user)
+       ) en ON TRUE
+       WHERE u.is_team = false
+         AND u.deleted_at IS NULL
+         AND ($1 = '%%'
+           OR u.email ILIKE $1
+           OR TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) ILIKE $1)
+         AND (NOT $2 OR en.names IS NOT NULL)
+       ORDER BY u.created_at DESC, u.id_user
+       LIMIT $3 OFFSET $4`,
+      [`%${params.q}%`, params.enrolledOnly, params.limit, params.offset]
+    );
+    return { players: res.rows, total: res.rows[0]?.total ?? 0 };
   }
 
   // Panel de estadísticas de la plataforma — todo en una sola consulta
