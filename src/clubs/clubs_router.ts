@@ -20,7 +20,7 @@ const notifications = new NotificationsRepository();
 
 const IMAGE_CONTENT_TYPES = ["image/webp", "image/jpeg", "image/png"];
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024; // 2 MB — header/escudo, generosos pero no un PUT arbitrario
-const headerKey = (idClub: string) => `clubs/${idClub}/header.webp`;
+export const headerKey = (idClub: string) => `clubs/${idClub}/header.webp`;
 export const crestKey = (idClub: string) => `clubs/${idClub}/crest.webp`;
 
 // Dueño del club — mismo criterio que requireTournamentOwnership en

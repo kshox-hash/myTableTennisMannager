@@ -886,6 +886,15 @@ export class ClubsRepository {
     }
   }
 
+  // Solo clubes sin administrador: borrar uno con dueño se llevaría sus cuotas
+  // y su caja (ON DELETE CASCADE), así que primero hay que quitarle el dueño.
+  async deleteFromCatalog(idClub: string): Promise<Result<true, "CLUB_NOT_FOUND" | "CLUB_HAS_ADMIN">> {
+    const res = await this.pool.query(`DELETE FROM clubs WHERE id_club = $1 AND is_listed AND created_by IS NULL`, [idClub]);
+    if ((res.rowCount ?? 0) > 0) return ok(true);
+    const exists = await this.pool.query(`SELECT 1 FROM clubs WHERE id_club = $1 AND is_listed`, [idClub]);
+    return fail((exists.rowCount ?? 0) > 0 ? "CLUB_HAS_ADMIN" : "CLUB_NOT_FOUND");
+  }
+
   // Asigna el administrador del club: una cuenta de jugador pasa a organizador.
   // Sin email, el club queda sin administrador.
   async assignAdmin(

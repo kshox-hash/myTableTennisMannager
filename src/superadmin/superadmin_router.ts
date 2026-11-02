@@ -5,7 +5,7 @@ import { authRequired } from "../middlewares/auth_required_middleware";
 import { requireRole } from "../middlewares/require_role_middleware";
 import { SuperadminRepository } from "./superadmin_repository";
 import { ClubsRepository } from "../clubs/clubs_repository";
-import { confirmHandler, crestKey, uploadUrlHandler } from "../clubs/clubs_router";
+import { confirmHandler, crestKey, headerKey, uploadUrlHandler } from "../clubs/clubs_router";
 import { deleteObject } from "../media/r2_client";
 import { NotificationsRepository } from "../notifications/notifications_repository";
 import DB from "../db/db_configuration";
@@ -71,6 +71,24 @@ router.patch(
         ? res.status(409).json({ ok: false, message: "Ya existe un club con ese nombre" })
         : res.status(404).json({ ok: false, message: "Club no encontrado" });
     }
+    return res.json({ ok: true });
+  })
+);
+
+// DELETE /api/v1/superadmin/clubs/:id_club — sus socios quedan sin club
+router.delete(
+  "/clubs/:id_club",
+  asyncHandler(async (req, res) => {
+    const r = await clubs.deleteFromCatalog(req.params.id_club);
+    if (!r.ok) {
+      return r.error === "CLUB_HAS_ADMIN"
+        ? res.status(409).json({ ok: false, message: "Primero quita el administrador del club" })
+        : res.status(404).json({ ok: false, message: "Club no encontrado" });
+    }
+    await Promise.all([
+      deleteObject(headerKey(req.params.id_club)).catch(() => {}),
+      deleteObject(crestKey(req.params.id_club)).catch(() => {}),
+    ]);
     return res.json({ ok: true });
   })
 );
