@@ -84,15 +84,22 @@ const cashMovementSchema = z.object({
   occurred_at: z.string().trim().nullable().optional(),
 });
 
+const clubRequestSchema = z.object({
+  name: z.string().trim().min(2).max(150),
+  comuna: z.string().trim().max(80).optional(),
+  note: z.string().trim().max(500).optional(),
+});
+
 const selectedSchema = z.object({
   selected: z.boolean(),
 });
 
-// POST /api/v1/clubs
+// POST /api/v1/clubs — solo superadmin: los clubes los controla MyTTM. Un
+// organizador pide el suyo con POST /clubs/requests.
 router.post(
   "/",
   authRequired,
-  requireRole("admin"),
+  requireRole("superadmin"),
   asyncHandler(async (req, res) => {
     const p = createSchema.safeParse(req.body);
     if (!p.success) return res.status(400).json({ ok: false, message: "Datos inválidos", issues: p.error.issues });
@@ -205,6 +212,24 @@ router.delete(
   })
 );
 
+// POST /api/v1/clubs/requests — "mi club no aparece": le llega a MyTTM.
+router.post(
+  "/requests",
+  authRequired,
+  requireRole(["admin", "player"]),
+  asyncHandler(async (req, res) => {
+    const p = clubRequestSchema.safeParse(req.body);
+    if (!p.success) return res.status(400).json({ ok: false, message: "Escribe el nombre del club" });
+    const r = await repo.createClubRequest(req.user!.id_user, {
+      name: p.data.name,
+      comuna: p.data.comuna ?? null,
+      note: p.data.note ?? null,
+    });
+    if (!r.ok) return res.status(409).json({ ok: false, message: "Ya tienes una solicitud de club en revisión" });
+    return res.status(201).json({ ok: true });
+  })
+);
+
 // POST /api/v1/clubs/:id_club/join — pedir unirse (jugador)
 router.post(
   "/:id_club/join",
@@ -217,7 +242,7 @@ router.post(
       return res.status(code).json({ ok: false, message: msg });
     }
 
-    const owner = await repo.getOwner(req.params.id_club);
+    const owner = r.data.joined ? null : await repo.getOwner(req.params.id_club);
     if (owner) {
       const [who, clubName] = await Promise.all([
         repo.getUserDisplayName(req.user!.id_user),

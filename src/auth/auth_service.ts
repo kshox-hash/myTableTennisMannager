@@ -49,6 +49,8 @@ export class AuthService {
       gender: input.gender,
       club_name: input.club_name,
       dominant_hand: input.dominant_hand,
+      forehand_rubber: input.forehand_rubber,
+      backhand_rubber: input.backhand_rubber,
       birth_date: input.birth_date,
       country: input.country,
       region: input.region,

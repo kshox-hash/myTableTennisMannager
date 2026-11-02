@@ -13,7 +13,7 @@ export class UserRepository {
     this.pool = pool ?? DB.getPool();
   }
 
-  // Solo empareja/crea clubes SIN dueño (texto libre de antes del sistema
+  // Solo empareja clubes viejos SIN dueño (texto libre de antes del sistema
   // de solicitudes — ver clubs_repository.ts). Antes buscaba por nombre
   // contra CUALQUIER club, incluidos los que un admin ya creó y cura con
   // aprobación manual — con esto (usado por updateProfile Y
@@ -21,19 +21,13 @@ export class UserRepository {
   // podían "entrar" directo a un club real solo escribiendo su nombre
   // exacto, sin pasar por la solicitud que el dueño tiene que aceptar. Un
   // club con dueño solo se entra vía ClubsRepository.decide() (solicitud
-  // aprobada).
-  private async findOrCreateClub(clubName: string): Promise<string> {
+  // aprobada). Ya no crea clubes: el catálogo lo controla MyTTM.
+  private async findLegacyClub(clubName: string): Promise<string | null> {
     const existing = await this.pool.query<{ id_club: string }>(
-      `SELECT id_club FROM clubs WHERE LOWER(name) = LOWER($1) AND created_by IS NULL LIMIT 1`,
+      `SELECT id_club FROM clubs WHERE LOWER(name) = LOWER($1) AND created_by IS NULL AND NOT is_listed LIMIT 1`,
       [clubName]
     );
-    if (existing.rows[0]) return existing.rows[0].id_club;
-
-    const created = await this.pool.query<{ id_club: string }>(
-      `INSERT INTO clubs (name) VALUES ($1) RETURNING id_club`,
-      [clubName]
-    );
-    return created.rows[0].id_club;
+    return existing.rows[0]?.id_club ?? null;
   }
 
   async updateProfile(id_user: string, input: UpdateProfileDTO): Promise<UserProfileDB | null> {
@@ -41,7 +35,7 @@ export class UserRepository {
     if (input.club_name === null) {
       idClub = null;
     } else if (input.club_name !== undefined) {
-      idClub = await this.findOrCreateClub(input.club_name);
+      idClub = await this.findLegacyClub(input.club_name);
     }
 
     await this.pool.query(
@@ -60,7 +54,9 @@ export class UserRepository {
          organizer_last_name    = CASE WHEN $15 THEN $16 ELSE organizer_last_name END,
          region                 = CASE WHEN $17 THEN $18 ELSE region END,
          doc_color_primary      = CASE WHEN $19 THEN $20 ELSE doc_color_primary END,
-         doc_color_accent       = CASE WHEN $21 THEN $22 ELSE doc_color_accent END
+         doc_color_accent       = CASE WHEN $21 THEN $22 ELSE doc_color_accent END,
+         forehand_rubber        = CASE WHEN $23 THEN $24 ELSE forehand_rubber END,
+         backhand_rubber        = CASE WHEN $25 THEN $26 ELSE backhand_rubber END
        WHERE id_user = $12`,
       [
         input.first_name ?? null,
@@ -80,6 +76,8 @@ export class UserRepository {
         input.region !== undefined, input.region ?? null,
         input.doc_color_primary !== undefined, input.doc_color_primary ?? null,
         input.doc_color_accent !== undefined, input.doc_color_accent ?? null,
+        input.forehand_rubber !== undefined, input.forehand_rubber ?? null,
+        input.backhand_rubber !== undefined, input.backhand_rubber ?? null,
       ]
     );
 
@@ -138,6 +136,8 @@ export class UserRepository {
         u.id_document,
         u.category,
         u.dominant_hand,
+        u.forehand_rubber,
+        u.backhand_rubber,
         u.created_at::text,
         u.avatar_url,
         u.organizer_avatar_url,
@@ -209,7 +209,7 @@ export class UserRepository {
     gender?: "male" | "female" | "other";
     clubName?: string;
   }): Promise<UserSearchRow> {
-    const idClub = input.clubName ? await this.findOrCreateClub(input.clubName) : null;
+    const idClub = input.clubName ? await this.findLegacyClub(input.clubName) : null;
     const email = `sin-registro+${randomUUID()}@myttm.local`;
     const passwordHash = await hashPassword(randomUUID());
 
@@ -284,6 +284,8 @@ export class UserRepository {
            id_document = NULL,
            category = NULL,
            dominant_hand = NULL,
+           forehand_rubber = NULL,
+           backhand_rubber = NULL,
            id_club = NULL,
            public_ranking_enabled = FALSE,
            deleted_at = NOW()

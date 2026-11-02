@@ -84,6 +84,8 @@ const INCREMENTAL = [
   "076_enrollment_payment_method.sql",
   "077_gold_silver_categories.sql",
   "078_points_per_set.sql",
+  "079_club_catalog.sql",
+  "080_player_rubbers.sql",
 ];
 
 export async function runMigrations(): Promise<void> {

@@ -23,6 +23,8 @@ export type ClubPublicRow = {
   id_club: string;
   name: string;
   crest_image_url: string | null;
+  comuna: string | null;
+  verified: boolean;
 };
 
 export type ClubMemberRow = {
@@ -136,6 +138,27 @@ export type MyRequestRow = {
   requested_at: string;
 };
 
+export type ClubCatalogRow = {
+  id_club: string;
+  name: string;
+  comuna: string | null;
+  created_by: string | null;
+  admin_email: string | null;
+  admin_name: string | null;
+  member_count: number;
+  pending_requests: number;
+};
+
+export type NewClubRequestRow = {
+  id_request: string;
+  name: string;
+  comuna: string | null;
+  note: string | null;
+  requested_at: string;
+  requested_by_email: string;
+  requested_by_name: string | null;
+};
+
 export class ClubsRepository {
   private pool: Pool;
   constructor(pool?: Pool) {
@@ -204,14 +227,13 @@ export class ClubsRepository {
     return res.rows;
   }
 
-  // Listado para el selector del jugador — solo clubes con dueño (los
-  // creados por texto libre antes de esta migración no tienen created_by
-  // y quedan afuera: nadie podría aprobar una solicitud para ellos).
+  // Catálogo para el selector del jugador. verified = tiene administrador
+  // asignado por MyTTM (sin dueño, las solicitudes esperan a que lo tenga).
   async listPublic(): Promise<ClubPublicRow[]> {
     const res = await this.pool.query<ClubPublicRow>(
-      `SELECT id_club, name, crest_image_url
+      `SELECT id_club, name, crest_image_url, comuna, created_by IS NOT NULL AS verified
        FROM clubs
-       WHERE created_by IS NOT NULL
+       WHERE is_listed
        ORDER BY name ASC`
     );
     return res.rows;
@@ -353,8 +375,11 @@ export class ClubsRepository {
   async requestJoin(
     idClub: string,
     idUser: string
-  ): Promise<Result<{ id_request: string }, "CLUB_NOT_FOUND" | "ALREADY_PENDING" | "ALREADY_MEMBER">> {
-    const club = await this.pool.query(`SELECT 1 FROM clubs WHERE id_club = $1 AND created_by IS NOT NULL`, [idClub]);
+  ): Promise<Result<{ joined: boolean; id_request: string | null }, "CLUB_NOT_FOUND" | "ALREADY_PENDING" | "ALREADY_MEMBER">> {
+    const club = await this.pool.query<{ created_by: string | null }>(
+      `SELECT created_by FROM clubs WHERE id_club = $1 AND is_listed`,
+      [idClub]
+    );
     if (club.rowCount === 0) return fail("CLUB_NOT_FOUND");
 
     // Pedir unirse a otro club estando ya en uno = cambio de club (al
@@ -362,17 +387,28 @@ export class ClubsRepository {
     const member = await this.pool.query(`SELECT 1 FROM users WHERE id_user = $1 AND id_club = $2`, [idUser, idClub]);
     if ((member.rowCount ?? 0) > 0) return fail("ALREADY_MEMBER");
 
+    // Sin administrador no hay quién apruebe: el jugador queda en el club de una.
+    if (!club.rows[0].created_by) {
+      await this.joinDirectly(idClub, idUser);
+      return ok({ joined: true, id_request: null });
+    }
+
     try {
       const res = await this.pool.query<{ id_request: string }>(
         `INSERT INTO club_join_requests (id_club, id_user) VALUES ($1, $2) RETURNING id_request`,
         [idClub, idUser]
       );
-      return ok({ id_request: res.rows[0].id_request });
+      return ok({ joined: false, id_request: res.rows[0].id_request });
     } catch (e: any) {
       // Viola idx_club_join_requests_one_pending (ya tiene una pendiente).
       if (e?.code === "23505") return fail("ALREADY_PENDING");
       throw e;
     }
+  }
+
+  private async joinDirectly(idClub: string, idUser: string, c: Pick<PoolClient, "query"> = this.pool): Promise<void> {
+    await c.query(`UPDATE users SET id_club = $1 WHERE id_user = $2`, [idClub, idUser]);
+    await c.query(`DELETE FROM club_join_requests WHERE id_user = $1 AND status = 'pending'`, [idUser]);
   }
 
   // Salir del club actual como JUGADOR (users.id_club). Vale también para
@@ -802,6 +838,142 @@ export class ClubsRepository {
   // ─────────────────────────────────────────────────────────
   // Plantel seleccionado — no saca a nadie del listado general de
   // socios, solo marca/desmarca la fila puente.
+  // ── Catálogo (superadmin) ─────────────────────────────────────
+
+  async listCatalog(): Promise<ClubCatalogRow[]> {
+    const res = await this.pool.query<ClubCatalogRow>(
+      `SELECT c.id_club, c.name, c.comuna, c.created_by,
+              u.email AS admin_email,
+              NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS admin_name,
+              (SELECT COUNT(*) FROM users m WHERE m.id_club = c.id_club)::int AS member_count,
+              (SELECT COUNT(*) FROM club_join_requests r WHERE r.id_club = c.id_club AND r.status = 'pending')::int AS pending_requests
+       FROM clubs c
+       LEFT JOIN users u ON u.id_user = c.created_by
+       WHERE c.is_listed
+       ORDER BY c.name ASC`
+    );
+    return res.rows;
+  }
+
+  async addToCatalog(name: string, comuna: string | null): Promise<Result<string, "CLUB_NAME_TAKEN">> {
+    try {
+      const res = await this.pool.query<{ id_club: string }>(
+        `INSERT INTO clubs (name, comuna, is_listed) VALUES ($1, $2, TRUE) RETURNING id_club`,
+        [name.trim(), comuna?.trim() || null]
+      );
+      return ok(res.rows[0].id_club);
+    } catch (e: any) {
+      if (e?.code === "23505") return fail("CLUB_NAME_TAKEN");
+      throw e;
+    }
+  }
+
+  // Asigna el administrador del club: una cuenta de jugador pasa a organizador.
+  // Sin email, el club queda sin administrador.
+  async assignAdmin(
+    idClub: string,
+    email: string | null
+  ): Promise<Result<true, "CLUB_NOT_FOUND" | "USER_NOT_FOUND" | "ALREADY_HAS_CLUB">> {
+    return this.withTx(async (c) => {
+      const club = await c.query(`SELECT 1 FROM clubs WHERE id_club = $1 AND is_listed FOR UPDATE`, [idClub]);
+      if (club.rowCount === 0) return fail("CLUB_NOT_FOUND");
+      if (email === null) {
+        await c.query(`UPDATE clubs SET created_by = NULL WHERE id_club = $1`, [idClub]);
+        return ok(true as const);
+      }
+      const user = await c.query<{ id_user: string }>(
+        `SELECT id_user FROM users WHERE LOWER(email) = LOWER($1) AND is_team = false`,
+        [email.trim()]
+      );
+      if (user.rowCount === 0) return fail("USER_NOT_FOUND");
+      const idUser = user.rows[0].id_user;
+      const other = await c.query(`SELECT 1 FROM clubs WHERE created_by = $1 AND id_club <> $2`, [idUser, idClub]);
+      if ((other.rowCount ?? 0) > 0) return fail("ALREADY_HAS_CLUB");
+      await c.query(`UPDATE clubs SET created_by = $1 WHERE id_club = $2`, [idUser, idClub]);
+      await c.query(
+        `UPDATE users SET id_role = (SELECT id_role FROM roles WHERE name = 'admin')
+         WHERE id_user = $1 AND id_role = (SELECT id_role FROM roles WHERE name = 'player')`,
+        [idUser]
+      );
+      return ok(true as const);
+    });
+  }
+
+  async createClubRequest(
+    idUser: string,
+    input: { name: string; comuna: string | null; note: string | null }
+  ): Promise<Result<true, "ALREADY_PENDING">> {
+    try {
+      await this.pool.query(
+        `INSERT INTO club_requests (name, comuna, note, requested_by) VALUES ($1, $2, $3, $4)`,
+        [input.name.trim(), input.comuna?.trim() || null, input.note?.trim() || null, idUser]
+      );
+      return ok(true as const);
+    } catch (e: any) {
+      if (e?.code === "23505") return fail("ALREADY_PENDING");
+      throw e;
+    }
+  }
+
+  async listClubRequests(): Promise<NewClubRequestRow[]> {
+    const res = await this.pool.query<NewClubRequestRow>(
+      `SELECT r.id_request, r.name, r.comuna, r.note, r.requested_at::text, u.email AS requested_by_email,
+              NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS requested_by_name
+       FROM club_requests r
+       JOIN users u ON u.id_user = r.requested_by
+       WHERE r.status = 'pending'
+       ORDER BY r.requested_at ASC`
+    );
+    return res.rows;
+  }
+
+  // Aprobar agrega el club al catálogo y deja a quien lo pidió con su solicitud
+  // de ingreso hecha: entra cuando el club tenga administrador.
+  async approveClubRequest(
+    idRequest: string,
+    decidedBy: string,
+    name?: string
+  ): Promise<Result<{ idUser: string; name: string }, "REQUEST_NOT_FOUND" | "CLUB_NAME_TAKEN">> {
+    try {
+      return await this.withTx(async (c) => {
+        const r = await c.query<{ name: string; comuna: string | null; requested_by: string }>(
+          `SELECT name, comuna, requested_by FROM club_requests WHERE id_request = $1 AND status = 'pending' FOR UPDATE`,
+          [idRequest]
+        );
+        if (r.rowCount === 0) return fail("REQUEST_NOT_FOUND");
+        const finalName = (name ?? r.rows[0].name).trim();
+        const club = await c.query<{ id_club: string }>(
+          `INSERT INTO clubs (name, comuna, is_listed) VALUES ($1, $2, TRUE) RETURNING id_club`,
+          [finalName, r.rows[0].comuna]
+        );
+        const idClub = club.rows[0].id_club;
+        await c.query(
+          `UPDATE club_requests SET status = 'approved', id_club = $2, decided_at = NOW(), decided_by = $3 WHERE id_request = $1`,
+          [idRequest, idClub, decidedBy]
+        );
+        await this.joinDirectly(idClub, r.rows[0].requested_by, c);
+        return ok({ idUser: r.rows[0].requested_by, name: finalName });
+      });
+    } catch (e: any) {
+      if (e?.code === "23505") return fail("CLUB_NAME_TAKEN");
+      throw e;
+    }
+  }
+
+  async rejectClubRequest(
+    idRequest: string,
+    decidedBy: string
+  ): Promise<Result<{ idUser: string; name: string }, "REQUEST_NOT_FOUND">> {
+    const res = await this.pool.query<{ requested_by: string; name: string }>(
+      `UPDATE club_requests SET status = 'rejected', decided_at = NOW(), decided_by = $2
+       WHERE id_request = $1 AND status = 'pending'
+       RETURNING requested_by, name`,
+      [idRequest, decidedBy]
+    );
+    if (res.rowCount === 0) return fail("REQUEST_NOT_FOUND");
+    return ok({ idUser: res.rows[0].requested_by, name: res.rows[0].name });
+  }
+
   async setSelected(idClub: string, idUser: string, selected: boolean): Promise<void> {
     if (selected) {
       await this.pool.query(

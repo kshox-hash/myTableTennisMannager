@@ -25,6 +25,8 @@ export type UserProfileDB = {
   id_document: string | null;
   category: string | null;
   dominant_hand: string | null;
+  forehand_rubber: string | null;
+  backhand_rubber: string | null;
   created_at: string;
   // Foto de perfil del JUGADOR — URL pública en Cloudflare R2, null si no
   // subió ninguna (se muestra un identicon en su lugar).

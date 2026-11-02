@@ -4,9 +4,14 @@ import { asyncHandler } from "../middlewares/wrap_async_middleware";
 import { authRequired } from "../middlewares/auth_required_middleware";
 import { requireRole } from "../middlewares/require_role_middleware";
 import { SuperadminRepository } from "./superadmin_repository";
+import { ClubsRepository } from "../clubs/clubs_repository";
+import { NotificationsRepository } from "../notifications/notifications_repository";
+import DB from "../db/db_configuration";
 
 const router = Router();
 const repo = new SuperadminRepository();
+const clubs = new ClubsRepository();
+const notifications = new NotificationsRepository(DB.getPool());
 
 // Estricto: "superadmin" nada más — a diferencia de casi todas las otras
 // rutas de este backend, acá NO se quiere que un admin común entre (el
@@ -17,6 +22,92 @@ router.use(authRequired, requireRole("superadmin"));
 const roleSchema = z.object({
   role: z.enum(["admin", "player"]),
 });
+
+const catalogSchema = z.object({
+  name: z.string().trim().min(2).max(150),
+  comuna: z.string().trim().max(80).nullable().optional(),
+});
+const assignAdminSchema = z.object({ email: z.string().trim().email().nullable() });
+const approveClubSchema = z.object({ name: z.string().trim().min(2).max(150).optional() });
+
+// ── Catálogo de clubes ───────────────────────────────────────
+
+// GET /api/v1/superadmin/clubs
+router.get(
+  "/clubs",
+  asyncHandler(async (_req, res) => res.json({ ok: true, data: await clubs.listCatalog() }))
+);
+
+// POST /api/v1/superadmin/clubs — agregar un club al catálogo
+router.post(
+  "/clubs",
+  asyncHandler(async (req, res) => {
+    const p = catalogSchema.safeParse(req.body);
+    if (!p.success) return res.status(400).json({ ok: false, message: "Datos inválidos" });
+    const r = await clubs.addToCatalog(p.data.name, p.data.comuna ?? null);
+    if (!r.ok) return res.status(409).json({ ok: false, message: "Ya existe un club con ese nombre" });
+    return res.status(201).json({ ok: true, data: { id_club: r.data } });
+  })
+);
+
+// PATCH /api/v1/superadmin/clubs/:id_club/admin — body: { email } (null = quitar)
+router.patch(
+  "/clubs/:id_club/admin",
+  asyncHandler(async (req, res) => {
+    const p = assignAdminSchema.safeParse(req.body);
+    if (!p.success) return res.status(400).json({ ok: false, message: "Escribe un correo válido" });
+    const r = await clubs.assignAdmin(req.params.id_club, p.data.email);
+    if (!r.ok) {
+      if (r.error === "USER_NOT_FOUND") return res.status(404).json({ ok: false, message: "No hay ninguna cuenta con ese correo" });
+      if (r.error === "ALREADY_HAS_CLUB") return res.status(409).json({ ok: false, message: "Esa cuenta ya administra otro club" });
+      return res.status(404).json({ ok: false, message: "Club no encontrado" });
+    }
+    return res.json({ ok: true });
+  })
+);
+
+// GET /api/v1/superadmin/club-requests — pedidos de club nuevo pendientes
+router.get(
+  "/club-requests",
+  asyncHandler(async (_req, res) => res.json({ ok: true, data: await clubs.listClubRequests() }))
+);
+
+// POST /api/v1/superadmin/club-requests/:id_request/approve — body: { name? }
+router.post(
+  "/club-requests/:id_request/approve",
+  asyncHandler(async (req, res) => {
+    const p = approveClubSchema.safeParse(req.body ?? {});
+    if (!p.success) return res.status(400).json({ ok: false, message: "Nombre inválido" });
+    const r = await clubs.approveClubRequest(req.params.id_request, req.user!.id_user, p.data.name);
+    if (!r.ok) {
+      if (r.error === "CLUB_NAME_TAKEN") return res.status(409).json({ ok: false, message: "Ya existe un club con ese nombre" });
+      return res.status(404).json({ ok: false, message: "Solicitud no encontrada" });
+    }
+    await notifications.create({
+      idUser: r.data.idUser,
+      type: "club_join_approved",
+      title: "Agregamos tu club",
+      message: `${r.data.name} ya está en MyTTM y quedaste en ese club.`,
+    });
+    return res.json({ ok: true });
+  })
+);
+
+// POST /api/v1/superadmin/club-requests/:id_request/reject
+router.post(
+  "/club-requests/:id_request/reject",
+  asyncHandler(async (req, res) => {
+    const r = await clubs.rejectClubRequest(req.params.id_request, req.user!.id_user);
+    if (!r.ok) return res.status(404).json({ ok: false, message: "Solicitud no encontrada" });
+    await notifications.create({
+      idUser: r.data.idUser,
+      type: "club_join_rejected",
+      title: "No agregamos tu club",
+      message: `Revisamos tu solicitud de ${r.data.name} y no la agregamos al catálogo. Si crees que es un error, escríbenos.`,
+    });
+    return res.json({ ok: true });
+  })
+);
 
 // GET /api/v1/superadmin/admins
 router.get(

@@ -78,6 +78,8 @@ export class UserService {
       avatar_url: user.avatar_url,
       // Datos de presentación para la ficha (sin fecha de nacimiento ni contacto).
       dominant_hand: user.dominant_hand ?? null,
+      forehand_rubber: user.forehand_rubber ?? null,
+      backhand_rubber: user.backhand_rubber ?? null,
       region: user.region ?? null,
       member_since: user.created_at ?? null,
       stats: stats ?? {
@@ -109,6 +111,8 @@ export class UserService {
       last_name: user.last_name,
       club_name: user.club_name,
       dominant_hand: user.dominant_hand,
+      forehand_rubber: user.forehand_rubber,
+      backhand_rubber: user.backhand_rubber,
       country: user.country,
       age: computeAge(user.birth_date),
       avatar_url: user.avatar_url,

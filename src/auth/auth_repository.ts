@@ -27,22 +27,17 @@ export class AuthRepository {
   // club real y quedar adentro directo, sin pasar por la solicitud que el
   // dueño tiene que aceptar. Un club con dueño solo se entra vía
   // ClubsRepository.decide() (solicitud aprobada).
-  private async findOrCreateClub(clubName: string): Promise<string> {
+  // Los clubes los agrega MyTTM: esto ya no crea ninguno.
+  private async findLegacyClub(clubName: string): Promise<string | null> {
     const existing = await this.pool.query<{ id_club: string }>(
-      `SELECT id_club FROM clubs WHERE LOWER(name) = LOWER($1) AND created_by IS NULL LIMIT 1`,
+      `SELECT id_club FROM clubs WHERE LOWER(name) = LOWER($1) AND created_by IS NULL AND NOT is_listed LIMIT 1`,
       [clubName]
     );
-    if (existing.rows[0]) return existing.rows[0].id_club;
-
-    const created = await this.pool.query<{ id_club: string }>(
-      `INSERT INTO clubs (name) VALUES ($1) RETURNING id_club`,
-      [clubName]
-    );
-    return created.rows[0].id_club;
+    return existing.rows[0]?.id_club ?? null;
   }
 
   async createUser(params: CreateUserInput): Promise<UserCreatedDB> {
-    const idClub = params.club_name ? await this.findOrCreateClub(params.club_name) : null;
+    const idClub = params.club_name ? await this.findLegacyClub(params.club_name) : null;
 
     const query = `
       INSERT INTO ${this.usersTable} (
@@ -58,9 +53,11 @@ export class AuthRepository {
         id_document,
         category,
         dominant_hand,
-        region
+        region,
+        forehand_rubber,
+        backhand_rubber
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
       RETURNING id_user, email, created_at;
     `;
 
@@ -78,6 +75,8 @@ export class AuthRepository {
       params.category ?? null,
       params.dominant_hand ?? null,
       params.region ?? null,
+      params.forehand_rubber ?? null,
+      params.backhand_rubber ?? null,
     ];
 
     const res = await this.pool.query<UserCreatedDB>(query, values);

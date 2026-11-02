@@ -24,6 +24,8 @@ export const signUpSchema = z.object({
   gender: z.enum(["male", "female", "other"]).optional(),
   club_name: z.string().trim().max(150).optional(),
   dominant_hand: z.enum(["right-handed", "left-handed"]).optional(),
+  forehand_rubber: z.enum(["smooth", "short_pips", "medium_pips", "long_pips", "antispin"]).optional(),
+  backhand_rubber: z.enum(["smooth", "short_pips", "medium_pips", "long_pips", "antispin"]).optional(),
   birth_date: z.string().trim().min(1).max(10).optional(),
   country: z.string().trim().max(100).optional(),
   region: z.string().trim().max(40).optional(),

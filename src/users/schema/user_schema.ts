@@ -21,6 +21,8 @@ export const updateProfileSchema = z
     id_document: z.string().trim().max(50).nullable().optional(),
     category: z.string().trim().max(50).nullable().optional(),
     dominant_hand: z.enum(["right-handed", "left-handed"]).nullable().optional(),
+    forehand_rubber: z.enum(["smooth", "short_pips", "medium_pips", "long_pips", "antispin"]).nullable().optional(),
+    backhand_rubber: z.enum(["smooth", "short_pips", "medium_pips", "long_pips", "antispin"]).nullable().optional(),
     // Mostrar el ranking privado ("Mi Ranking") también en la página
     // pública de organizador ("Comunidad") — ver 043_public_organizer_profile.sql.
     public_ranking_enabled: z.boolean().optional(),
