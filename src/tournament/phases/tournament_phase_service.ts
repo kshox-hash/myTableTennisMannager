@@ -131,7 +131,7 @@ export class TournamentPhaseService {
   async advanceToBracket(
     id_category: string,
     id_tournament: string,
-    opts: { bestOfSets?: 1 | 3 | 5 | 7; pointsPerSet?: 11 | 21; force?: boolean; bracketSize?: number; slotAssignment?: BracketSlotAssignmentInput }
+    opts: { bestOfSets?: 1 | 3 | 5 | 7; pointsPerSet?: 11 | 21; force?: boolean; early?: boolean; bracketSize?: number; slotAssignment?: BracketSlotAssignmentInput }
   ) {
     const cat = await this.repo.getCategoryPhase(id_category);
     if (!cat) return { ok: false as const, error: PHASE_ERRORS.CATEGORY_NOT_FOUND };
@@ -140,8 +140,11 @@ export class TournamentPhaseService {
       return { ok: false as const, error: "Esta categoría es de grupo único: no tiene llave eliminatoria" };
     }
 
-    // Si no es force, verificar que todos los partidos de grupo tengan resultado
-    if (!opts.force) {
+    // Si no es force, verificar que todos los partidos de grupo tengan
+    // resultado. Se puede adelantar la llave salvo con Oro y Plata: Plata se
+    // arma con quienes quedan fuera de cada grupo, y eso aún no se sabe.
+    const canAdvanceEarly = opts.early === true && !cat.silver_category_id;
+    if (!opts.force && !canAdvanceEarly) {
       const done = await this.repo.allGroupMatchesFinished(id_category);
       if (!done) return { ok: false as const, error: PHASE_ERRORS.GROUPS_NOT_FINISHED };
     }
@@ -149,7 +152,12 @@ export class TournamentPhaseService {
     const result = await this.bracketsService.generateBracket(
       id_tournament,
       id_category,
-      { best_of_sets: opts.bestOfSets ?? 5, points_per_set: opts.pointsPerSet ?? 11, bracket_size: opts.bracketSize },
+      {
+        best_of_sets: opts.bestOfSets ?? 5,
+        points_per_set: opts.pointsPerSet ?? 11,
+        bracket_size: opts.bracketSize,
+        early: canAdvanceEarly,
+      },
       opts.slotAssignment
     );
     if (!result.ok) {
@@ -178,12 +186,14 @@ export class TournamentPhaseService {
     if (!cat) return { ok: false as const, error: PHASE_ERRORS.CATEGORY_NOT_FOUND };
     if (cat.phase !== "groups") return { ok: false as const, error: PHASE_ERRORS.WRONG_PHASE };
 
+    let early = false;
     if (!force) {
       const done = await this.repo.allGroupMatchesFinished(id_category);
-      if (!done) return { ok: false as const, error: PHASE_ERRORS.GROUPS_NOT_FINISHED };
+      if (!done && cat.silver_category_id) return { ok: false as const, error: PHASE_ERRORS.GROUPS_NOT_FINISHED };
+      early = !done;
     }
 
-    return this.bracketsService.previewBracket(id_tournament, id_category, bracketSize);
+    return this.bracketsService.previewBracket(id_tournament, id_category, bracketSize, early);
   }
 
   // Marcar categoría como finalizada

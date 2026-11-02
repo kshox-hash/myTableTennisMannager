@@ -172,6 +172,7 @@ export class TournamentPhaseController {
       bestOfSets,
       pointsPerSet,
       force,
+      early: req.body.early === true,
       bracketSize,
       slotAssignment,
     });

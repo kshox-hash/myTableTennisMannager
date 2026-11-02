@@ -30,6 +30,7 @@ export const BRACKETS_ERRORS = {
   // confirmar) — hay que volver a previsualizar.
   SEEDING_OUT_OF_DATE: "SEEDING_OUT_OF_DATE",
   INVALID_BRACKET_SIZE: "INVALID_BRACKET_SIZE",
+  GROUP_LOCKED_BY_BRACKET: "GROUP_LOCKED_BY_BRACKET",
   // El orden de grupos que se está confirmando no coincide con los grupos
   // que arma el algoritmo ahora mismo (p.ej. cambió quién está inscrito
   // entre previsualizar el fixture y confirmarlo) — hay que volver a
@@ -226,6 +227,8 @@ export type BracketMatchRow = {
   referee_id: string | null;
   referee_name?: string | null;
   dead_slot: 1 | 2 | null;
+  player1_slot_label?: string | null; // "1° GR-3" mientras el cupo no se llena
+  player2_slot_label?: string | null;
   seed1: number | null;
   seed2: number | null;
 };
@@ -271,6 +274,7 @@ export type BracketSlotRow = {
 export type BracketPreview = {
   bracket_size: number;
   size_options: number[]; // tamaños que se pueden elegir (ver bracketSizeOptions)
+  early: boolean; // grupos sin terminar: la llave se arma con cupos por llenar
   qualifiers: BracketQualifierRow[]; // lista ordenada por clasificación, sin sortear
   slots: BracketSlotRow[]; // resultado del sorteo, listo para confirmar
   // Pre-llave (ronda 0): solo viene si el número de clasificados no es una

@@ -3,7 +3,9 @@ import {
   drawBracketSlotsForGroups,
   buildBracketForSize,
   bracketSizeOptions,
-  getPhysicalDisplayOrder,
+  groupSlotId,
+  isGroupSlotId,
+  resolveGroupSlots,
   getSeedPositions,
   type DrawnSlot,
   type GroupSeededEntry,
@@ -486,13 +488,40 @@ export class BracketsService {
     });
 
     await this.repo.setResultReason("group", matchId, walkover ? result_reason ?? null : null);
+    await this.fillBracketSlotsIfGroupFinished(match.id_group, match.id_tournament, match.id_category);
     return ok({ recorded: true, tournamentId: match.id_tournament, categoryId: match.id_category });
+  }
+
+  // Llave adelantada: al terminar el grupo, sus clasificados entran a la llave.
+  private async fillBracketSlotsIfGroupFinished(groupId: string, tournamentId: string, categoryId: string): Promise<void> {
+    if (!(await this.repo.groupHasBracketSlots(groupId))) return;
+    const qualifiers = (await this.repo.loadGroupQualifiers(tournamentId, categoryId)).filter((q) => q.id_group === groupId);
+    if (qualifiers.length === 0 || !qualifiers[0].group_finished) return;
+
+    await this.repo.fillGroupSlots(groupId, qualifiers);
+    await this.repo.markGroupQualifiers(tournamentId, categoryId, [groupId]);
+
+    const names = await this.repo.getTournamentCategoryNames(tournamentId, categoryId);
+    if (names) {
+      await this.repo.notifications.createForMany(qualifiers.map((q) => q.id_user), {
+        type: "bracket_generated",
+        title: "Clasificaste a la llave",
+        message: `Ya estás en la llave de ${names.categoryType} ${names.categoryRange} (${names.tournamentName}). Mira contra quién te toca.`,
+        idTournament: tournamentId,
+        idCategory: categoryId,
+      });
+    }
+    if (!(await this.repo.hasPendingGroupSlots(categoryId))) {
+      const seeded = await this.loadSeededPlayers(tournamentId, categoryId);
+      void notifyGroupOutcome(categoryId, seeded.map((p) => p.id_user));
+    }
   }
 
   // Deshace un resultado de partido de grupo ya cargado (ej: error de digitación).
   // Solo mientras la categoría siga en fase "groups" — una vez generado el
   // cuadro eliminatorio, los clasificados ya quedaron fijados a partir de
-  // estos resultados y deshacer uno rompería esa foto.
+  // estos resultados y deshacer uno rompería esa foto. En una llave adelantada
+  // un grupo con cupos se puede corregir mientras nadie los haya jugado.
   async undoGroupMatchResult(
     matchId: string,
     requestedBy: string
@@ -506,7 +535,9 @@ export class BracketsService {
     // "groups" abajo). En grupos + llave, con la llave armada no.
     const reopenRoundRobin =
       phase === "finished" && (await this.repo.isRoundRobinCategory(match.id_category));
-    if (phase !== "groups" && !reopenRoundRobin) return fail(BRACKETS_ERRORS.CATEGORY_ALREADY_ADVANCED);
+    const hasSlots = phase === "bracket" && (await this.repo.groupHasBracketSlots(match.id_group));
+    if (phase !== "groups" && !reopenRoundRobin && !hasSlots) return fail(BRACKETS_ERRORS.CATEGORY_ALREADY_ADVANCED);
+    if (hasSlots && (await this.repo.groupSlotsPlayed(match.id_group))) return fail(BRACKETS_ERRORS.GROUP_LOCKED_BY_BRACKET);
 
     const winnerIsPlayer1 = match.winner_id === match.player1_id;
     const loserId = winnerIsPlayer1 ? match.player2_id : match.player1_id;
@@ -532,6 +563,7 @@ export class BracketsService {
     });
 
     if (reopenRoundRobin) await this.repo.reopenRoundRobinCategory(match.id_category);
+    if (hasSlots) await this.repo.clearGroupSlots(match.id_group);
 
     return ok({ undone: true, tournamentId: match.id_tournament, categoryId: match.id_category });
   }
@@ -542,9 +574,12 @@ export class BracketsService {
   // semilla 1). Compartido por previewBracket y generateBracket para que
   // ambos partan siempre del mismo criterio. group_name/qualification_label
   // vienen null para los pases directos (no salieron de ningún grupo).
+  // Con `early`, un grupo sin terminar aporta cupos (groupSlotId) en vez de
+  // quién va ganando: su seed depende del grupo y del puesto, no del resultado.
   private async loadSeededPlayers(
     tournamentId: string,
-    categoryId: string
+    categoryId: string,
+    early = false
   ): Promise<
     Array<{
       id_user: string;
@@ -556,15 +591,18 @@ export class BracketsService {
     const groupQualifiers = await this.repo.loadGroupQualifiers(tournamentId, categoryId);
     const directEntries = await this.repo.loadDirectEntryPlayers(tournamentId, categoryId);
     return [
-      ...groupQualifiers.map((q) => ({
-        id_user: q.id_user,
+      ...groupQualifiers.map((q) => {
+        const pending = early && !q.group_finished;
+        return {
+        id_user: pending ? groupSlotId(q.id_group, q.rank_in_group) : q.id_user,
         group_name: q.group_name,
         qualification_label: (q.rank_in_group === 1 ? "first" : q.rank_in_group === 2 ? "second" : null) as
           | "first"
           | "second"
           | null,
-        id_club: q.id_club,
-      })),
+        id_club: pending ? null : q.id_club,
+        };
+      }),
       ...directEntries.map((e) => ({
         id_user: e.id_user,
         group_name: null,
@@ -597,20 +635,27 @@ export class BracketsService {
   async previewBracket(
     tournamentId: string,
     categoryId: string,
-    requestedSize?: number
+    requestedSize?: number,
+    early = false
   ): Promise<Result<BracketPreview, BracketsError>> {
     const exists = await this.repo.bracketExists(tournamentId, categoryId);
     if (exists) return fail(BRACKETS_ERRORS.BRACKET_ALREADY_EXISTS);
 
-    const seededPlayers = await this.loadSeededPlayers(tournamentId, categoryId);
+    const seededPlayers = await this.loadSeededPlayers(tournamentId, categoryId, early);
     if (seededPlayers.length < 2) return fail(BRACKETS_ERRORS.NOT_ENOUGH_QUALIFIERS);
     const seededIds = seededPlayers.map((p) => p.id_user);
 
     const drawn = drawBracketSlotsForGroups(this.toGroupSeededEntries(seededPlayers));
 
     const allIds = [...new Set([...seededIds, ...drawn.map((d) => d.player)].filter((id): id is string => id !== null))];
-    const names = await this.repo.getUserNames(allIds);
+    const names = await this.repo.getUserNames(allIds.filter((id) => !isGroupSlotId(id)));
+    const originOf = new Map(seededPlayers.map((p, i) => [p.id_user, i]));
     const nameFields = (idUser: string | null) => {
+      if (isGroupSlotId(idUser)) {
+        const p = seededPlayers[originOf.get(idUser!)!];
+        const rank = idUser!.split(":").pop();
+        return { first_name: `${rank}° ${p.group_name}`, last_name: null, email: "" };
+      }
       const n = idUser ? names.get(idUser) : undefined;
       return { first_name: n?.first_name ?? null, last_name: n?.last_name ?? null, email: n?.email ?? "" };
     };
@@ -634,20 +679,9 @@ export class BracketsService {
     const preRoundTempMatches = withPreRound.matches.filter((m) => m.round === 0);
     const bracketSize = withPreRound.bracket_size;
 
-    // El orden físico (visual) de la planilla de sorteo es distinto del
-    // orden de emparejamiento de partidos: acá lo que importa es en qué fila
-    // aparece cada uno (semilla 1 arriba, semilla 2 abajo, BYE/pendiente
-    // pegados a las semillas protegidas primero y después hacia el medio),
-    // no quién juega contra quién en la ronda 1 — ver getPhysicalDisplayOrder.
-    const displayOrder = getPhysicalDisplayOrder(bracketSize);
-    // A qué partido de la ronda 1 corresponde cada semilla (ver
-    // getSeedPositions/buildBracketFromSlots) — el orden físico de la
-    // planilla (displayOrder) no es el mismo que el de emparejamiento, así
-    // que hay que calcularlo aparte para poder mostrar "quién juega contra
-    // quién" en la previsualización sin adivinar.
+    // Cada fila de la planilla es un cupo de la llave, en el mismo orden: lo
+    // que se ve al sortear es lo que queda en el cuadro.
     const seedOrder = getSeedPositions(bracketSize);
-    const matchNumberBySeed = new Map<number, number>();
-    seedOrder.forEach((seed, i) => matchNumberBySeed.set(seed, Math.floor(i / 2) + 1));
 
     // El "cuadro" que se muestra en la sección 2 (Posiciones) es el OFICIAL
     // (tamaño floor si hay pre-llave, sin ningún BYE real): semillas
@@ -698,6 +732,7 @@ export class BracketsService {
     return ok({
       bracket_size: bracketSize,
       size_options: sizeOptions,
+      early: seededPlayers.some((p) => isGroupSlotId(p.id_user)),
       qualifiers: seededPlayers.map((p, i) => ({
         id_user: p.id_user,
         seed: i + 1,
@@ -705,12 +740,12 @@ export class BracketsService {
         qualification_label: p.qualification_label,
         ...nameFields(p.id_user),
       })),
-      slots: displayOrder.map((drawnIdx, i) => {
-        const d = officialDrawn[drawnIdx];
+      slots: seedOrder.map((seed, i) => {
+        const d = officialDrawn[seed - 1];
         const origin = d.player ? originByUser.get(d.player) : undefined;
         return {
           position: i + 1,
-          match_number: matchNumberBySeed.get(d.seed)!,
+          match_number: Math.floor(i / 2) + 1,
           id_user: d.player,
           seed: d.seed,
           group_name: origin?.group_name ?? null,
@@ -725,7 +760,7 @@ export class BracketsService {
   async generateBracket(
     tournamentId: string,
     categoryId: string,
-    input: GenerateBracketInput,
+    input: GenerateBracketInput & { early?: boolean },
     slotAssignment?: BracketSlotAssignmentInput,
     requestedBy?: string
   ): Promise<Result<BracketView, BracketsError>> {
@@ -736,8 +771,9 @@ export class BracketsService {
     const pointsPerSet = pointsFor(bestOfSets, input.points_per_set);
 
     // Semilla final: primero clasificados de grupo, luego pases directos.
-    const seededPlayers = await this.loadSeededPlayers(tournamentId, categoryId);
+    const seededPlayers = await this.loadSeededPlayers(tournamentId, categoryId, input.early === true);
     const seededIds = seededPlayers.map((p) => p.id_user);
+    const pendingGroups = seededPlayers.some((p) => isGroupSlotId(p.id_user));
 
     if (seededIds.length < 2) {
       return fail(BRACKETS_ERRORS.NOT_ENOUGH_QUALIFIERS);
@@ -772,17 +808,26 @@ export class BracketsService {
     const targetSize = input.bracket_size ?? sizeOptions[0];
     if (!sizeOptions.includes(targetSize)) return fail(BRACKETS_ERRORS.INVALID_BRACKET_SIZE);
 
-    const generated = buildBracketForSize(rankedRealPlayers, targetSize, bestOfSets, pointsPerSet);
+    const generated = resolveGroupSlots(buildBracketForSize(rankedRealPlayers, targetSize, bestOfSets, pointsPerSet));
     await this.repo.persistBracket(tournamentId, categoryId, generated, requestedBy);
-    await this.repo.markGroupQualifiers(tournamentId, categoryId);
+    if (pendingGroups) {
+      const qualifiers = await this.repo.loadGroupQualifiers(tournamentId, categoryId);
+      const finished = [...new Set(qualifiers.filter((q) => q.group_finished).map((q) => q.id_group))];
+      await this.repo.markGroupQualifiers(tournamentId, categoryId, finished);
+    } else {
+      await this.repo.markGroupQualifiers(tournamentId, categoryId);
+    }
 
     const names = await this.repo.getTournamentCategoryNames(tournamentId, categoryId);
     if (names) {
-      const realPlayers = rankedRealPlayers.map((d) => d.player).filter((p): p is string => p !== null);
+      const realPlayers = rankedRealPlayers
+        .map((d) => d.player)
+        .filter((p): p is string => p !== null && !isGroupSlotId(p));
       // Aviso aparte de clasificación (clasificaste / quedaste fuera) a
       // todos los que jugaron los grupos — antes solo se enteraban los
       // clasificados, y sin saber en qué puesto.
-      void notifyGroupOutcome(categoryId, realPlayers);
+      // Con grupos en juego se avisa cuando se llene el último cupo.
+      if (!pendingGroups) void notifyGroupOutcome(categoryId, realPlayers);
       await this.repo.notifications.createForMany(realPlayers, {
         type: "bracket_generated",
         title: "Se generó el cuadro eliminatorio",

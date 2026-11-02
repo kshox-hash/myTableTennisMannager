@@ -9,7 +9,8 @@ import {
   buildBracketWithPreRound,
   buildBracketForSize,
   bracketSizeOptions,
-  getPhysicalDisplayOrder,
+  groupSlotId,
+  resolveGroupSlots,
   type GroupSeededEntry,
   type DrawnSlot,
 } from "../bracket_generation_logic";
@@ -29,17 +30,41 @@ describe("nextPowerOf2", () => {
 
 describe("getSeedPositions", () => {
   it("garantiza que la semilla 1 y 2 solo se encuentran en la final", () => {
-    expect(getSeedPositions(8)).toEqual([1, 8, 4, 5, 2, 7, 3, 6]);
+    expect(getSeedPositions(8)).toEqual([1, 8, 6, 3, 4, 5, 7, 2]);
+  });
+
+  // Figura 3.1 del ITTF Handbook for Tournament Referees: filas de la columna
+  // "B" (orden sugerido de los BYE) de cada tamaño de cuadro.
+  const figure31: Record<number, number[]> = {
+    8: [2, 7, 3, 6],
+    16: [2, 15, 7, 10, 3, 14, 6, 11],
+    32: [2, 31, 15, 18, 7, 26, 10, 23, 3, 30, 14, 19, 6, 27, 11, 22],
+    64: [2, 63, 31, 34, 15, 50, 18, 47, 7, 58, 26, 39, 10, 55, 23, 42],
+  };
+
+  it.each(Object.keys(figure31).map(Number))("ubica cada BYE en la fila de la planilla ITTF, cuadro de %i", (n) => {
+    const order = getSeedPositions(n);
+    figure31[n].forEach((row, i) => {
+      const bye = i + 1;
+      expect(order.indexOf(n + 1 - bye) + 1).toBe(row); // el BYE es el rival de la semilla `bye`
+    });
+  });
+
+  it.each([4, 8, 16, 32, 64, 128])("cada semilla aparece una sola vez y 1 y 2 van en mitades opuestas, cuadro de %i", (n) => {
+    const order = getSeedPositions(n);
+    expect([...order].sort((a, b) => a - b)).toEqual(Array.from({ length: n }, (_, i) => i + 1));
+    expect(order[0]).toBe(1);
+    expect(order[n - 1]).toBe(2);
   });
 });
 
-describe("getPhysicalDisplayOrder", () => {
+describe("orden de la llave de arriba abajo", () => {
   // Verificado a mano contra una planilla real de sorteo ITTF de 32
   // jugadores: semilla 1 en la fila 1, semilla 2 en la última fila, semillas
   // 3-4 exactamente en el medio, 5-8 en los cuartos, 9-16 en los octavos, y
   // el resto rellenando el resto ("2do" en la planilla real).
   it("ubica las semillas 1, 2, 3-4, 5-8 y 9-16 en las filas exactas de una planilla real de 32", () => {
-    const order = getPhysicalDisplayOrder(32); // order[posición-1] = índice (semilla-1) que va ahí
+    const order = getSeedPositions(32).map((s) => s - 1); // order[posición-1] = índice (semilla-1) que va ahí
     const rowOfSeed = (seed: number) => order.indexOf(seed - 1) + 1;
 
     expect(rowOfSeed(1)).toBe(1);
@@ -53,14 +78,14 @@ describe("getPhysicalDisplayOrder", () => {
 
   it("con un solo BYE, cae en la fila pegada a la semilla 1 (primer partido)", () => {
     // 3 jugadores reales en un cuadro de 4 -> 1 BYE (semilla 4, la más débil)
-    const order = getPhysicalDisplayOrder(4);
+    const order = getSeedPositions(4).map((s) => s - 1);
     const byeRow = order.indexOf(3) + 1; // semilla 4 = índice 3
     expect(byeRow).toBe(2); // pegado a la semilla 1 (fila 1)
   });
 
   it("con dos BYE, el segundo cae pegado a la semilla 2 (último partido)", () => {
     // 2 jugadores reales en un cuadro de 4 -> 2 BYE (semillas 3 y 4)
-    const order = getPhysicalDisplayOrder(4);
+    const order = getSeedPositions(4).map((s) => s - 1);
     const byeRows = [order.indexOf(2) + 1, order.indexOf(3) + 1].sort((a, b) => a - b);
     expect(byeRows).toEqual([2, 3]); // pegadas a la semilla 1 (fila 1) y a la semilla 2 (fila 4)
   });
@@ -332,6 +357,15 @@ describe("prevPowerOf2", () => {
 describe("elegir el tamaño de la llave", () => {
   const ranked = (n: number) => Array.from({ length: n }, (_, i) => ({ player: `p${i + 1}`, seed: i + 1 }));
 
+  it("reparte los BYE arriba, abajo, al medio y en los cuartos, con el jugador en el primer cupo", () => {
+    const round1 = buildBracketForSize(ranked(26), 32, 5).matches.filter((m) => m.round === 1);
+    const byes = round1.filter((m) => m.is_bye);
+    expect(byes.map((m) => m.match_number)).toEqual([1, 4, 8, 9, 13, 16]);
+    expect(round1.find((m) => m.match_number === 16)!.player1_id).toBe("p2");
+    expect(round1.find((m) => m.match_number === 16)!.seed1).toBe(2);
+    expect(byes.every((m) => m.player1_id !== null && m.player2_id === null)).toBe(true);
+  });
+
   it("ofrece el tamaño menor y el mayor, y uno solo si ya es potencia de 2", () => {
     expect(bracketSizeOptions(40)).toEqual([32, 64]);
     expect(bracketSizeOptions(12)).toEqual([8, 16]);
@@ -363,6 +397,38 @@ describe("elegir el tamaño de la llave", () => {
     const placed = round1.flatMap((m) => [m.player1_id, m.player2_id]).filter(Boolean);
     expect(placed.sort()).toEqual(["p1", "p2", "p3", "p4", "p5"]);
     expect(round1.flatMap((m) => [m.seed1, m.seed2])).toContain(6);
+  });
+});
+
+describe("llave adelantada (cupos por grupo)", () => {
+  const slot = (rank: number, seed: number) => ({ player: groupSlotId("grupo-a", rank), seed });
+
+  it("un partido con un cupo por llenar queda pendiente y recuerda de dónde sale", () => {
+    const players = [{ player: "p1", seed: 1 }, { player: "p2", seed: 2 }, slot(1, 3), slot(2, 4)];
+    const round1 = resolveGroupSlots(buildBracketForSize(players, 4, 5)).matches.filter((m) => m.round === 1);
+    const withSlot = round1.find((m) => m.player2_source_rank === 2)!;
+    expect(withSlot.player1_id).toBe("p1");
+    expect(withSlot.player2_id).toBeNull();
+    expect(withSlot.player2_source_group).toBe("grupo-a");
+    expect(withSlot.status).toBe("pending");
+    expect(withSlot.is_bye).toBe(false);
+  });
+
+  it("no deja ningún id de cupo en los partidos, tampoco si el cupo pasa con BYE", () => {
+    const players = [slot(1, 1), { player: "p2", seed: 2 }, slot(2, 3)];
+    const result = resolveGroupSlots(buildBracketForSize(players, 4, 5));
+    const bye = result.matches.find((m) => m.is_bye)!;
+    expect(bye.player1_source_group).toBe("grupo-a");
+    expect(bye.winner_id).toBeNull();
+    const ids = result.matches.flatMap((m) => [m.player1_id, m.player2_id, m.winner_id]);
+    expect(ids.filter((id) => id?.startsWith("slot:"))).toHaveLength(0);
+    const final = result.matches.find((m) => m.round === 2)!;
+    expect(final.player1_source_group).toBe("grupo-a");
+  });
+
+  it("sin cupos, el cuadro queda igual", () => {
+    const generated = buildBracketForSize([{ player: "p1", seed: 1 }, { player: "p2", seed: 2 }], 2, 5);
+    expect(resolveGroupSlots(generated).matches).toEqual(generated.matches);
   });
 });
 

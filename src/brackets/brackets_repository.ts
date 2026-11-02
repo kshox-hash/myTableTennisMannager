@@ -956,11 +956,21 @@ export class BracketsRepository {
   async loadGroupQualifiers(
     tournamentId: string,
     categoryId: string
-  ): Promise<Array<{ id_user: string; group_name: string; rank_in_group: number; id_club: string | null }>> {
+  ): Promise<
+    Array<{
+      id_user: string;
+      id_group: string;
+      group_name: string;
+      rank_in_group: number;
+      id_club: string | null;
+      group_finished: boolean;
+    }>
+  > {
     const query = `
       WITH ranked AS (
         SELECT
           gs.id_user,
+          gs.id_group,
           cg.group_name,
           ROW_NUMBER() OVER (
             PARTITION BY gs.id_group
@@ -975,7 +985,10 @@ export class BracketsRepository {
         JOIN category_groups cg ON cg.id_group = gs.id_group
         WHERE cg.id_tournament = $1 AND cg.id_category = $2
       )
-      SELECT ranked.id_user, ranked.group_name, ranked.rank_in_group, u.id_club
+      SELECT ranked.id_user, ranked.id_group, ranked.group_name, ranked.rank_in_group, u.id_club,
+             NOT EXISTS (
+               SELECT 1 FROM group_matches gm WHERE gm.id_group = ranked.id_group AND gm.status = 'scheduled'
+             ) AS group_finished
       FROM ranked
       JOIN users u ON u.id_user = ranked.id_user
       WHERE rank_in_group <= qualifiers_per_group
@@ -984,13 +997,104 @@ export class BracketsRepository {
 
     const res = await this.pool.query(query, [tournamentId, categoryId]);
     return res.rows.map(
-      (r: { id_user: string; group_name: string; rank_in_group: string | number; id_club: string | null }) => ({
+      (r: {
+        id_user: string;
+        id_group: string;
+        group_name: string;
+        rank_in_group: string | number;
+        id_club: string | null;
+        group_finished: boolean;
+      }) => ({
         id_user: r.id_user,
+        id_group: r.id_group,
         group_name: r.group_name,
         rank_in_group: Number(r.rank_in_group),
         id_club: r.id_club,
+        group_finished: r.group_finished,
       })
     );
+  }
+
+  // ─── Llave adelantada: cupos que salen de un grupo ───────
+
+  async groupHasBracketSlots(groupId: string): Promise<boolean> {
+    const res = await this.pool.query(
+      `SELECT 1 FROM bracket_matches WHERE player1_source_group = $1 OR player2_source_group = $1 LIMIT 1`,
+      [groupId]
+    );
+    return (res.rowCount ?? 0) > 0;
+  }
+
+  // Sus clasificados ya jugaron en la llave: corregir el grupo dejaría en la
+  // llave a alguien que quizá no clasificaba.
+  async groupSlotsPlayed(groupId: string): Promise<boolean> {
+    const res = await this.pool.query(
+      `SELECT 1 FROM bracket_matches
+       WHERE (player1_source_group = $1 OR player2_source_group = $1) AND status IN ('played', 'walkover')
+       LIMIT 1`,
+      [groupId]
+    );
+    return (res.rowCount ?? 0) > 0;
+  }
+
+  async hasPendingGroupSlots(categoryId: string): Promise<boolean> {
+    const res = await this.pool.query(
+      `SELECT 1 FROM bracket_matches
+       WHERE id_category = $1
+         AND ((player1_source_group IS NOT NULL AND player1_id IS NULL)
+           OR (player2_source_group IS NOT NULL AND player2_id IS NULL))
+       LIMIT 1`,
+      [categoryId]
+    );
+    return (res.rowCount ?? 0) > 0;
+  }
+
+  async fillGroupSlots(groupId: string, qualifiers: Array<{ id_user: string; rank_in_group: number }>): Promise<void> {
+    await this.withTransaction(async (client) => {
+      for (const q of qualifiers) {
+        for (const slot of ["player1", "player2"]) {
+          await client.query(
+            `UPDATE bracket_matches SET ${slot}_id = $1 WHERE ${slot}_source_group = $2 AND ${slot}_source_rank = $3`,
+            [q.id_user, groupId, q.rank_in_group]
+          );
+        }
+      }
+      await client.query(
+        `UPDATE bracket_matches SET winner_id = COALESCE(player1_id, player2_id)
+         WHERE (player1_source_group = $1 OR player2_source_group = $1) AND is_bye AND winner_id IS NULL`,
+        [groupId]
+      );
+      await client.query(
+        `UPDATE bracket_matches SET status = 'ready'
+         WHERE (player1_source_group = $1 OR player2_source_group = $1)
+           AND status = 'pending' AND player1_id IS NOT NULL AND player2_id IS NOT NULL`,
+        [groupId]
+      );
+    });
+  }
+
+  // Se corrigió un resultado de un grupo ya terminado y ningún partido de
+  // llave con sus clasificados se jugó: los cupos vuelven a quedar por llenar.
+  async clearGroupSlots(groupId: string): Promise<void> {
+    await this.withTransaction(async (client) => {
+      for (const slot of ["player1", "player2"]) {
+        await client.query(`UPDATE bracket_matches SET ${slot}_id = NULL WHERE ${slot}_source_group = $1`, [groupId]);
+      }
+      await client.query(
+        `UPDATE bracket_matches SET winner_id = NULL
+         WHERE (player1_source_group = $1 OR player2_source_group = $1) AND is_bye`,
+        [groupId]
+      );
+      await client.query(
+        `UPDATE bracket_matches SET status = 'pending', table_number = NULL, referee_id = NULL, set_scores = NULL
+         WHERE (player1_source_group = $1 OR player2_source_group = $1) AND status = 'ready'`,
+        [groupId]
+      );
+      await client.query(
+        `UPDATE group_standings SET qualified_to_bracket = FALSE, qualification_label = NULL WHERE id_group = $1`,
+        [groupId]
+      );
+    });
   }
 
   // Formato "Oro y Plata" (ver TournamentPhaseService.populateSilverBracket):
@@ -1039,7 +1143,7 @@ export class BracketsRepository {
 
   // Marca en group_standings quién clasificó al cuadro, con el mismo criterio
   // de desempate/orden y el mismo corte por grupo que loadGroupQualifiers.
-  async markGroupQualifiers(tournamentId: string, categoryId: string): Promise<void> {
+  async markGroupQualifiers(tournamentId: string, categoryId: string, onlyGroups?: string[]): Promise<void> {
     await this.pool.query(
       `WITH ranked AS (
          SELECT
@@ -1064,8 +1168,9 @@ export class BracketsRepository {
            END
        FROM ranked
        WHERE gs.id_group = ranked.id_group AND gs.id_user = ranked.id_user
-         AND ranked.rank_in_group <= ranked.qualifiers_per_group`,
-      [tournamentId, categoryId]
+         AND ranked.rank_in_group <= ranked.qualifiers_per_group
+         AND ($3::uuid[] IS NULL OR gs.id_group = ANY($3))`,
+      [tournamentId, categoryId, onlyGroups ?? null]
     );
   }
 
@@ -1122,14 +1227,17 @@ export class BracketsRepository {
              (id_tournament, id_category, round, match_number,
               player1_id, player2_id,
               next_round, next_match_number, next_match_slot,
-              winner_id, is_bye, best_of_sets, points_per_set, status, dead_slot, seed1, seed2)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+              winner_id, is_bye, best_of_sets, points_per_set, status, dead_slot, seed1, seed2,
+              player1_source_group, player1_source_rank, player2_source_group, player2_source_rank)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
           [
             tournamentId, categoryId, match.round, match.match_number,
             match.player1_id, match.player2_id,
             match.next_round, match.next_match_number, match.next_match_slot,
             match.winner_id, match.is_bye, match.best_of_sets, match.points_per_set, match.status,
             match.dead_slot, match.seed1, match.seed2,
+            match.player1_source_group ?? null, match.player1_source_rank ?? null,
+            match.player2_source_group ?? null, match.player2_source_rank ?? null,
           ]
         );
       }
@@ -1148,7 +1256,11 @@ export class BracketsRepository {
               player1_id, player2_id, next_round, next_match_number, next_match_slot,
               winner_id, sets_player1, sets_player2, best_of_sets, points_per_set,
               is_bye, status, played_at::text, set_scores, result_reason, table_number, played_table_number,
-              referee_id, ${REFEREE_NAME_SQL("bracket_matches")} AS referee_name, dead_slot, seed1, seed2
+              referee_id, ${REFEREE_NAME_SQL("bracket_matches")} AS referee_name, dead_slot, seed1, seed2,
+              (SELECT player1_source_rank::text || '° ' || cg.group_name FROM category_groups cg
+                WHERE cg.id_group = player1_source_group) AS player1_slot_label,
+              (SELECT player2_source_rank::text || '° ' || cg.group_name FROM category_groups cg
+                WHERE cg.id_group = player2_source_group) AS player2_slot_label
        FROM bracket_matches
        WHERE id_tournament = $1 AND id_category = $2
        ORDER BY round ASC, match_number ASC`,
@@ -1974,7 +2086,8 @@ export class BracketsRepository {
          FROM bracket_matches
          WHERE id_match = $1
            AND round = 0 AND status = 'pending'
-           AND (player1_id IS NULL OR player2_id IS NULL)
+           AND ((player1_id IS NULL AND player1_source_group IS NULL)
+             OR (player2_id IS NULL AND player2_source_group IS NULL))
          FOR UPDATE`,
         [matchId]
       );

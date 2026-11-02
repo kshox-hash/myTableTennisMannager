@@ -326,6 +326,8 @@ export class BracketsController {
       const messages: Record<string, string> = {
         [BRACKETS_ERRORS.MATCH_NOT_FOUND]: "Partido no encontrado",
         [BRACKETS_ERRORS.MATCH_NOT_PLAYED]: "Este partido todavía no tiene resultado cargado",
+        [BRACKETS_ERRORS.GROUP_LOCKED_BY_BRACKET]:
+          "Un clasificado de este grupo ya jugó en la llave: primero deshaz ese partido de llave",
         [BRACKETS_ERRORS.CATEGORY_ALREADY_ADVANCED]:
           "La categoría ya avanzó a la fase de cuadro eliminatorio: no se puede deshacer un resultado de grupos",
       };

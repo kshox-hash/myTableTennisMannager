@@ -34,6 +34,12 @@ export type TempBracketMatch = {
   // mostrar "semilla 1 vs semilla 8" en la UI.
   seed1: number | null;
   seed2: number | null;
+  // Llave adelantada: de qué grupo y puesto sale el jugador de cada cupo que
+  // todavía no se conoce (ver resolveGroupSlots).
+  player1_source_group?: string | null;
+  player1_source_rank?: number | null;
+  player2_source_group?: string | null;
+  player2_source_rank?: number | null;
 };
 
 export type GeneratedBracketResult = {
@@ -59,23 +65,40 @@ export function prevPowerOf2(n: number): number {
 }
 
 /**
- * Devuelve el orden de semillas para un cuadro de tamaño n.
- * Para n=8: [1, 8, 4, 5, 2, 7, 3, 6]
+ * Partido (1 = el de arriba) de cada semilla, en orden: Figura 3.1 del ITTF
+ * Handbook for Tournament Referees. Como cada semilla juega contra un BYE
+ * antes que nadie, es también el orden en que se ubican los BYE. Para 16
+ * partidos: 1, 16, 8, 9, 4, 13, 5, 12 y después el partido vecino de cada uno,
+ * en el mismo orden: 2, 15, 7, 10, 3, 14, 6, 11.
+ */
+function seedMatchOrder(matches: number): number[] {
+  if (matches === 1) return [1];
+  const outer = seedMatchOrder(matches / 2).map((m) => (m % 2 === 1 ? 2 * m - 1 : 2 * m));
+  return [...outer, ...outer.map((m) => (m % 2 === 1 ? m + 1 : m - 1))];
+}
+
+/**
+ * Devuelve el orden de semillas para un cuadro de tamaño n, de arriba abajo.
+ * Para n=8: [1, 8, 6, 3, 4, 5, 7, 2]
  * → Match 1: semilla 1 vs semilla 8
- * → Match 2: semilla 4 vs semilla 5
- * → Match 3: semilla 2 vs semilla 7
- * → Match 4: semilla 3 vs semilla 6
- * Garantiza que 1 y 2 se encuentran solo en la final.
+ * → Match 2: semilla 6 vs semilla 3
+ * → Match 3: semilla 4 vs semilla 5
+ * → Match 4: semilla 7 vs semilla 2
+ * Garantiza que 1 y 2 se encuentran solo en la final. Semilla 1 en la primera
+ * fila, 2 en la última, 3-4 en el medio y 5-8 en los cuartos; dentro de cada
+ * banda el sorteo decide quién queda en cada lugar.
  */
 export function getSeedPositions(n: number): number[] {
   if (n === 1) return [1];
-  const prev = getSeedPositions(n / 2);
-  const result: number[] = [];
-  for (const seed of prev) {
-    result.push(seed);
-    result.push(n + 1 - seed);
-  }
-  return result;
+  const order = new Array<number>(n);
+  seedMatchOrder(n / 2).forEach((match, i) => {
+    const seed = i + 1;
+    const rival = n + 1 - seed;
+    const seedFirst = match % 2 === 1;
+    order[2 * match - 2] = seedFirst ? seed : rival;
+    order[2 * match - 1] = seedFirst ? rival : seed;
+  });
+  return order;
 }
 
 /**
@@ -112,68 +135,6 @@ export function shuffleWithinSeedBands<T>(players: T[], isReal: (p: T) => boolea
     i = end;
   }
 
-  return result;
-}
-
-/**
- * Banda de la posición física p (1 = primera fila) en la planilla de sorteo:
- * misma numeración que seedBand (0 = semilla 1, 1 = semilla 2, 2 = semillas
- * 3-4, ...), pero aplicada al LUGAR en el cuadro en vez de a la semilla.
- * Verificado contra una planilla real de sorteo ITTF de 32 jugadores: la
- * semilla 1 siempre en la posición 1, la semilla 2 en la última, semillas
- * 3-4 exactamente en el medio, 5-8 en los cuartos, 9-16 en los octavos, y el
- * resto ("2do") rellenando el resto — ver getPhysicalDisplayOrder más abajo.
- */
-function positionBands(n: number): number[] {
-  const band = new Array(n + 1).fill(-1); // 1-indexado, band[0] sin usar
-  band[1] = 0;
-  band[n] = 1;
-  function recurse(lo: number, hi: number, depth: number) {
-    if (hi - lo < 1) return;
-    const mid = lo + Math.floor((hi - lo + 1) / 2);
-    band[mid - 1] = depth;
-    band[mid] = depth;
-    recurse(lo, mid - 2, depth + 1);
-    recurse(mid + 1, hi, depth + 1);
-  }
-  recurse(2, n - 1, 2);
-  return band.slice(1); // 0-indexado por posición-1
-}
-
-/**
- * Orden FÍSICO (visual) del cuadro para mostrarlo como una planilla de
- * sorteo real, distinto del orden de emparejamiento de partidos que arma
- * buildBracketFromSlots (getSeedPositions). Acá lo que importa es: dado un
- * BYE, ¿en qué posición de la lista aparece? Los BYE siempre son las
- * semillas más débiles (las que sobran al rellenar hasta la potencia de 2), y
- * la convención estándar les da la posición más cercana a la semilla 1
- * primero, después la más cercana a la semilla 2, y así hacia adentro —
- * exactamente la misma banda protegida que ya usa el sorteo, solo que acá se
- * usa para decidir la fila visual en vez de el rival de la ronda 1.
- *
- * Devuelve, para cada posición física p (1..n, índice p-1), el índice
- * (0-based, semilla-1) del arreglo `drawn` de drawBracketSlots que debe
- * mostrarse ahí.
- */
-export function getPhysicalDisplayOrder(n: number): number[] {
-  if (n === 1) return [0];
-  const posBand = positionBands(n);
-  const depthFromEdge = (p: number) => Math.min(p, n + 1 - p);
-
-  // Posiciones ordenadas de "más candidata a BYE" a "menos": primero por
-  // banda descendente (la banda más débil primero), y dentro de una banda,
-  // por cercanía al borde ascendente (más cerca de la semilla 1 o 2 = más
-  // prioridad para quedar vacía).
-  const weakestFirst = Array.from({ length: n }, (_, i) => i + 1).sort(
-    (a, b) => posBand[b - 1] - posBand[a - 1] || depthFromEdge(a) - depthFromEdge(b)
-  );
-
-  const result = new Array(n);
-  for (let seedIdx = 0; seedIdx < n; seedIdx++) {
-    // seedIdx 0 = semilla 1 (la más fuerte) debe caer en la posición MENOS
-    // candidata a BYE → se recorre weakestFirst desde el final.
-    result[weakestFirst[n - 1 - seedIdx] - 1] = seedIdx;
-  }
   return result;
 }
 
@@ -435,10 +396,14 @@ export function buildBracketFromSlots(
 
   for (let i = 0; i < round1.length; i++) {
     const match = round1[i];
-    match.player1_id = drawn[seedOrder[i * 2] - 1] ?? null;
-    match.player2_id = drawn[seedOrder[i * 2 + 1] - 1] ?? null;
-    match.seed1 = match.player1_id !== null ? drawnSeeds[seedOrder[i * 2] - 1] : null;
-    match.seed2 = match.player2_id !== null ? drawnSeeds[seedOrder[i * 2 + 1] - 1] : null;
+    const slot1 = seedOrder[i * 2] - 1;
+    const slot2 = seedOrder[i * 2 + 1] - 1;
+    // En un BYE el jugador va siempre en el primer cupo: ahí lo muestra la llave.
+    const [first, second] = drawn[slot1] == null ? [slot2, slot1] : [slot1, slot2];
+    match.player1_id = drawn[first] ?? null;
+    match.player2_id = drawn[second] ?? null;
+    match.seed1 = match.player1_id !== null ? drawnSeeds[first] : null;
+    match.seed2 = match.player2_id !== null ? drawnSeeds[second] : null;
 
     if (match.player1_id !== null && match.player2_id !== null) {
       match.status = "ready";
@@ -719,6 +684,51 @@ export function buildBracketForSize(
   const bySeed = new Map(rankedRealPlayers.map((d) => [d.seed, d.player]));
   const slots = Array.from({ length: size }, (_, i) => ({ player: bySeed.get(i + 1) ?? null, seed: i + 1 }));
   return buildBracketFromSlots(slots, bestOfSets, pointsPerSet);
+}
+
+const GROUP_SLOT_PREFIX = "slot:";
+
+// Jugador "de mentira" para sortear un cupo que aún no se conoce: el sorteo y
+// el armado lo tratan como a cualquier jugador. Ver resolveGroupSlots.
+export function groupSlotId(idGroup: string, rank: number): string {
+  return `${GROUP_SLOT_PREFIX}${idGroup}:${rank}`;
+}
+
+export function isGroupSlotId(id: string | null): boolean {
+  return !!id && id.startsWith(GROUP_SLOT_PREFIX);
+}
+
+function parseGroupSlot(id: string | null): { group: string; rank: number } | null {
+  if (!id || !isGroupSlotId(id)) return null;
+  const [group, rank] = id.slice(GROUP_SLOT_PREFIX.length).split(":");
+  return { group, rank: Number(rank) };
+}
+
+/**
+ * Convierte los cupos sorteados con groupSlotId en cupos vacíos que recuerdan
+ * de qué grupo y puesto salen. Un partido con un cupo así queda pendiente, y
+ * un BYE sin ganador conocido se completa cuando se llene el cupo.
+ */
+export function resolveGroupSlots(generated: GeneratedBracketResult): GeneratedBracketResult {
+  return {
+    ...generated,
+    matches: generated.matches.map((m) => {
+      const slot1 = parseGroupSlot(m.player1_id);
+      const slot2 = parseGroupSlot(m.player2_id);
+      if (!slot1 && !slot2) return m;
+      return {
+        ...m,
+        player1_id: slot1 ? null : m.player1_id,
+        player2_id: slot2 ? null : m.player2_id,
+        winner_id: isGroupSlotId(m.winner_id) ? null : m.winner_id,
+        status: m.status === "ready" ? "pending" : m.status,
+        player1_source_group: slot1?.group ?? null,
+        player1_source_rank: slot1?.rank ?? null,
+        player2_source_group: slot2?.group ?? null,
+        player2_source_rank: slot2?.rank ?? null,
+      };
+    }),
+  };
 }
 
 /**
