@@ -71,6 +71,7 @@ export class UserService {
       first_name: user.first_name,
       last_name: user.last_name,
       club_name: user.club_name,
+      club_verified: user.club_verified,
       gender: user.gender,
       // Ya es público (la ficha sin login también lo muestra) — para la
       // bandera junto al nombre en la ficha del jugador.
@@ -110,6 +111,7 @@ export class UserService {
       first_name: user.first_name,
       last_name: user.last_name,
       club_name: user.club_name,
+      club_verified: user.club_verified,
       dominant_hand: user.dominant_hand,
       forehand_rubber: user.forehand_rubber,
       backhand_rubber: user.backhand_rubber,

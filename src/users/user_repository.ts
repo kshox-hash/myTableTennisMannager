@@ -128,6 +128,13 @@ export class UserRepository {
         r.name AS role,
         u.id_club,
         cl.name AS club_name,
+        -- Verificado: lo aceptó un club con administrador. Quien entró directo
+        -- a un club sin administrador no lleva el sello.
+        COALESCE(cl.created_by = u.id_user OR EXISTS (
+          SELECT 1 FROM club_join_requests r
+          WHERE r.id_user = u.id_user AND r.id_club = u.id_club AND r.status = 'approved'
+            AND cl.created_by IS NOT NULL
+        ), FALSE) AS club_verified,
         owned.id_club AS owned_club_id,
         owned.name AS owned_club_name,
         u.birth_date::text,

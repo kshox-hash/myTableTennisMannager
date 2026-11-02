@@ -12,6 +12,7 @@ export type UserProfileDB = {
   organizer_last_name: string | null;
   id_club: string | null;
   club_name: string | null;
+  club_verified: boolean;
   // Club "real" que este admin administra (el de Clubes, con escudo) —
   // distinto de club_name/id_club, que es el texto suelto de este mismo
   // perfil. null para jugadores y para admins que no crearon un club.
