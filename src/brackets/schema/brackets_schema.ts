@@ -44,6 +44,7 @@ export const generateBracketSchema = z
   .object({
     best_of_sets: z.union([z.literal(1), z.literal(3), z.literal(5), z.literal(7)]).optional(),
     points_per_set: z.union([z.literal(11), z.literal(21)]).optional(),
+    bracket_size: z.number().int().positive().optional(),
   })
   .strict();
 

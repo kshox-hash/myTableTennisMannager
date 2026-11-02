@@ -692,6 +692,36 @@ export function buildBracketWithPreRound(
 }
 
 /**
+ * Tamaños de llave que tienen sentido para n jugadores: el menor manda a los
+ * sobrantes a pre-llave y el mayor completa con BYE. Uno todavía más grande
+ * daría lo mismo que el mayor, con una ronda entera sin partidos antes.
+ */
+export function bracketSizeOptions(n: number): number[] {
+  const floor = prevPowerOf2(n);
+  const ceil = nextPowerOf2(n);
+  return floor === ceil ? [floor] : [floor, ceil];
+}
+
+/**
+ * Arma la llave del tamaño elegido (ver bracketSizeOptions). En el tamaño
+ * mayor cada jugador va en el puesto de su semilla y los puestos sin nadie
+ * son BYE, que quedan contra las mejores semillas.
+ */
+export function buildBracketForSize(
+  rankedRealPlayers: DrawnSlot[],
+  size: number,
+  bestOfSets: 1 | 3 | 5 | 7 = 5,
+  pointsPerSet: 11 | 21 = 11
+): GeneratedBracketResult {
+  if (size === prevPowerOf2(rankedRealPlayers.length)) {
+    return buildBracketWithPreRound(rankedRealPlayers, bestOfSets, pointsPerSet);
+  }
+  const bySeed = new Map(rankedRealPlayers.map((d) => [d.seed, d.player]));
+  const slots = Array.from({ length: size }, (_, i) => ({ player: bySeed.get(i + 1) ?? null, seed: i + 1 }));
+  return buildBracketFromSlots(slots, bestOfSets, pointsPerSet);
+}
+
+/**
  * Atajo que hace todo de una: sortea y arma el cuadro en un solo llamado.
  * Se mantiene para quien no necesite previsualizar el sorteo antes.
  */

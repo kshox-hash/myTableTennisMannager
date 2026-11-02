@@ -131,7 +131,7 @@ export class TournamentPhaseService {
   async advanceToBracket(
     id_category: string,
     id_tournament: string,
-    opts: { bestOfSets?: 1 | 3 | 5 | 7; pointsPerSet?: 11 | 21; force?: boolean; slotAssignment?: BracketSlotAssignmentInput }
+    opts: { bestOfSets?: 1 | 3 | 5 | 7; pointsPerSet?: 11 | 21; force?: boolean; bracketSize?: number; slotAssignment?: BracketSlotAssignmentInput }
   ) {
     const cat = await this.repo.getCategoryPhase(id_category);
     if (!cat) return { ok: false as const, error: PHASE_ERRORS.CATEGORY_NOT_FOUND };
@@ -149,7 +149,7 @@ export class TournamentPhaseService {
     const result = await this.bracketsService.generateBracket(
       id_tournament,
       id_category,
-      { best_of_sets: opts.bestOfSets ?? 5, points_per_set: opts.pointsPerSet ?? 11 },
+      { best_of_sets: opts.bestOfSets ?? 5, points_per_set: opts.pointsPerSet ?? 11, bracket_size: opts.bracketSize },
       opts.slotAssignment
     );
     if (!result.ok) {
@@ -173,7 +173,7 @@ export class TournamentPhaseService {
   // nada, para la pantalla "Sembrar / Sorteo" previa a confirmar el cuadro.
   // `force`: igual que en advanceToBracket, permite previsualizar (y luego
   // confirmar) aunque todavía haya partidos de grupo sin resultado.
-  async previewBracket(id_category: string, id_tournament: string, force = false) {
+  async previewBracket(id_category: string, id_tournament: string, force = false, bracketSize?: number) {
     const cat = await this.repo.getCategoryPhase(id_category);
     if (!cat) return { ok: false as const, error: PHASE_ERRORS.CATEGORY_NOT_FOUND };
     if (cat.phase !== "groups") return { ok: false as const, error: PHASE_ERRORS.WRONG_PHASE };
@@ -183,7 +183,7 @@ export class TournamentPhaseService {
       if (!done) return { ok: false as const, error: PHASE_ERRORS.GROUPS_NOT_FINISHED };
     }
 
-    return this.bracketsService.previewBracket(id_tournament, id_category);
+    return this.bracketsService.previewBracket(id_tournament, id_category, bracketSize);
   }
 
   // Marcar categoría como finalizada

@@ -166,11 +166,13 @@ export class TournamentPhaseController {
     const pointsPerSet = parsePointsPerSet(req.body.points_per_set, 11);
     const force      = req.body.force === true;
     const slotAssignment = parseSlotAssignment(req.body.slot_assignment);
+    const bracketSize = Number.isInteger(req.body.bracket_size) ? (req.body.bracket_size as number) : undefined;
 
     const result = await this.service.advanceToBracket(id_category, id_tournament, {
       bestOfSets,
       pointsPerSet,
       force,
+      bracketSize,
       slotAssignment,
     });
 
@@ -187,6 +189,8 @@ export class TournamentPhaseController {
           message: "El sorteo que estás confirmando ya no coincide con los clasificados actuales — vuelve a previsualizar",
           code: "SEEDING_OUT_OF_DATE",
         });
+      if (result.error === "INVALID_BRACKET_SIZE")
+        return res.status(400).json({ ok: false, message: "Ese tamaño de llave no sirve para esta cantidad de clasificados" });
       return res.status(400).json({ ok: false, message: result.error });
     }
 
@@ -197,8 +201,9 @@ export class TournamentPhaseController {
   previewBracket = async (req: Request, res: Response) => {
     const { id_tournament, id_category } = req.params;
     const force = req.query.force === "true";
+    const bracketSize = req.query.bracket_size ? Number(req.query.bracket_size) : undefined;
 
-    const result = await this.service.previewBracket(id_category, id_tournament, force);
+    const result = await this.service.previewBracket(id_category, id_tournament, force, bracketSize);
 
     if (!result.ok) {
       if (result.error === PHASE_ERRORS.CATEGORY_NOT_FOUND)
@@ -209,6 +214,8 @@ export class TournamentPhaseController {
         return res.status(409).json({ ok: false, message: "Aún hay partidos de grupo sin resultado", code: "GROUPS_NOT_FINISHED" });
       if (result.error === "NOT_ENOUGH_QUALIFIERS")
         return res.status(400).json({ ok: false, message: "No hay suficientes clasificados para armar un cuadro" });
+      if (result.error === "INVALID_BRACKET_SIZE")
+        return res.status(400).json({ ok: false, message: "Ese tamaño de llave no sirve para esta cantidad de clasificados" });
       if (result.error === "BRACKET_ALREADY_EXISTS")
         return res.status(409).json({ ok: false, message: "Esta categoría ya tiene un cuadro eliminatorio generado" });
       return res.status(400).json({ ok: false, message: result.error });

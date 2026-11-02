@@ -29,6 +29,7 @@ export const BRACKETS_ERRORS = {
   // actuales (p.ej. cambiaron resultados de grupo entre previsualizar y
   // confirmar) — hay que volver a previsualizar.
   SEEDING_OUT_OF_DATE: "SEEDING_OUT_OF_DATE",
+  INVALID_BRACKET_SIZE: "INVALID_BRACKET_SIZE",
   // El orden de grupos que se está confirmando no coincide con los grupos
   // que arma el algoritmo ahora mismo (p.ej. cambió quién está inscrito
   // entre previsualizar el fixture y confirmarlo) — hay que volver a
@@ -269,6 +270,7 @@ export type BracketSlotRow = {
 
 export type BracketPreview = {
   bracket_size: number;
+  size_options: number[]; // tamaños que se pueden elegir (ver bracketSizeOptions)
   qualifiers: BracketQualifierRow[]; // lista ordenada por clasificación, sin sortear
   slots: BracketSlotRow[]; // resultado del sorteo, listo para confirmar
   // Pre-llave (ronda 0): solo viene si el número de clasificados no es una

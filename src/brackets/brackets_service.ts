@@ -1,7 +1,8 @@
 import { generateGroupsFromPlayers, buildManualGroups } from "../group_generation_logic";
 import {
   drawBracketSlotsForGroups,
-  buildBracketWithPreRound,
+  buildBracketForSize,
+  bracketSizeOptions,
   getPhysicalDisplayOrder,
   getSeedPositions,
   type DrawnSlot,
@@ -595,7 +596,8 @@ export class BracketsService {
   // se ve en la previsualización sea exactamente lo que se guarda.
   async previewBracket(
     tournamentId: string,
-    categoryId: string
+    categoryId: string,
+    requestedSize?: number
   ): Promise<Result<BracketPreview, BracketsError>> {
     const exists = await this.repo.bracketExists(tournamentId, categoryId);
     if (exists) return fail(BRACKETS_ERRORS.BRACKET_ALREADY_EXISTS);
@@ -619,15 +621,18 @@ export class BracketsService {
     const originByUser = new Map(seededPlayers.map((p) => [p.id_user, p]));
 
     // Cuál es el cuadro OFICIAL que se va a generar de verdad — mismo
-    // cálculo que usará generateBracket al confirmar (buildBracketWithPreRound
-    // decide solo si hace falta pre-llave), para que la previsualización
-    // nunca muestre un tamaño de cuadro ni un "BYE" que después no exista.
+    // cálculo que usará generateBracket al confirmar, para que la
+    // previsualización nunca muestre un tamaño de cuadro ni un "BYE" que
+    // después no exista. Sin tamaño pedido, el menor (con pre-llave).
     const rankedRealPlayers = drawn
       .filter((d): d is DrawnSlot => d.player !== null)
       .sort((a, b) => a.seed - b.seed);
-    const withPreRound = buildBracketWithPreRound(rankedRealPlayers, 5);
+    const sizeOptions = bracketSizeOptions(rankedRealPlayers.length);
+    const targetSize = requestedSize ?? sizeOptions[0];
+    if (!sizeOptions.includes(targetSize)) return fail(BRACKETS_ERRORS.INVALID_BRACKET_SIZE);
+    const withPreRound = buildBracketForSize(rankedRealPlayers, targetSize, 5);
     const preRoundTempMatches = withPreRound.matches.filter((m) => m.round === 0);
-    const bracketSize = withPreRound.bracket_size; // = floor cuando hay pre-llave, = N si ya era potencia de 2
+    const bracketSize = withPreRound.bracket_size;
 
     // El orden físico (visual) de la planilla de sorteo es distinto del
     // orden de emparejamiento de partidos: acá lo que importa es en qué fila
@@ -658,7 +663,7 @@ export class BracketsService {
               seed: bracketSize - preRoundTempMatches.length + i + 1,
             })),
           ]
-        : rankedRealPlayers;
+        : [...drawn].sort((a, b) => a.seed - b.seed);
 
     // Pre-llave (ronda 0), lista para mostrar aparte de la sección 2 —
     // mismos partidos exactos que va a persistir generateBracket.
@@ -692,6 +697,7 @@ export class BracketsService {
 
     return ok({
       bracket_size: bracketSize,
+      size_options: sizeOptions,
       qualifiers: seededPlayers.map((p, i) => ({
         id_user: p.id_user,
         seed: i + 1,
@@ -762,7 +768,11 @@ export class BracketsService {
         .sort((a, b) => a.seed - b.seed);
     }
 
-    const generated = buildBracketWithPreRound(rankedRealPlayers, bestOfSets, pointsPerSet);
+    const sizeOptions = bracketSizeOptions(rankedRealPlayers.length);
+    const targetSize = input.bracket_size ?? sizeOptions[0];
+    if (!sizeOptions.includes(targetSize)) return fail(BRACKETS_ERRORS.INVALID_BRACKET_SIZE);
+
+    const generated = buildBracketForSize(rankedRealPlayers, targetSize, bestOfSets, pointsPerSet);
     await this.repo.persistBracket(tournamentId, categoryId, generated, requestedBy);
     await this.repo.markGroupQualifiers(tournamentId, categoryId);
 

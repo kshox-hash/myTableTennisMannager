@@ -7,6 +7,8 @@ import {
   drawBracketSlotsForGroups,
   buildBracketFromSlots,
   buildBracketWithPreRound,
+  buildBracketForSize,
+  bracketSizeOptions,
   getPhysicalDisplayOrder,
   type GroupSeededEntry,
   type DrawnSlot,
@@ -324,6 +326,43 @@ describe("prevPowerOf2", () => {
     expect(prevPowerOf2(24)).toBe(16);
     expect(prevPowerOf2(31)).toBe(16);
     expect(prevPowerOf2(32)).toBe(32);
+  });
+});
+
+describe("elegir el tamaño de la llave", () => {
+  const ranked = (n: number) => Array.from({ length: n }, (_, i) => ({ player: `p${i + 1}`, seed: i + 1 }));
+
+  it("ofrece el tamaño menor y el mayor, y uno solo si ya es potencia de 2", () => {
+    expect(bracketSizeOptions(40)).toEqual([32, 64]);
+    expect(bracketSizeOptions(12)).toEqual([8, 16]);
+    expect(bracketSizeOptions(70)).toEqual([64, 128]);
+    expect(bracketSizeOptions(32)).toEqual([32]);
+  });
+
+  it("el tamaño menor es la llave con pre-llave de siempre", () => {
+    const players = ranked(40);
+    const result = buildBracketForSize(players, 32, 5);
+    expect(result.bracket_size).toBe(32);
+    expect(result.matches.filter((m) => m.round === 0)).toHaveLength(8);
+  });
+
+  it("el tamaño mayor no tiene pre-llave y da BYE a las mejores semillas", () => {
+    const result = buildBracketForSize(ranked(40), 64, 5);
+    expect(result.bracket_size).toBe(64);
+    expect(result.matches.filter((m) => m.round === 0)).toHaveLength(0);
+    const byes = result.matches.filter((m) => m.round === 1 && m.is_bye);
+    expect(byes).toHaveLength(24);
+    expect(byes.map((m) => m.winner_id).sort()).toEqual(ranked(24).map((p) => p.player).sort());
+    expect(result.matches.filter((m) => m.round === 1 && m.status === "ready")).toHaveLength(8);
+  });
+
+  it("respeta la semilla de cada jugador y no pierde a nadie aunque haya huecos", () => {
+    const players = ranked(5).map((p, i) => ({ ...p, seed: i === 4 ? 6 : p.seed }));
+    const result = buildBracketForSize(players, 8, 5);
+    const round1 = result.matches.filter((m) => m.round === 1);
+    const placed = round1.flatMap((m) => [m.player1_id, m.player2_id]).filter(Boolean);
+    expect(placed.sort()).toEqual(["p1", "p2", "p3", "p4", "p5"]);
+    expect(round1.flatMap((m) => [m.seed1, m.seed2])).toContain(6);
   });
 });
 
