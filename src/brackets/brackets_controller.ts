@@ -116,6 +116,13 @@ export class BracketsController {
       return res.status(400).json({ ok: false, message: result.error });
     }
 
+    // La asistencia es de la mesa de control: esta ruta también la usan jugadores.
+    if (req.user?.role !== "admin" && req.user?.role !== "superadmin") {
+      for (const group of result.data.groups) {
+        for (const member of group.members) delete member.attendance;
+      }
+    }
+
     return res.json({ ok: true, data: result.data });
   };
 

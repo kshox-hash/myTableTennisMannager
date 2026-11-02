@@ -680,7 +680,10 @@ export class PublicTournamentRepository {
                 gs.sets_for, gs.sets_against, gs.position, gs.qualified_to_bracket
          FROM group_standings gs
          JOIN users u ON u.id_user = gs.id_user
-         LEFT JOIN clubs cl ON cl.id_club = u.id_club
+         JOIN category_groups cg ON cg.id_group = gs.id_group
+         LEFT JOIN enrollments e
+           ON e.id_user = gs.id_user AND e.id_tournament = cg.id_tournament AND e.id_category = cg.id_category
+         LEFT JOIN clubs cl ON cl.id_club = COALESCE(e.club_override, u.id_club)
          WHERE gs.id_group = ANY($1::uuid[])
          ORDER BY gs.id_group, gs.position ASC NULLS LAST, gs.won DESC`,
         [groupIds]

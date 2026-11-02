@@ -93,6 +93,7 @@ export type GroupMemberRow = {
   club_name: string | null;
   club_crest_url?: string | null;
   age?: number | null;
+  attendance?: "present" | "pending" | "absent" | null;
 };
 
 export type GroupStandingRow = {

@@ -1334,6 +1334,13 @@ export class AdminTournamentRepository {
           u.gender,
           u.id_club,
           cl.name AS club_name,
+          cl.crest_image_url AS club_crest_url,
+          e.club_override,
+          e.attendance,
+          pc.name AS profile_club_name,
+          EXTRACT(YEAR FROM AGE(u.birth_date::date))::int AS age,
+          -- La fecha exacta solo se edita en jugadores sin cuenta.
+          CASE WHEN u.email LIKE 'sin-registro+%' THEN u.birth_date::text END AS birth_date,
 
           c.category_type,
           c.category_range,
@@ -1342,7 +1349,9 @@ export class AdminTournamentRepository {
         JOIN ${this.usersTable} u
           ON u.id_user = e.id_user
         LEFT JOIN ${this.clubsTable} cl
-          ON cl.id_club = u.id_club
+          ON cl.id_club = COALESCE(e.club_override, u.id_club)
+        LEFT JOIN ${this.clubsTable} pc
+          ON pc.id_club = u.id_club
         JOIN ${this.tournamentCategoriesTable} c
           ON c.id_category = e.id_category
         WHERE e.id_tournament = $1
@@ -1477,7 +1486,8 @@ export class AdminTournamentRepository {
              enrolled_at = NOW(),
              qualification_type = EXCLUDED.qualification_type,
              seed = NULL,
-             checked_in = true
+             checked_in = true,
+             attendance = 'present'
            WHERE ${this.enrollmentsTable}.status <> 'active'
            RETURNING
              id_enrollment,
@@ -2013,7 +2023,8 @@ export class AdminTournamentRepository {
 
       const query = `
         UPDATE ${this.enrollmentsTable}
-           SET checked_in = $4
+           SET checked_in = $4,
+               attendance = CASE WHEN $4 THEN 'present' ELSE 'absent' END
          WHERE id_tournament = $1
            AND id_user = $2
            AND id_category = $3

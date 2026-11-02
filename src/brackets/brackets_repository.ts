@@ -196,7 +196,7 @@ export class BracketsRepository {
         cl.name AS club_name
       FROM enrollments e
       JOIN users u ON u.id_user = e.id_user
-      LEFT JOIN clubs cl ON cl.id_club = u.id_club
+      LEFT JOIN clubs cl ON cl.id_club = COALESCE(e.club_override, u.id_club)
       LEFT JOIN ranked_players rp ON rp.id_user = u.id_user
       WHERE e.id_tournament = $1
         AND e.id_category = $2
@@ -358,11 +358,14 @@ export class BracketsRepository {
         `SELECT gm.id_group, gm.id_user, gm.seed, gm.assignment_type, gm.group_position,
                 u.first_name, u.last_name, u.email, u.avatar_url, cl.name AS club_name,
                 cl.crest_image_url AS club_crest_url,
-                EXTRACT(YEAR FROM AGE(u.birth_date::date))::int AS age
+                EXTRACT(YEAR FROM AGE(u.birth_date::date))::int AS age,
+                e.attendance
          FROM group_members gm
          JOIN category_groups cg ON cg.id_group = gm.id_group
          JOIN users u ON u.id_user = gm.id_user
-         LEFT JOIN clubs cl ON cl.id_club = u.id_club
+         LEFT JOIN enrollments e
+           ON e.id_user = gm.id_user AND e.id_tournament = cg.id_tournament AND e.id_category = cg.id_category
+         LEFT JOIN clubs cl ON cl.id_club = COALESCE(e.club_override, u.id_club)
          WHERE cg.id_tournament = $1 AND cg.id_category = $2
          ORDER BY gm.group_position ASC NULLS LAST`,
         [tournamentId, categoryId]

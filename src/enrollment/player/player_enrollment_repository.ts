@@ -164,7 +164,8 @@ export class EnrollmentsRepository {
              enrolled_at = NOW(),
              qualification_type = 'group',
              seed = NULL,
-             checked_in = true
+             checked_in = true,
+             attendance = 'present'
            RETURNING id_enrollment, id_user, id_tournament, id_category, status, enrolled_at`,
           [id_user, payload.id_tournament, payload.id_category]
         );

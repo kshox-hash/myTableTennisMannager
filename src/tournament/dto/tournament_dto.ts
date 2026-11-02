@@ -227,6 +227,12 @@ export type EnrollmentRow = {
 
   id_club: string | null;
   club_name: string | null;
+  club_crest_url?: string | null;
+  club_override?: string | null;
+  attendance?: "present" | "pending" | "absent";
+  profile_club_name?: string | null;
+  age?: number | null;
+  birth_date?: string | null;
 
   category_type: string;
   category_range: string;
