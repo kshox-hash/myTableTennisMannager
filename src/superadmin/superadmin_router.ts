@@ -57,6 +57,22 @@ router.post(
   })
 );
 
+// PATCH /api/v1/superadmin/clubs/:id_club — corregir nombre y comuna
+router.patch(
+  "/clubs/:id_club",
+  asyncHandler(async (req, res) => {
+    const p = catalogSchema.safeParse(req.body);
+    if (!p.success) return res.status(400).json({ ok: false, message: "Datos inválidos" });
+    const r = await clubs.updateCatalogClub(req.params.id_club, p.data.name, p.data.comuna ?? null);
+    if (!r.ok) {
+      return r.error === "CLUB_NAME_TAKEN"
+        ? res.status(409).json({ ok: false, message: "Ya existe un club con ese nombre" })
+        : res.status(404).json({ ok: false, message: "Club no encontrado" });
+    }
+    return res.json({ ok: true });
+  })
+);
+
 // PATCH /api/v1/superadmin/clubs/:id_club/admin — body: { email } (null = quitar)
 router.patch(
   "/clubs/:id_club/admin",

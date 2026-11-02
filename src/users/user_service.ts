@@ -140,12 +140,14 @@ export class UserService {
   }
 
   // Crea un jugador sin cuenta (walk-in) y lo devuelve listo para inscribir.
-  async createQuickPlayer(input: QuickCreatePlayerDTO): Promise<Result<UserSearchRow, never>> {
+  async createQuickPlayer(input: QuickCreatePlayerDTO, addedBy: string): Promise<Result<UserSearchRow, never>> {
     const data = await this.repo.createQuickPlayer({
       firstName: input.first_name,
       lastName: input.last_name,
       gender: input.gender,
       clubName: input.club_name,
+      idClub: input.id_club,
+      addedBy,
     });
     return ok(data);
   }

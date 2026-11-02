@@ -42,6 +42,7 @@ export const quickCreatePlayerSchema = z
     last_name: z.string().trim().min(1).max(100).optional(),
     gender: z.enum(["male", "female", "other"]).optional(),
     club_name: z.string().trim().min(1).max(150).optional(),
+    id_club: z.string().uuid().optional(),
   })
   .strict();
 

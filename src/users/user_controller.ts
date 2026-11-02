@@ -70,7 +70,7 @@ export class UserController {
 
   // POST /api/v1/users/admin/quick-create — crea un jugador sin cuenta (walk-in) para inscribirlo
   adminQuickCreatePlayer = async (req: Request, res: Response) => {
-    const result = await this.service.createQuickPlayer(req.body);
+    const result = await this.service.createQuickPlayer(req.body, req.user!.id_user);
     if (!result.ok) return res.status(500).json({ ok: false });
     return res.status(201).json({ ok: true, data: result.data });
   };

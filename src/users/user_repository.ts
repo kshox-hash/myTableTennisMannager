@@ -215,8 +215,24 @@ export class UserRepository {
     lastName?: string;
     gender?: "male" | "female" | "other";
     clubName?: string;
+    idClub?: string;
+    addedBy: string;
   }): Promise<UserSearchRow> {
-    const idClub = input.clubName ? await this.findLegacyClub(input.clubName) : null;
+    // En un campeonato el club es de palabra: queda el que el organizador
+    // elija, sin solicitud. El sello azul sí exige aceptación del club, y
+    // solo lo da el dueño al sumar a alguien al suyo.
+    const picked = input.idClub
+      ? await this.pool.query<{ name: string; created_by: string | null }>(
+          `SELECT name, created_by FROM clubs WHERE id_club = $1 AND is_listed`,
+          [input.idClub]
+        )
+      : null;
+    const club = picked?.rows[0] ?? null;
+    const idClub = club
+      ? input.idClub!
+      : input.clubName
+        ? await this.findLegacyClub(input.clubName)
+        : null;
     const email = `sin-registro+${randomUUID()}@myttm.local`;
     const passwordHash = await hashPassword(randomUUID());
 
@@ -233,12 +249,19 @@ export class UserRepository {
     );
 
     const row = res.rows[0];
+    if (club?.created_by === input.addedBy) {
+      await this.pool.query(
+        `INSERT INTO club_join_requests (id_club, id_user, status, decided_at, decided_by)
+         VALUES ($1, $2, 'approved', NOW(), $3)`,
+        [input.idClub, row.id_user, input.addedBy]
+      );
+    }
     return {
       id_user: row.id_user,
       email: row.email,
       first_name: row.first_name,
       last_name: row.last_name,
-      club_name: input.clubName ?? null,
+      club_name: club?.name ?? input.clubName ?? null,
     };
   }
 

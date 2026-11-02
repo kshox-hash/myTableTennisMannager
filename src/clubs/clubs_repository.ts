@@ -868,6 +868,23 @@ export class ClubsRepository {
     }
   }
 
+  async updateCatalogClub(
+    idClub: string,
+    name: string,
+    comuna: string | null
+  ): Promise<Result<true, "CLUB_NOT_FOUND" | "CLUB_NAME_TAKEN">> {
+    try {
+      const res = await this.pool.query(
+        `UPDATE clubs SET name = $2, comuna = $3 WHERE id_club = $1 AND is_listed`,
+        [idClub, name.trim(), comuna?.trim() || null]
+      );
+      return res.rowCount === 0 ? fail("CLUB_NOT_FOUND") : ok(true);
+    } catch (e: any) {
+      if (e?.code === "23505") return fail("CLUB_NAME_TAKEN");
+      throw e;
+    }
+  }
+
   // Asigna el administrador del club: una cuenta de jugador pasa a organizador.
   // Sin email, el club queda sin administrador.
   async assignAdmin(
