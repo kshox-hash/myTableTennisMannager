@@ -216,6 +216,7 @@ export class UserRepository {
     gender?: "male" | "female" | "other";
     clubName?: string;
     idClub?: string;
+    birthDate?: string;
     addedBy: string;
   }): Promise<UserSearchRow> {
     // En un campeonato el club es de palabra: queda el que el organizador
@@ -242,10 +243,10 @@ export class UserRepository {
       first_name: string | null;
       last_name: string | null;
     }>(
-      `INSERT INTO users (email, password_hash, id_role, first_name, last_name, gender, id_club)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO users (email, password_hash, id_role, first_name, last_name, gender, id_club, birth_date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING id_user, email, first_name, last_name`,
-      [email, passwordHash, ROLE_IDS.player, input.firstName, input.lastName ?? null, input.gender ?? null, idClub]
+      [email, passwordHash, ROLE_IDS.player, input.firstName, input.lastName ?? null, input.gender ?? null, idClub, input.birthDate ?? null]
     );
 
     const row = res.rows[0];

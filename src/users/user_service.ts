@@ -147,6 +147,7 @@ export class UserService {
       gender: input.gender,
       clubName: input.club_name,
       idClub: input.id_club,
+      birthDate: input.birth_date,
       addedBy,
     });
     return ok(data);

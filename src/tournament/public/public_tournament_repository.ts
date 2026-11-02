@@ -625,7 +625,7 @@ export class PublicTournamentRepository {
       id_group: string;
       group_name: string;
       standings: Array<{
-        id_user: string; name: string; avatar_url: string | null; played: number; won: number; lost: number;
+        id_user: string; name: string; avatar_url: string | null; club_name: string | null; played: number; won: number; lost: number;
         sets_for: number; sets_against: number; position: number | null; qualified_to_bracket: boolean;
       }>;
       matches: Array<{
@@ -676,10 +676,11 @@ export class PublicTournamentRepository {
     const groupIds = groupsRes.rows.map((g) => g.id_group);
     const [allStandings, allMatches] = await Promise.all([
       this.pool.query(
-        `SELECT gs.id_group, gs.id_user, u.first_name, u.last_name, u.avatar_url, gs.played, gs.won, gs.lost,
+        `SELECT gs.id_group, gs.id_user, u.first_name, u.last_name, u.avatar_url, cl.name AS club_name, gs.played, gs.won, gs.lost,
                 gs.sets_for, gs.sets_against, gs.position, gs.qualified_to_bracket
          FROM group_standings gs
          JOIN users u ON u.id_user = gs.id_user
+         LEFT JOIN clubs cl ON cl.id_club = u.id_club
          WHERE gs.id_group = ANY($1::uuid[])
          ORDER BY gs.id_group, gs.position ASC NULLS LAST, gs.won DESC`,
         [groupIds]
@@ -719,6 +720,7 @@ export class PublicTournamentRepository {
           id_user: r.id_user,
           name: `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim(),
           avatar_url: r.avatar_url,
+          club_name: r.club_name ?? null,
           played: r.played,
           won: r.won,
           lost: r.lost,

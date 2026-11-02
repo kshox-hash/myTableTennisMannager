@@ -356,7 +356,9 @@ export class BracketsRepository {
       ),
       this.pool.query<GroupMemberRow>(
         `SELECT gm.id_group, gm.id_user, gm.seed, gm.assignment_type, gm.group_position,
-                u.first_name, u.last_name, u.email, u.avatar_url, cl.name AS club_name
+                u.first_name, u.last_name, u.email, u.avatar_url, cl.name AS club_name,
+                cl.crest_image_url AS club_crest_url,
+                EXTRACT(YEAR FROM AGE(u.birth_date::date))::int AS age
          FROM group_members gm
          JOIN category_groups cg ON cg.id_group = gm.id_group
          JOIN users u ON u.id_user = gm.id_user

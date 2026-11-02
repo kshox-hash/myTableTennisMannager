@@ -5,6 +5,8 @@ import { authRequired } from "../middlewares/auth_required_middleware";
 import { requireRole } from "../middlewares/require_role_middleware";
 import { SuperadminRepository } from "./superadmin_repository";
 import { ClubsRepository } from "../clubs/clubs_repository";
+import { confirmHandler, crestKey, uploadUrlHandler } from "../clubs/clubs_router";
+import { deleteObject } from "../media/r2_client";
 import { NotificationsRepository } from "../notifications/notifications_repository";
 import DB from "../db/db_configuration";
 
@@ -69,6 +71,26 @@ router.patch(
         ? res.status(409).json({ ok: false, message: "Ya existe un club con ese nombre" })
         : res.status(404).json({ ok: false, message: "Club no encontrado" });
     }
+    return res.json({ ok: true });
+  })
+);
+
+// Escudo del club — mismo flujo que el dueño, para los clubes sin administrador.
+router.post(
+  "/clubs/:id_club/crest/upload-url",
+  asyncHandler(async (req, res) => uploadUrlHandler(req, res, crestKey(req.params.id_club)))
+);
+router.post(
+  "/clubs/:id_club/crest",
+  asyncHandler(async (req, res) =>
+    confirmHandler(req, res, crestKey(req.params.id_club), (url) => clubs.setCrestUrl(req.params.id_club, url))
+  )
+);
+router.delete(
+  "/clubs/:id_club/crest",
+  asyncHandler(async (req, res) => {
+    await clubs.setCrestUrl(req.params.id_club, null);
+    await deleteObject(crestKey(req.params.id_club)).catch(() => {});
     return res.json({ ok: true });
   })
 );

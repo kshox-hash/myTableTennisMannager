@@ -21,7 +21,7 @@ const notifications = new NotificationsRepository();
 const IMAGE_CONTENT_TYPES = ["image/webp", "image/jpeg", "image/png"];
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024; // 2 MB — header/escudo, generosos pero no un PUT arbitrario
 const headerKey = (idClub: string) => `clubs/${idClub}/header.webp`;
-const crestKey = (idClub: string) => `clubs/${idClub}/crest.webp`;
+export const crestKey = (idClub: string) => `clubs/${idClub}/crest.webp`;
 
 // Dueño del club — mismo criterio que requireTournamentOwnership en
 // leagues: un club no tiene coorganizadores (fuera de alcance por ahora),
@@ -553,7 +553,7 @@ router.put(
 // usuario (ver user_service.ts): 1) URL firmada, 2) PUT directo a R2 desde
 // el navegador, 3) confirmar acá para guardar la URL pública. ---
 
-async function uploadUrlHandler(req: Request, res: Response, key: string) {
+export async function uploadUrlHandler(req: Request, res: Response, key: string) {
   if (!r2Configured) return res.status(503).json({ ok: false, message: "El almacenamiento de imágenes no está configurado." });
   const contentType = typeof req.body?.contentType === "string" ? req.body.contentType : "";
   if (!IMAGE_CONTENT_TYPES.includes(contentType)) {
@@ -563,7 +563,7 @@ async function uploadUrlHandler(req: Request, res: Response, key: string) {
   return res.json({ ok: true, data: { uploadUrl, key, publicUrl: publicUrlFor(key) } });
 }
 
-async function confirmHandler(req: Request, res: Response, key: string, save: (url: string | null) => Promise<void>) {
+export async function confirmHandler(req: Request, res: Response, key: string, save: (url: string | null) => Promise<void>) {
   if (!r2Configured) return res.status(503).json({ ok: false, message: "El almacenamiento de imágenes no está configurado." });
   const bodyKey = typeof req.body?.key === "string" ? req.body.key : "";
   if (bodyKey !== key) return res.status(400).json({ ok: false, message: "Solicitud inválida." });

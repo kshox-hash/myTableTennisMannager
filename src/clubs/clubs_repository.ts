@@ -145,6 +145,7 @@ export type ClubCatalogRow = {
   created_by: string | null;
   admin_email: string | null;
   admin_name: string | null;
+  crest_image_url: string | null;
   member_count: number;
   pending_requests: number;
 };
@@ -842,7 +843,7 @@ export class ClubsRepository {
 
   async listCatalog(): Promise<ClubCatalogRow[]> {
     const res = await this.pool.query<ClubCatalogRow>(
-      `SELECT c.id_club, c.name, c.comuna, c.created_by,
+      `SELECT c.id_club, c.name, c.comuna, c.created_by, c.crest_image_url,
               u.email AS admin_email,
               NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS admin_name,
               (SELECT COUNT(*) FROM users m WHERE m.id_club = c.id_club)::int AS member_count,

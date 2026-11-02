@@ -91,6 +91,8 @@ export type GroupMemberRow = {
   email: string;
   avatar_url?: string | null;
   club_name: string | null;
+  club_crest_url?: string | null;
+  age?: number | null;
 };
 
 export type GroupStandingRow = {
