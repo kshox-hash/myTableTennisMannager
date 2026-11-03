@@ -9,10 +9,13 @@ import { confirmHandler, crestKey, headerKey, uploadUrlHandler } from "../clubs/
 import { deleteObject } from "../media/r2_client";
 import { NotificationsRepository } from "../notifications/notifications_repository";
 import DB from "../db/db_configuration";
+import { UserRepository } from "../users/user_repository";
+import { UserService } from "../users/user_service";
 
 const router = Router();
 const repo = new SuperadminRepository();
 const clubs = new ClubsRepository();
+const users = new UserService(new UserRepository());
 const notifications = new NotificationsRepository(DB.getPool());
 
 // Estricto: "superadmin" nada más — a diferencia de casi todas las otras
@@ -275,6 +278,35 @@ router.post(
     const updated = await repo.setUserRole(req.params.id_user, p.data.role);
     if (!updated) return res.status(404).json({ ok: false, message: "Usuario no encontrado" });
     return res.json({ ok: true, data: updated });
+  })
+);
+
+// DELETE /api/v1/superadmin/users/:id_user — igual que "eliminar mi cuenta":
+// la fila se anonimiza (sus partidos y rankings son también de los rivales).
+const deletionMessages = {
+  NOT_FOUND: [404, "Jugador no encontrado"],
+  SUPERADMIN: [403, "Un superadministrador no se puede eliminar desde acá"],
+  CLUB_ADMIN: [409, "Administra un club: primero quítalo como administrador del club"],
+  HAS_TOURNAMENTS: [409, "Creó campeonatos: no se puede eliminar sin dejarlos sin organizador"],
+} as const;
+
+router.delete(
+  "/users/:id_user",
+  asyncHandler(async (req, res) => {
+    if (!z.string().uuid().safeParse(req.params.id_user).success) {
+      return res.status(404).json({ ok: false, message: "Jugador no encontrado" });
+    }
+    if (req.params.id_user === req.user!.id_user) {
+      return res.status(403).json({ ok: false, message: "No puedes eliminar tu propia cuenta desde acá" });
+    }
+    const blocker = await repo.deletionBlocker(req.params.id_user);
+    if (blocker) {
+      const [status, message] = deletionMessages[blocker];
+      return res.status(status).json({ ok: false, message });
+    }
+    const result = await users.deleteAccount(req.params.id_user);
+    if (!result.ok) return res.status(404).json({ ok: false, message: "Jugador no encontrado" });
+    return res.json({ ok: true });
   })
 );
 

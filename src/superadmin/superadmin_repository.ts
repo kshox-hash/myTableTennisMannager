@@ -113,6 +113,28 @@ export class SuperadminRepository {
     return res.rows;
   }
 
+  // Antes de que el superadmin elimine una cuenta: qué lo impediría. Un
+  // superadmin no se elimina desde acá; quien administra un club o creó
+  // campeonatos tampoco, porque el club y los campeonatos quedarían sin dueño.
+  async deletionBlocker(
+    idUser: string
+  ): Promise<"NOT_FOUND" | "SUPERADMIN" | "CLUB_ADMIN" | "HAS_TOURNAMENTS" | null> {
+    const res = await this.pool.query<{ email: string; club_admin: boolean; has_tournaments: boolean }>(
+      `SELECT u.email,
+              EXISTS (SELECT 1 FROM clubs c WHERE c.created_by = u.id_user) AS club_admin,
+              EXISTS (SELECT 1 FROM tournaments t WHERE t.created_by = u.id_user) AS has_tournaments
+       FROM users u
+       WHERE u.id_user = $1 AND u.is_team = false AND u.deleted_at IS NULL`,
+      [idUser]
+    );
+    const row = res.rows[0];
+    if (!row) return "NOT_FOUND";
+    if (getSuperadminEmails().includes(row.email.toLowerCase())) return "SUPERADMIN";
+    if (row.club_admin) return "CLUB_ADMIN";
+    if (row.has_tournaments) return "HAS_TOURNAMENTS";
+    return null;
+  }
+
   // Personas registradas, las más nuevas primero. Una pareja de dobles se
   // inscribe como usuario equipo (migración 044): sus campeonatos se le
   // cuentan a los dos jugadores reales, que son quienes aparecen acá.
