@@ -533,6 +533,13 @@ export class AdminTournamentController {
         });
       }
 
+      if (result.error === ADMIN_TOURNAMENT_ERRORS.CATEGORY_FULL) {
+        return res.status(409).json({
+          ok: false,
+          message: "La categoría está completa. Para agregar más jugadores, sube los cupos en Editar campeonato.",
+        });
+      }
+
       return res.status(400).json({ ok: false, message: result.error });
     }
 

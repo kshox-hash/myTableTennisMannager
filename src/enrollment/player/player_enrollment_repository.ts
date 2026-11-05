@@ -124,6 +124,13 @@ export class EnrollmentsRepository {
           throw new Error("TOURNAMENT_CANCELLED");
         }
 
+        // Cupo lleno. Se había perdido en 7d8f81d (al agregar la elegibilidad
+        // por género/edad) y desde entonces nadie revisaba el límite: se podía
+        // seguir inscribiendo con la categoría completa.
+        if (quotas !== null && Number(enrolled_count) >= Number(quotas)) {
+          throw new Error("QUOTA_EXCEEDED");
+        }
+
         // Plata se llena sola con los terceros de su Oro: nadie entra a mano
         // (quedaría inscrito pero fuera de la llave).
         if (category_status !== "active" || is_silver) {

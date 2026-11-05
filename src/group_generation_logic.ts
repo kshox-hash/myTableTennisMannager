@@ -447,6 +447,69 @@ export function assignPlayersToGroups(
 }
 
 /**
+ * Orden de los partidos de un todos contra todos, intercalado para que nadie
+ * juegue dos partidos seguidos. Antes era "de papeleta" (1vN, 1v(N-1), …,
+ * 1v2, después 2vN, …): el jugador 1 jugaba todos sus partidos de corrido.
+ *
+ * - 2 o 3 jugadores: el orden de siempre (con 3 alguien repite sí o sí).
+ * - 4 o más: método del círculo (jornadas donde cada uno juega una vez) y,
+ *   sobre eso, se elige siempre el partido cuyos jugadores llevan más tiempo
+ *   sin jugar. Con 4 da el orden ITTF (1v4, 2v3, 1v3, 2v4, 1v2, 3v4: el
+ *   mínimo posible de repeticiones); con 5 o más, nadie juega dos seguidos.
+ *
+ * Devuelve pares de índices [i, j] con i < j (el de mejor siembra va como
+ * jugador 1, igual que antes).
+ */
+export function roundRobinOrder(n: number): Array<[number, number]> {
+  if (n < 2) return [];
+  if (n <= 3) {
+    const out: Array<[number, number]> = [];
+    for (let i = 0; i < n; i++) for (let j = n - 1; j > i; j--) out.push([i, j]);
+    return out;
+  }
+
+  // Método del círculo: el primero fijo, el resto rota. Con N impar se suma
+  // un "descanso" (-1) y ese cruce no se genera.
+  const ring = Array.from({ length: n }, (_, i) => i);
+  if (n % 2 === 1) ring.push(-1);
+  const m = ring.length;
+  const pairs: Array<[number, number]> = [];
+  for (let r = 0; r < m - 1; r++) {
+    for (let k = 0; k < m / 2; k++) {
+      const a = ring[k];
+      const b = ring[m - 1 - k];
+      if (a !== -1 && b !== -1) pairs.push([Math.min(a, b), Math.max(a, b)]);
+    }
+    ring.splice(1, 0, ring.pop() as number);
+  }
+
+  // Reordenar por descanso: el partido cuyo jugador menos descansado lleva
+  // más tiempo sin jugar va primero; empate, el orden de las jornadas.
+  // (Probado de 5 a 20 jugadores: nadie juega dos partidos seguidos.)
+  const left = pairs.slice();
+  const lastPlayed = new Map<number, number>();
+  const out: Array<[number, number]> = [];
+  while (left.length > 0) {
+    const idx = out.length;
+    const rest = (p: number) => (lastPlayed.has(p) ? idx - (lastPlayed.get(p) as number) - 1 : Number.MAX_SAFE_INTEGER);
+    let best = 0;
+    let bestMin = -1;
+    left.forEach(([a, b], k) => {
+      const min = Math.min(rest(a), rest(b));
+      if (min > bestMin) {
+        best = k;
+        bestMin = min;
+      }
+    });
+    const [pick] = left.splice(best, 1);
+    lastPlayed.set(pick[0], idx);
+    lastPlayed.set(pick[1], idx);
+    out.push(pick);
+  }
+  return out;
+}
+
+/**
  * Todos contra todos dentro del grupo.
  * - grupo de 2 => 1 partido
  * - grupo de 3 => 3 partidos
@@ -461,29 +524,24 @@ export function generateRoundRobinMatches(
   const matches: GeneratedMatch[] = [];
   let matchNumber = 1;
 
-  // Orden de papeleta: el jugador 1 juega primero contra el último del
-  // grupo y va bajando (1vN, 1v(N-1), ..., 1v2), luego el 2 contra los que
-  // quedan de mayor a menor, y así — no el orden lexicográfico simple
-  // (1v2, 1v3, ..., 2v3) que daría el loop ascendente de siempre.
-  for (let i = 0; i < group.players.length; i++) {
-    for (let j = group.players.length - 1; j > i; j--) {
-      matches.push({
-        temp_match_id: buildTempMatchId(groupIndex, matchNumber - 1),
-        temp_group_id: group.temp_group_id,
-        stage: "group",
-        round_number: 1,
-        match_number: matchNumber,
-        best_of_sets: bestOfSets,
-        points_per_set: pointsPerSet,
-        player1_id: group.players[i].id_user,
-        player2_id: group.players[j].id_user,
-        status: "scheduled",
-        source_note:
-          group.target_size === 2 ? "two_player_group" : "group_stage",
-      });
+  // Intercalado: nadie juega dos partidos seguidos (ver roundRobinOrder).
+  for (const [i, j] of roundRobinOrder(group.players.length)) {
+    matches.push({
+      temp_match_id: buildTempMatchId(groupIndex, matchNumber - 1),
+      temp_group_id: group.temp_group_id,
+      stage: "group",
+      round_number: 1,
+      match_number: matchNumber,
+      best_of_sets: bestOfSets,
+      points_per_set: pointsPerSet,
+      player1_id: group.players[i].id_user,
+      player2_id: group.players[j].id_user,
+      status: "scheduled",
+      source_note:
+        group.target_size === 2 ? "two_player_group" : "group_stage",
+    });
 
-      matchNumber++;
-    }
+    matchNumber++;
   }
 
   return matches;

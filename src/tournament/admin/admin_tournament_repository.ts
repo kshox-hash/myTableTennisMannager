@@ -1479,6 +1479,28 @@ export class AdminTournamentRepository {
           throw new Error("TOURNAMENT_ALREADY_CANCELLED");
         }
 
+        // Cupo de la categoría: también al agregar a mano (antes el organizador
+        // podía pasarse del límite que él mismo puso). Se bloquea la fila de la
+        // categoría y se cuenta en una sentencia aparte (ver subscribe del
+        // jugador). Para hacer lugar, el organizador sube los cupos.
+        await client.query(
+          `SELECT 1 FROM ${this.tournamentCategoriesTable} WHERE id_category = $1 FOR UPDATE`,
+          [input.categoryId]
+        );
+        const quotaRes = await client.query<{ quotas: number | null; enrolled: number; already: boolean }>(
+          `SELECT c.quotas,
+                  (SELECT COUNT(*)::int FROM ${this.enrollmentsTable} e
+                    WHERE e.id_category = c.id_category AND e.status = 'active') AS enrolled,
+                  EXISTS (SELECT 1 FROM ${this.enrollmentsTable} e
+                           WHERE e.id_category = c.id_category AND e.id_user = $2 AND e.status = 'active') AS already
+             FROM ${this.tournamentCategoriesTable} c WHERE c.id_category = $1`,
+          [input.categoryId, input.userId]
+        );
+        const q = quotaRes.rows[0];
+        if (q && !q.already && q.quotas !== null && Number(q.enrolled) >= Number(q.quotas)) {
+          throw new Error("CATEGORY_FULL");
+        }
+
         // ON CONFLICT en vez de un INSERT liso: si a este jugador ya lo
         // habían sacado de la categoría antes, su fila queda con
         // status='cancelled' (no se borra) y un INSERT normal chocaba con
@@ -1546,6 +1568,7 @@ export class AdminTournamentRepository {
       });
     } catch (error: any) {
       if (error?.message === "TOURNAMENT_ALREADY_CANCELLED") throw error;
+      if (error?.message === "CATEGORY_FULL") throw error;
       if (error?.code === "23505") throw new Error("PLAYER_ALREADY_ENROLLED");
       if (error?.code === "23503") throw new Error("INVALID_IDS");
       throw error;

@@ -326,6 +326,9 @@ export class AdminTournamentService {
       if (error?.message === "TOURNAMENT_ALREADY_CANCELLED") {
         return fail(ADMIN_TOURNAMENT_ERRORS.TOURNAMENT_ALREADY_CANCELLED);
       }
+      if (error?.message === "CATEGORY_FULL") {
+        return fail(ADMIN_TOURNAMENT_ERRORS.CATEGORY_FULL);
+      }
       throw error;
     }
   }

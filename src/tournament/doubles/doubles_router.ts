@@ -48,6 +48,7 @@ router.post(
         PLAYER_NOT_FOUND: "Alguno de los jugadores no existe",
         ALREADY_IN_TEAM: "Uno de los jugadores ya está en otra pareja de esta categoría",
         MIXED_RULE: "En dobles mixtos la pareja tiene que ser un varón y una dama",
+  CATEGORY_FULL: "La categoría está completa. Para agregar más parejas, sube los cupos en Editar campeonato.",
         CATEGORY_STARTED: "La categoría ya arrancó — no se pueden armar más parejas",
       };
       return res.status(400).json({ ok: false, message: messages[result.error] ?? result.error });

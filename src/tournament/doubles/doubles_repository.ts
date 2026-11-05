@@ -21,6 +21,7 @@ export type CreateTeamError =
   | "PLAYER_NOT_FOUND"
   | "ALREADY_IN_TEAM"
   | "MIXED_RULE"
+  | "CATEGORY_FULL"
   | "CATEGORY_STARTED";
 
 export type DissolveTeamError = "TEAM_NOT_FOUND" | "CATEGORY_STARTED";
@@ -94,6 +95,19 @@ export class DoublesRepository {
       if (!cat) return { ok: false as const, error: "CATEGORY_NOT_FOUND" as const };
       if (cat.format !== "doubles") return { ok: false as const, error: "NOT_DOUBLES" as const };
       if (cat.phase !== "enrollment") return { ok: false as const, error: "CATEGORY_STARTED" as const };
+
+      // Cupo: cada pareja ocupa un lugar (una inscripción a nombre de la pareja).
+      await client.query(`SELECT 1 FROM tournament_categories WHERE id_category = $1 FOR UPDATE`, [id_category]);
+      const quotaRes = await client.query<{ quotas: number | null; enrolled: number }>(
+        `SELECT c.quotas,
+                (SELECT COUNT(*)::int FROM enrollments e WHERE e.id_category = c.id_category AND e.status = 'active') AS enrolled
+           FROM tournament_categories c WHERE c.id_category = $1`,
+        [id_category]
+      );
+      const q = quotaRes.rows[0];
+      if (q && q.quotas !== null && Number(q.enrolled) >= Number(q.quotas)) {
+        return { ok: false as const, error: "CATEGORY_FULL" as const };
+      }
 
       const playersRes = await client.query<{ id_user: string; first_name: string | null; last_name: string | null; gender: string | null }>(
         `SELECT id_user, first_name, last_name, gender FROM users WHERE id_user = ANY($1::uuid[])`,

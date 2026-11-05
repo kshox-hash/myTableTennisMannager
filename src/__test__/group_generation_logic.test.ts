@@ -5,6 +5,7 @@ import {
   buildSerpentineGroupOrder,
   assignPlayersToGroups,
   generateRoundRobinMatches,
+  roundRobinOrder,
   generateGroupsFromPlayers,
   nextManualGroupName,
   type CompetitionPlayerInput,
@@ -154,6 +155,29 @@ describe("generateRoundRobinMatches", () => {
       };
       const matches = generateRoundRobinMatches(bucket, 0, 3);
       expect(matches).toHaveLength(expectedMatches);
+    }
+  });
+});
+
+describe("roundRobinOrder", () => {
+  const seguidos = (seq: Array<[number, number]>) =>
+    seq.slice(1).filter(([a, b], k) => seq[k].includes(a) || seq[k].includes(b)).length;
+
+  it("grupo de 4: orden ITTF (1v4, 2v3, 1v3, 2v4, 1v2, 3v4)", () => {
+    expect(roundRobinOrder(4)).toEqual([[0, 3], [1, 2], [0, 2], [1, 3], [0, 1], [2, 3]]);
+  });
+
+  it("grupo de 3: el orden de siempre", () => {
+    expect(roundRobinOrder(3)).toEqual([[0, 2], [0, 1], [1, 2]]);
+  });
+
+  it("con 5 o más nadie juega dos partidos seguidos, y están todos los cruces una vez", () => {
+    for (let n = 5; n <= 20; n++) {
+      const seq = roundRobinOrder(n);
+      expect(seq).toHaveLength((n * (n - 1)) / 2);
+      expect(new Set(seq.map(([a, b]) => `${a}|${b}`)).size).toBe(seq.length);
+      expect(seq.every(([a, b]) => a < b)).toBe(true);
+      expect(seguidos(seq)).toBe(0);
     }
   });
 });
