@@ -112,8 +112,8 @@ export class TablesRepository {
            gm.table_number,
            gm.called_out_of_order,
            gm.player1_id, gm.player2_id, gm.referee_id,
-           COALESCE(NULLIF(TRIM(u1.last_name || ' ' || u1.first_name), ''), u1.email) AS player1_name,
-           COALESCE(NULLIF(TRIM(u2.last_name || ' ' || u2.first_name), ''), u2.email) AS player2_name
+           COALESCE(NULLIF(TRIM(u1.first_name || ' ' || u1.last_name), ''), 'Jugador sin nombre') AS player1_name,
+           COALESCE(NULLIF(TRIM(u2.first_name || ' ' || u2.last_name), ''), 'Jugador sin nombre') AS player2_name
          FROM group_matches gm
          JOIN category_groups cg  ON cg.id_group    = gm.id_group
          JOIN tournament_categories tc ON tc.id_category = cg.id_category
@@ -134,8 +134,8 @@ export class TablesRepository {
            bm.table_number,
            bm.called_out_of_order,
            bm.player1_id, bm.player2_id, bm.referee_id,
-           COALESCE(NULLIF(TRIM(u1.last_name || ' ' || u1.first_name), ''), u1.email) AS player1_name,
-           COALESCE(NULLIF(TRIM(u2.last_name || ' ' || u2.first_name), ''), u2.email) AS player2_name
+           COALESCE(NULLIF(TRIM(u1.first_name || ' ' || u1.last_name), ''), 'Jugador sin nombre') AS player1_name,
+           COALESCE(NULLIF(TRIM(u2.first_name || ' ' || u2.last_name), ''), 'Jugador sin nombre') AS player2_name
          FROM bracket_matches bm
          JOIN tournament_categories tc ON tc.id_category = bm.id_category
          LEFT JOIN users u1 ON u1.id_user = bm.player1_id
@@ -199,8 +199,8 @@ export class TablesRepository {
            tc.id_category, tc.category_type, tc.category_range,
            cg.group_name, NULL::int AS round, gm.match_number,
            gm.player1_id, gm.player2_id,
-           COALESCE(NULLIF(TRIM(u1.last_name || ' ' || u1.first_name), ''), u1.email) AS player1_name,
-           COALESCE(NULLIF(TRIM(u2.last_name || ' ' || u2.first_name), ''), u2.email) AS player2_name
+           COALESCE(NULLIF(TRIM(u1.first_name || ' ' || u1.last_name), ''), 'Jugador sin nombre') AS player1_name,
+           COALESCE(NULLIF(TRIM(u2.first_name || ' ' || u2.last_name), ''), 'Jugador sin nombre') AS player2_name
          FROM group_matches gm
          JOIN category_groups cg  ON cg.id_group    = gm.id_group
          JOIN tournament_categories tc ON tc.id_category = cg.id_category
@@ -219,8 +219,8 @@ export class TablesRepository {
            tc.id_category, tc.category_type, tc.category_range,
            NULL::text AS group_name, bm.round, bm.match_number,
            bm.player1_id, bm.player2_id,
-           COALESCE(NULLIF(TRIM(u1.last_name || ' ' || u1.first_name), ''), u1.email) AS player1_name,
-           COALESCE(NULLIF(TRIM(u2.last_name || ' ' || u2.first_name), ''), u2.email) AS player2_name
+           COALESCE(NULLIF(TRIM(u1.first_name || ' ' || u1.last_name), ''), 'Jugador sin nombre') AS player1_name,
+           COALESCE(NULLIF(TRIM(u2.first_name || ' ' || u2.last_name), ''), 'Jugador sin nombre') AS player2_name
          FROM bracket_matches bm
          JOIN tournament_categories tc ON tc.id_category = bm.id_category
          LEFT JOIN users u1 ON u1.id_user = bm.player1_id
@@ -479,7 +479,7 @@ export class TablesRepository {
     if (outOfOrder) {
       const called = [match.player1_id, match.player2_id];
       const names = await this.pool.query<{ id_user: string; name: string }>(
-        `SELECT id_user, COALESCE(NULLIF(TRIM(first_name || ' ' || last_name), ''), email) AS name
+        `SELECT id_user, COALESCE(NULLIF(TRIM(first_name || ' ' || last_name), ''), 'Jugador sin nombre') AS name
            FROM users WHERE id_user = ANY($1::uuid[])`,
         [called.filter(Boolean)]
       );

@@ -785,7 +785,18 @@ export class AdminTournamentRepository {
 
         if (Number(existing.enrolled_count) > 0) {
           if (activateSilver) await this.createSilverSibling(client, tournamentId, existing);
-          continue; // categoría con inscritos: inmutable
+          // Con inscritos la categoría queda fija, salvo los cupos: el
+          // organizador puede ampliarlos (p. ej. cuando se llenó) o dejarlos
+          // ilimitados, pero nunca por debajo de los ya inscritos.
+          if (cat.quotas !== undefined) {
+            await client.query(
+              `UPDATE ${this.tournamentCategoriesTable}
+                  SET quotas = CASE WHEN $1::int IS NULL THEN NULL ELSE GREATEST($1::int, $2::int) END
+                WHERE id_category = $3`,
+              [cat.quotas, Number(existing.enrolled_count), existing.id_category]
+            );
+          }
+          continue; // el resto de la categoría con inscritos: inmutable
         }
 
         await client.query(
@@ -925,7 +936,9 @@ export class AdminTournamentRepository {
       OR EXISTS (
         SELECT 1 FROM enrollments e
         JOIN tournament_categories ec ON ec.id_category = e.id_category
-        WHERE ec.id_tournament = t.id_tournament AND e.id_user = $${visibilityUserParam} AND e.status = 'active'
+        WHERE ec.id_tournament = t.id_tournament AND e.status = 'active'
+          AND (e.id_user = $${visibilityUserParam}
+               OR e.id_user IN (SELECT dt.id_user FROM doubles_teams dt WHERE dt.id_player_1 = $${visibilityUserParam} OR dt.id_player_2 = $${visibilityUserParam}))
       )
       OR EXISTS (
         SELECT 1 FROM tournament_organizers o

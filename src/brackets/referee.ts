@@ -51,8 +51,8 @@ type MatchInfo = {
 const MATCH_INFO_SQL = (table: MatchTable, type: "group" | "bracket") => `
   SELECT m.id_match, '${type}' AS match_type, tc.id_tournament, tc.id_category, t.tournament_name,
          tc.category_type || ' ' || tc.category_range AS category_display,
-         COALESCE(NULLIF(TRIM(p1.last_name || ' ' || p1.first_name), ''), p1.email) AS player1_name,
-         COALESCE(NULLIF(TRIM(p2.last_name || ' ' || p2.first_name), ''), p2.email) AS player2_name,
+         COALESCE(NULLIF(TRIM(p1.first_name || ' ' || p1.last_name), ''), 'Jugador sin nombre') AS player1_name,
+         COALESCE(NULLIF(TRIM(p2.first_name || ' ' || p2.last_name), ''), 'Jugador sin nombre') AS player2_name,
          m.table_number, m.status
   FROM ${table} m
   ${type === "group" ? "JOIN category_groups cg ON cg.id_group = m.id_group JOIN tournament_categories tc ON tc.id_category = cg.id_category" : "JOIN tournament_categories tc ON tc.id_category = m.id_category"}

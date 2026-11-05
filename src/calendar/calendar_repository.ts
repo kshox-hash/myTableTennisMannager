@@ -53,7 +53,11 @@ export class CalendarRepository {
         FROM enrollments e
         JOIN tournament_categories c ON c.id_category = e.id_category
         JOIN tournaments t           ON t.id_tournament = e.id_tournament
-        WHERE e.id_user = $1
+        -- El jugador o su pareja de dobles (en dobles la inscripción queda a
+        -- nombre del usuario-pareja): antes las de dobles no salían en el
+        -- calendario ni en "Mis campeonatos" aunque el detalle dijera inscrito.
+        WHERE (e.id_user = $1
+               OR e.id_user IN (SELECT dt.id_user FROM doubles_teams dt WHERE dt.id_player_1 = $1 OR dt.id_player_2 = $1))
           AND e.status = 'active'
           -- Un campeonato cancelado no es "próximo" ni "en curso": antes
           -- seguía en el calendario y en "Mis campeonatos" del Inicio.

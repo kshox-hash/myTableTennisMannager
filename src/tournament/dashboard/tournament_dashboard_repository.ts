@@ -189,7 +189,7 @@ export class TournamentDashboardRepository {
        )
        SELECT
          p.id_user,
-         COALESCE(NULLIF(TRIM(u.last_name || ' ' || u.first_name), ''), u.email) AS name,
+         COALESCE(NULLIF(TRIM(u.first_name || ' ' || u.last_name), ''), u.email) AS name,
          (SELECT COUNT(*) FROM tm WHERE tm.p1 = p.id_user OR tm.p2 = p.id_user) AS matches_played,
          (SELECT COUNT(*) FROM tm WHERE tm.winner_id = p.id_user) AS matches_won,
          COALESCE((SELECT pts.points FROM pts WHERE pts.id_user = p.id_user), 0) AS points,

@@ -48,8 +48,11 @@ enrollmentsRouter.post(
       return res.status(409).json({ ok: false, message: "Ya se armaron los grupos: habla con el organizador para darte de baja." });
     }
     const upd = await pool.query(
+      // El jugador o su pareja de dobles (la inscripción de dobles está a
+      // nombre del usuario-pareja).
       `UPDATE enrollments SET status = 'cancelled'
-        WHERE id_user = $1 AND id_tournament = $2 AND id_category = $3 AND status = 'active'
+        WHERE (id_user = $1 OR id_user IN (SELECT dt.id_user FROM doubles_teams dt WHERE dt.id_player_1 = $1 OR dt.id_player_2 = $1))
+          AND id_tournament = $2 AND id_category = $3 AND status = 'active'
         RETURNING id_enrollment`,
       [userId, id_tournament, id_category]
     );

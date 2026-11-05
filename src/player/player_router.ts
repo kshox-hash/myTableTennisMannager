@@ -126,7 +126,7 @@ router.get(
     if (matchType !== "group" && matchType !== "bracket") {
       return res.status(400).json({ ok: false, message: "match_type inválido" });
     }
-    const data = await repo.getMatchDetail(matchType, req.params.id_match);
+    const data = await repo.getMatchDetail(matchType, req.params.id_match, req.user!.id_user);
     if (!data) return res.status(404).json({ ok: false, message: "Partido no encontrado" });
     return res.json({ ok: true, data });
   })
