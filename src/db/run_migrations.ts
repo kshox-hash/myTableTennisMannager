@@ -89,6 +89,7 @@ const INCREMENTAL = [
   "081_enrollment_club_override.sql",
   "082_enrollment_attendance.sql",
   "083_bracket_group_slots.sql",
+  "084_normalize_text_nfc.sql",
 ];
 
 export async function runMigrations(): Promise<void> {

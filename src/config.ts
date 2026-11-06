@@ -1,4 +1,5 @@
 import express from "express";
+import { normalizeTextBody } from "./middlewares/normalize_text_middleware";
 import helmet  from "helmet";
 import cors from "cors";
 import compression from "compression";
@@ -20,6 +21,8 @@ export default (app : express.Express) => {
 
     app.use(express.json());
     app.use(express.urlencoded({ extended : true}));
+    // Todo texto entrante en forma compuesta (Ñ y tildes): ver normalize_text_middleware.
+    app.use(normalizeTextBody);
 
     // Antes cors() sin opciones reflejaba CUALQUIER origen (Access-Control-Allow-Origin: *
     // efectivo). No era explotable para robar el token porque la API es
