@@ -148,6 +148,13 @@ router.post(
     let rankingId: string | null = null;
     if (mode === "new") {
       if (!name) return res.status(400).json({ ok: false, message: "Falta el nombre del ranking" });
+      // Dos rankings con el mismo nombre no se distinguen en la lista.
+      const taken = (await rankingRepo.listOwnerRankings(createdBy)).some(
+        (r) => r.name.trim().toLowerCase() === name.trim().toLowerCase()
+      );
+      if (taken) {
+        return res.status(409).json({ ok: false, message: "Ya tienes un ranking con ese nombre: elígelo en \"Sumar a un ranking que ya tengo\"" });
+      }
       rankingId = await rankingRepo.createRanking(createdBy, name);
     } else if (mode === "existing") {
       const r = id_ranking ? await rankingRepo.getRanking(id_ranking) : null;

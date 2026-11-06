@@ -85,6 +85,27 @@ export class BracketsRepository {
          WHERE id_tournament = $1 AND id_category = $2 AND id_user = $3 AND status = 'active'`,
         [tournamentId, categoryId, userId]
       );
+      const ctx = (
+        await client.query(
+          `SELECT t.tournament_name, tc.category_type, tc.category_range
+           FROM tournaments t JOIN tournament_categories tc ON tc.id_category = $1
+           WHERE t.id_tournament = $2`,
+          [categoryId, tournamentId]
+        )
+      ).rows[0];
+      if (ctx) {
+        await this.notifications.create(
+          {
+            idUser: userId,
+            type: "enrollment_removed",
+            title: "Inscripción cancelada",
+            message: `El organizador te sacó de ${ctx.category_type} ${ctx.category_range} (${ctx.tournament_name})`,
+            idTournament: tournamentId,
+            idCategory: categoryId,
+          },
+          client
+        );
+      }
       await client.query("COMMIT");
     } catch (e) {
       await client.query("ROLLBACK");
