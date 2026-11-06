@@ -3,6 +3,7 @@ import {
   drawBracketSlotsForGroups,
   buildBracketForSize,
   bracketSizeOptions,
+  defaultBracketSize,
   groupSlotId,
   isGroupSlotId,
   resolveGroupSlots,
@@ -679,12 +680,12 @@ export class BracketsService {
     // Cuál es el cuadro OFICIAL que se va a generar de verdad — mismo
     // cálculo que usará generateBracket al confirmar, para que la
     // previsualización nunca muestre un tamaño de cuadro ni un "BYE" que
-    // después no exista. Sin tamaño pedido, el menor (con pre-llave).
+    // después no exista. Sin tamaño pedido, el de defaultBracketSize.
     const rankedRealPlayers = drawn
       .filter((d): d is DrawnSlot => d.player !== null)
       .sort((a, b) => a.seed - b.seed);
     const sizeOptions = bracketSizeOptions(rankedRealPlayers.length);
-    const targetSize = requestedSize ?? sizeOptions[0];
+    const targetSize = requestedSize ?? defaultBracketSize(rankedRealPlayers.length);
     if (!sizeOptions.includes(targetSize)) return fail(BRACKETS_ERRORS.INVALID_BRACKET_SIZE);
     const withPreRound = buildBracketForSize(rankedRealPlayers, targetSize, 5);
     const preRoundTempMatches = withPreRound.matches.filter((m) => m.round === 0);
@@ -816,7 +817,7 @@ export class BracketsService {
     }
 
     const sizeOptions = bracketSizeOptions(rankedRealPlayers.length);
-    const targetSize = input.bracket_size ?? sizeOptions[0];
+    const targetSize = input.bracket_size ?? defaultBracketSize(rankedRealPlayers.length);
     if (!sizeOptions.includes(targetSize)) return fail(BRACKETS_ERRORS.INVALID_BRACKET_SIZE);
 
     const generated = resolveGroupSlots(buildBracketForSize(rankedRealPlayers, targetSize, bestOfSets, pointsPerSet));

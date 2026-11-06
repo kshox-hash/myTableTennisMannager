@@ -9,6 +9,7 @@ import {
   buildBracketWithPreRound,
   buildBracketForSize,
   bracketSizeOptions,
+  defaultBracketSize,
   groupSlotId,
   resolveGroupSlots,
   type GroupSeededEntry,
@@ -573,5 +574,25 @@ describe("buildBracketWithPreRound (sistema de pre-llaves)", () => {
       expect(new Set(allPlaced).size).toBe(allPlaced.length); // sin duplicados
       expect(allPlaced).toHaveLength(n); // sin faltantes
     }
+  });
+});
+
+describe("defaultBracketSize", () => {
+  it("potencia de 2 exacta: ese tamaño", () => {
+    expect(defaultBracketSize(32)).toBe(32);
+    expect(defaultBracketSize(64)).toBe(64);
+  });
+  it("pocos sobrantes: la llave chica con pre-llave", () => {
+    expect(defaultBracketSize(34)).toBe(32);
+    expect(defaultBracketSize(48)).toBe(32);
+    expect(defaultBracketSize(18)).toBe(16);
+  });
+  it("muchos sobrantes: la grande con BYE (124 jugadores: Oro 62, Plata 31)", () => {
+    expect(defaultBracketSize(62)).toBe(64);
+    expect(defaultBracketSize(31)).toBe(32);
+    expect(defaultBracketSize(49)).toBe(64);
+  });
+  it("siempre es una de las opciones", () => {
+    for (let n = 2; n <= 130; n++) expect(bracketSizeOptions(n)).toContain(defaultBracketSize(n));
   });
 });

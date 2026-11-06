@@ -668,6 +668,22 @@ export function bracketSizeOptions(n: number): number[] {
 }
 
 /**
+ * Tamaño de llave por defecto. Los dos tamaños juegan los mismos partidos
+ * (n − 1) y las mismas personas pasan sin jugar; solo cambia cómo se ve:
+ * - pocos sobrantes (hasta la mitad de la llave chica): la chica con
+ *   pre-llave — p. ej. 34 → 2 partidos de pre-llave y llave de 32, en vez de
+ *   una de 64 con 30 BYE;
+ * - muchos sobrantes: la grande con BYE — p. ej. 62 → llave de 64 con 2 BYE,
+ *   en vez de 30 partidos de pre-llave y solo 2 jugadores directo.
+ */
+export function defaultBracketSize(n: number): number {
+  const floor = prevPowerOf2(n);
+  const ceil = nextPowerOf2(n);
+  if (floor === ceil) return floor;
+  return n - floor > floor / 2 ? ceil : floor;
+}
+
+/**
  * Arma la llave del tamaño elegido (ver bracketSizeOptions). En el tamaño
  * mayor cada jugador va en el puesto de su semilla y los puestos sin nadie
  * son BYE, que quedan contra las mejores semillas.
