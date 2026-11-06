@@ -112,6 +112,14 @@ export const addPlayerToBracketMatchSchema = z
   })
   .strict();
 
+// Intercambiar dos jugadores de grupos distintos (cada uno toma el lugar del otro).
+export const swapGroupMembersSchema = z
+  .object({
+    id_user_a: z.string().uuid("id_user_a inválido"),
+    id_user_b: z.string().uuid("id_user_b inválido"),
+  })
+  .strict();
+
 export const moveGroupMemberSchema = z
   .object({
     id_user: z.string().uuid("id_user inválido"),

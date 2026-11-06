@@ -390,6 +390,17 @@ export class BracketsService {
     return ok({ moved: true });
   }
 
+  async swapGroupMembers(input: {
+    tournamentId: string;
+    categoryId: string;
+    userA: string;
+    userB: string;
+  }): Promise<Result<{ swapped: true }, BracketsError>> {
+    const result = await this.repo.swapGroupMembers(input);
+    if (!result.swapped) return fail(result.error);
+    return ok({ swapped: true });
+  }
+
   // Agrega directamente a un jugador (ya inscrito) a un grupo puntual, sin
   // pasar por "rearmar grupos" ni "mover jugador".
   async addPlayerToGroup(

@@ -215,6 +215,27 @@ export class BracketsController {
     return res.json({ ok: true, data: result.data });
   };
 
+  // POST /api/v1/bracket/tournaments/:id_tournament/categories/:id_category/swap-players
+  swapGroupMembers = async (req: Request, res: Response) => {
+    const tournamentId = req.params.id_tournament?.trim();
+    const categoryId = req.params.id_category?.trim();
+    const { id_user_a, id_user_b } = req.body;
+
+    const result = await this.service.swapGroupMembers({ tournamentId, categoryId, userA: id_user_a, userB: id_user_b });
+    if (!result.ok) {
+      const messages: Record<string, string> = {
+        [BRACKETS_ERRORS.GROUPS_LOCKED]: "La categoría ya no está en fase de grupos: no se pueden cambiar jugadores",
+        [BRACKETS_ERRORS.PLAYER_NOT_IN_GROUP]: "Uno de los jugadores no está en ningún grupo de esta categoría",
+        [BRACKETS_ERRORS.SAME_GROUP]: "Los dos jugadores están en el mismo grupo",
+        [BRACKETS_ERRORS.PLAYER_ALREADY_PLAYED]: "Uno de los jugadores ya jugó un partido en su grupo: no se puede cambiar",
+        [BRACKETS_ERRORS.PLAYER_ON_TABLE]: "Uno de los jugadores tiene un partido en mesa o en juego: espera a que termine",
+      };
+      const status = result.error === BRACKETS_ERRORS.PLAYER_NOT_IN_GROUP ? 404 : 409;
+      return res.status(status).json({ ok: false, message: messages[result.error] ?? result.error });
+    }
+    return res.json({ ok: true, data: result.data });
+  };
+
   // POST /api/v1/bracket/groups/:id_group/members
   addPlayerToGroup = async (req: Request, res: Response) => {
     const groupId = req.params.id_group?.trim();

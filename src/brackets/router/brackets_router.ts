@@ -22,6 +22,7 @@ import {
   setMatchRefereeSchema,
   setMatchesBestOfSchema,
   moveGroupMemberSchema,
+  swapGroupMembersSchema,
   setGroupsManualSchema,
   addPlayerToGroupSchema,
   createManualGroupSchema,
@@ -162,6 +163,17 @@ router.patch(
 );
 
 // Mover manualmente a un jugador de su grupo a otro (fix de errores al armar los grupos)
+// POST /api/v1/bracket/tournaments/:id_tournament/categories/:id_category/swap-players
+// Intercambia a dos jugadores de grupos distintos (antes de que jueguen).
+router.post(
+  "/tournaments/:id_tournament/categories/:id_category/swap-players",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(),
+  validateBody(swapGroupMembersSchema),
+  asyncHandler(controller.swapGroupMembers)
+);
+
 // PATCH /api/v1/bracket/tournaments/:id_tournament/categories/:id_category/move-player
 router.patch(
   "/tournaments/:id_tournament/categories/:id_category/move-player",
