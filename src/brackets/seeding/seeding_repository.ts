@@ -78,15 +78,18 @@ export class SeedingRepository {
   }
 
   private async getSeedsWithOrganizerRanking(id_tournament: string, id_category: string): Promise<SeedRow[]> {
-    const ownerRes = await this.pool.query<{ created_by: string }>(
-      `SELECT created_by FROM tournaments WHERE id_tournament = $1`,
+    const ownerRes = await this.pool.query<{ created_by: string; id_ranking: string | null }>(
+      `SELECT created_by, id_ranking FROM tournaments WHERE id_tournament = $1`,
       [id_tournament]
     );
     const idAdmin = ownerRes.rows[0]?.created_by ?? null;
+    // El ranking al que suma este campeonato; sin asignar todavía, el más
+    // reciente del organizador (lo que se usaba antes).
+    const idRanking = ownerRes.rows[0]?.id_ranking ?? null;
 
     const rankByUser = new Map<string, { points: number; position: number }>();
     if (idAdmin) {
-      const rows = await this.rankingRepo.getOrganizerRanking(idAdmin);
+      const rows = await this.rankingRepo.getOrganizerRanking(idAdmin, 200, "sembrado", idRanking);
       for (const r of rows) rankByUser.set(r.id_user, { points: r.ranking_points, position: r.ranking_position });
     }
 

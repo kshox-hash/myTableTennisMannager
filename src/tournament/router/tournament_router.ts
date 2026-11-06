@@ -11,7 +11,7 @@ import { asyncHandler } from "../../middlewares/wrap_async_middleware";
 import { finishTournament } from "../admin/finish_tournament";
 import { saveTournamentSchedule } from "../admin/tournament_schedule";
 import { z } from "zod";
-import { RANKED_PLAYERS_CTE } from "../../ranking/ranking_repository";
+import { RANKED_PLAYERS_CTE, RankingRepository } from "../../ranking/ranking_repository";
 import { requireTournamentOwnership } from "../../middlewares/require_tournament_ownership_middleware";
 
 import {
@@ -94,6 +94,73 @@ router.post(
     const r = await finishTournament(String(req.params.id_tournament), req.user!.id_user);
     if (!r.ok) return res.status(r.status).json({ ok: false, message: r.message });
     return res.json({ ok: true, data: { categories: r.categories, cancelled_matches: r.cancelledMatches } });
+  })
+);
+
+// RANKING DEL CAMPEONATO: a qué ranking del organizador suma. Los rankings
+// son del dueño del campeonato (created_by), aunque lo cambie un co-organizador.
+const rankingRepo = new RankingRepository();
+
+router.get(
+  "/admin/tournaments/:id_tournament/ranking",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(),
+  asyncHandler(async (req, res) => {
+    const r = await DB.getPool().query(
+      `SELECT t.created_by, t.id_ranking, t.is_ranked, rk.name AS ranking_name,
+              (EXISTS (SELECT 1 FROM tournament_categories tc WHERE tc.id_tournament = t.id_tournament)
+               AND NOT EXISTS (SELECT 1 FROM tournament_categories tc WHERE tc.id_tournament = t.id_tournament AND tc.phase <> 'finished')) AS finished
+       FROM tournaments t
+       LEFT JOIN rankings rk ON rk.id_ranking = t.id_ranking
+       WHERE t.id_tournament = $1`,
+      [req.params.id_tournament]
+    );
+    const t = r.rows[0];
+    if (!t) return res.status(404).json({ ok: false, message: "Campeonato no encontrado" });
+    const rankings = await rankingRepo.listOwnerRankings(t.created_by);
+    return res.json({
+      ok: true,
+      data: { id_ranking: t.id_ranking, ranking_name: t.ranking_name, is_ranked: t.is_ranked, finished: t.finished, rankings },
+    });
+  })
+);
+
+const rankingChoiceSchema = z.object({
+  mode: z.enum(["new", "existing", "none"]),
+  name: z.string().trim().min(1).max(80).optional(),
+  id_ranking: z.string().uuid().optional(),
+});
+
+router.post(
+  "/admin/tournaments/:id_tournament/ranking",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(),
+  validateBody(rankingChoiceSchema),
+  asyncHandler(async (req, res) => {
+    const { mode, name, id_ranking } = req.body as z.infer<typeof rankingChoiceSchema>;
+    const id = String(req.params.id_tournament);
+    const owner = await DB.getPool().query(`SELECT created_by FROM tournaments WHERE id_tournament = $1`, [id]);
+    const createdBy: string | undefined = owner.rows[0]?.created_by;
+    if (!createdBy) return res.status(404).json({ ok: false, message: "Campeonato no encontrado" });
+
+    let rankingId: string | null = null;
+    if (mode === "new") {
+      if (!name) return res.status(400).json({ ok: false, message: "Falta el nombre del ranking" });
+      rankingId = await rankingRepo.createRanking(createdBy, name);
+    } else if (mode === "existing") {
+      const r = id_ranking ? await rankingRepo.getRanking(id_ranking) : null;
+      if (!r || r.id_owner !== createdBy) return res.status(400).json({ ok: false, message: "Ese ranking no es de este organizador" });
+      rankingId = r.id_ranking;
+    }
+    // "none": no suma a ningún ranking (tampoco al general de la plataforma).
+    await DB.getPool().query(`UPDATE tournaments SET id_ranking = $2, is_ranked = $3 WHERE id_tournament = $1`, [
+      id,
+      rankingId,
+      mode !== "none",
+    ]);
+    return res.json({ ok: true, data: { id_ranking: rankingId, is_ranked: mode !== "none" } });
   })
 );
 

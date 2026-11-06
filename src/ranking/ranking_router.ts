@@ -107,13 +107,32 @@ router.get(
 // solo los torneos que él creó, no el ranking global de la plataforma.
 // Nadie más puede pedir el de otro admin (no recibe id por parámetro,
 // siempre usa el del token) — es privado, no una vitrina pública.
+// ?ranking=<id>: uno de SUS rankings (sin el parámetro, el más reciente).
 router.get(
   "/mine-as-organizer",
   authRequired,
   requireRole("admin"),
   asyncHandler(async (req, res) => {
-    const data = await repo.getOrganizerRanking(req.user!.id_user, 200, copaParam(req.query.copa));
+    const me = req.user!.id_user;
+    const wanted = organizerParam(req.query.ranking);
+    if (wanted) {
+      const r = await repo.getRanking(wanted);
+      if (!r || r.id_owner !== me) return res.status(404).json({ ok: false, message: "Ranking no encontrado" });
+    }
+    const data = await repo.getOrganizerRanking(me, 200, copaParam(req.query.copa), wanted);
     return res.json({ ok: true, data: data.map(shapeRankingRow) });
+  })
+);
+
+// GET /api/v1/ranking/mine/rankings — los rankings de este admin (cada uno
+// junta los campeonatos que el admin le asignó), el más reciente primero.
+router.get(
+  "/mine/rankings",
+  authRequired,
+  requireRole("admin"),
+  asyncHandler(async (req, res) => {
+    const data = await repo.listOwnerRankings(req.user!.id_user);
+    return res.json({ ok: true, data });
   })
 );
 
