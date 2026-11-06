@@ -11,7 +11,7 @@ import {
   type DrawnSlot,
   type GroupSeededEntry,
 } from "../bracket_generation_logic";
-import { BracketsRepository } from "./brackets_repository";
+import { BracketsRepository, type WithdrawalMatch } from "./brackets_repository";
 import { notifyGroupOutcome } from "../notifications/player_outcomes";
 import {
   BRACKETS_ERRORS,
@@ -920,6 +920,54 @@ export class BracketsService {
       rounds,
       ...(preRoundMatches.length > 0 ? { pre_round: preRoundMatches } : {}),
     });
+  }
+
+  /**
+   * Sacar a un inscrito de una categoría ya empezada.
+   * - Todavía sin jugar en su grupo (y sin llave armada): sale del grupo y de
+   *   la categoría, como si no se hubiera inscrito ("removed").
+   * - Ya jugó o está en la llave: se retira ("withdrawn"). Lo jugado queda y
+   *   cada partido pendiente se cierra por W.O. a favor del rival (en la
+   *   llave el rival avanza). Un partido de llave cuyo rival todavía no se
+   *   conoce queda para cerrarlo cuando se defina (`waiting`).
+   */
+  async withdrawPlayer(
+    tournamentId: string,
+    categoryId: string,
+    userId: string,
+    reason: "retired" | "injury" | "no_show" | "disqualified" = "retired"
+  ): Promise<Result<{ mode: "removed" | "withdrawn"; walkovers: number; waiting: number }, BracketsError>> {
+    const st = await this.repo.loadWithdrawalState(categoryId, userId);
+    if (!st.phase || st.phase === "enrollment") return fail(BRACKETS_ERRORS.PLAYER_NOT_IN_GROUP);
+
+    const inBracket = st.readyBracketMatches.length > 0 || st.waitingBracketMatches > 0;
+    const slotsLocked = st.idGroup ? await this.repo.groupHasBracketSlots(st.idGroup) : false;
+    if (st.phase === "groups" && st.playedGroupMatches === 0 && !inBracket && !slotsLocked) {
+      await this.repo.removeUnplayedFromGroup(tournamentId, categoryId, userId, st.idGroup);
+      return ok({ mode: "removed", walkovers: 0, waiting: 0 });
+    }
+
+    const wo = (m: WithdrawalMatch) => {
+      const need = Math.ceil(m.best_of_sets / 2);
+      const p1Wins = m.player2_id === userId;
+      return {
+        winner_id: p1Wins ? m.player1_id : m.player2_id,
+        sets_player1: p1Wins ? need : 0,
+        sets_player2: p1Wins ? 0 : need,
+        result_reason: reason,
+      };
+    };
+    let walkovers = 0;
+    for (const m of st.pendingGroupMatches) {
+      if (!m.player1_id || !m.player2_id) continue;
+      const r = await this.recordResult(m.id_match, wo(m));
+      if (r.ok) walkovers++;
+    }
+    for (const m of st.readyBracketMatches) {
+      const r = await this.recordBracketResult(m.id_match, wo(m));
+      if (r.ok) walkovers++;
+    }
+    return ok({ mode: "withdrawn", walkovers, waiting: st.waitingBracketMatches });
   }
 
   async recordBracketResult(

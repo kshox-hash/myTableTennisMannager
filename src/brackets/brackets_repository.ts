@@ -23,10 +23,76 @@ const REFEREE_NAME_SQL = (alias: string) =>
   `(SELECT COALESCE(NULLIF(TRIM(COALESCE(r.first_name, '') || ' ' || COALESCE(r.last_name, '')), ''), r.email)
     FROM users r WHERE r.id_user = ${alias}.referee_id)`;
 
+export type WithdrawalMatch = { id_match: string; player1_id: string; player2_id: string; best_of_sets: number };
+
 export class BracketsRepository {
   private pool: Pool;
   notifications: NotificationsRepository;
   private activityLog: ActivityLogRepository;
+
+  /** Dónde está un inscrito dentro de una categoría ya empezada: su grupo,
+   *  cuántos partidos jugó y los que le quedan (de grupo y de llave). */
+  async loadWithdrawalState(categoryId: string, userId: string) {
+    const phase = (await this.pool.query(`SELECT phase FROM tournament_categories WHERE id_category = $1`, [categoryId])).rows[0]?.phase ?? null;
+    const group = (
+      await this.pool.query(
+        `SELECT gm.id_group FROM group_members gm JOIN category_groups cg ON cg.id_group = gm.id_group
+         WHERE cg.id_category = $1 AND gm.id_user = $2 LIMIT 1`,
+        [categoryId, userId]
+      )
+    ).rows[0]?.id_group ?? null;
+    const groupMatches = (
+      await this.pool.query(
+        `SELECT m.id_match, m.player1_id, m.player2_id, m.best_of_sets, m.status
+         FROM group_matches m JOIN category_groups cg ON cg.id_group = m.id_group
+         WHERE cg.id_category = $1 AND (m.player1_id = $2 OR m.player2_id = $2)`,
+        [categoryId, userId]
+      )
+    ).rows;
+    const bracketMatches = (
+      await this.pool.query(
+        `SELECT id_match, player1_id, player2_id, best_of_sets, status FROM bracket_matches
+         WHERE id_category = $1 AND (player1_id = $2 OR player2_id = $2) AND winner_id IS NULL`,
+        [categoryId, userId]
+      )
+    ).rows;
+    return {
+      phase: phase as string | null,
+      idGroup: group as string | null,
+      playedGroupMatches: groupMatches.filter((m: any) => m.status !== "scheduled").length,
+      pendingGroupMatches: groupMatches.filter((m: any) => m.status === "scheduled") as WithdrawalMatch[],
+      readyBracketMatches: bracketMatches.filter((m: any) => m.status === "ready") as WithdrawalMatch[],
+      waitingBracketMatches: bracketMatches.filter((m: any) => m.status === "pending").length,
+    };
+  }
+
+  /** Saca del todo a un inscrito que todavía no jugó en su grupo: sus
+   *  partidos pendientes, su fila de la tabla, el grupo y la inscripción. */
+  async removeUnplayedFromGroup(tournamentId: string, categoryId: string, userId: string, groupId: string | null): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      if (groupId) {
+        await client.query(
+          `DELETE FROM group_matches WHERE id_group = $1 AND status = 'scheduled' AND (player1_id = $2 OR player2_id = $2)`,
+          [groupId, userId]
+        );
+        await client.query(`DELETE FROM group_standings WHERE id_group = $1 AND id_user = $2`, [groupId, userId]);
+        await client.query(`DELETE FROM group_members WHERE id_group = $1 AND id_user = $2`, [groupId, userId]);
+      }
+      await client.query(
+        `UPDATE enrollments SET status = 'cancelled'
+         WHERE id_tournament = $1 AND id_category = $2 AND id_user = $3 AND status = 'active'`,
+        [tournamentId, categoryId, userId]
+      );
+      await client.query("COMMIT");
+    } catch (e) {
+      await client.query("ROLLBACK");
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
 
   constructor(pool?: Pool) {
     this.pool = pool ?? DB.getPool();

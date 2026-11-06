@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { z } from "zod";
 import { BracketsController } from "../brackets_controller";
 import { BracketsService } from "../brackets_service";
 import { BracketsRepository } from "../brackets_repository";
@@ -182,6 +183,34 @@ router.patch(
   requireTournamentOwnership(),
   validateBody(moveGroupMemberSchema),
   asyncHandler(controller.moveGroupMember)
+);
+
+// Sacar/retirar a un inscrito de una categoría ya empezada (ver
+// BracketsService.withdrawPlayer). Después revisa si el grupo o la llave
+// quedaron terminados con los W.O., igual que al cargar un resultado.
+// POST /api/v1/bracket/tournaments/:id_tournament/categories/:id_category/withdraw-player
+const withdrawPlayerSchema = z
+  .object({
+    id_user: z.string().uuid(),
+    reason: z.enum(["retired", "injury", "no_show", "disqualified"]).optional(),
+  })
+  .strict();
+router.post(
+  "/tournaments/:id_tournament/categories/:id_category/withdraw-player",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(),
+  validateBody(withdrawPlayerSchema),
+  asyncHandler(async (req, res) => {
+    const tournamentId = String(req.params.id_tournament);
+    const categoryId = String(req.params.id_category);
+    const { id_user, reason } = req.body as z.infer<typeof withdrawPlayerSchema>;
+    const r = await service.withdrawPlayer(tournamentId, categoryId, id_user, reason);
+    if (!r.ok) return res.status(400).json({ ok: false, message: "Ese jugador no está jugando esta categoría" });
+    await phaseService.checkGroupAutoAdvance(categoryId, tournamentId);
+    await phaseService.checkBracketAutoFinish(categoryId);
+    return res.json({ ok: true, data: r.data });
+  })
 );
 
 // Registrar resultado de partido de grupo
