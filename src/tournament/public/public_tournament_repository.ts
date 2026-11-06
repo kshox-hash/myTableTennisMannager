@@ -102,6 +102,7 @@ export interface PublicOrganizerRow {
 }
 
 export interface PublicOrganizerProfileRow {
+  organizer_logo_url: string | null;
   id_user: string;
   doc_color_primary: string | null;
   doc_color_accent: string | null;
@@ -334,6 +335,9 @@ export class PublicTournamentRepository {
          ${ORGANIZER_NAME_SQL} AS organizer_name,
          cl.name AS club_name,
          ${organizerAvatarSql("u")} AS avatar_url,
+         -- Solo el logo/foto que el admin subió COMO ORGANIZADOR (sin caer a
+         -- su foto de jugador): es lo que va en el encabezado de sus documentos.
+         u.organizer_avatar_url AS organizer_logo_url,
          u.public_ranking_enabled,
          u.doc_color_primary,
          u.doc_color_accent,

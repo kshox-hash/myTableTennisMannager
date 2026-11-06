@@ -255,6 +255,8 @@ router.get(
         organizer_name: organizer.organizer_name,
         club_name: organizer.club_name,
         avatar_url: organizer.avatar_url,
+        // El logo que subió como organizador (Mi perfil), sin la foto de jugador.
+        organizer_logo_url: organizer.organizer_logo_url,
         // Colores de sus documentos publicados (fixture/grupos); null = por defecto.
         doc_colors: { primary: organizer.doc_color_primary, accent: organizer.doc_color_accent },
         club: organizer.id_club
