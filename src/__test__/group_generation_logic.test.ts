@@ -97,6 +97,28 @@ describe("sortPlayersForGrouping", () => {
     expect(sorted.map((p) => p.id_user)).toEqual(["c", "a", "b"]);
   });
 
+  it("el sembrado del organizador manda sobre el ranking (cabezas de serie elegidos a mano)", () => {
+    const players = [
+      player("top", { ranking_points: 900, seed_number: 3 }),
+      player("medio", { ranking_points: 500, seed_number: 1 }),
+      player("bajo", { ranking_points: 10, seed_number: 2 }),
+      player("sinSiembra", { ranking_points: 1000 }),
+    ];
+    const sorted = sortPlayersForGrouping(players);
+    expect(sorted.map((p) => p.id_user)).toEqual(["medio", "bajo", "top", "sinSiembra"]);
+  });
+
+  it("el organizador puede hacer cabeza de serie a otro jugador", () => {
+    // 8 jugadores → 2 grupos de 4: cabezas = sembrado 1 y 2. Por ranking
+    // serían p0 y p1; el organizador sube a p7 al puesto 1.
+    const players = Array.from({ length: 8 }, (_, i) =>
+      player(`p${i}`, { ranking_points: 1000 - i * 10, seed_number: i === 7 ? 1 : i + 2 })
+    );
+    const result = generateGroupsFromPlayers(players);
+    const heads = result.members.filter((m) => m.group_position === 1).map((m) => m.id_user);
+    expect(heads).toContain("p7");
+  });
+
   it("deja los null al final de cada criterio", () => {
     const players = [
       player("a", { ranking_points: null }),
@@ -167,12 +189,18 @@ describe("roundRobinOrder", () => {
     expect(roundRobinOrder(4)).toEqual([[0, 3], [1, 2], [0, 2], [1, 3], [0, 1], [2, 3]]);
   });
 
+  it("el cabeza de serie juega siempre el partido 1 (también con N impar)", () => {
+    for (let n = 2; n <= 24; n++) {
+      expect(roundRobinOrder(n)[0][0]).toBe(0);
+    }
+  });
+
   it("grupo de 3: el orden de siempre", () => {
     expect(roundRobinOrder(3)).toEqual([[0, 2], [0, 1], [1, 2]]);
   });
 
   it("con 5 o más nadie juega dos partidos seguidos, y están todos los cruces una vez", () => {
-    for (let n = 5; n <= 20; n++) {
+    for (let n = 5; n <= 24; n++) {
       const seq = roundRobinOrder(n);
       expect(seq).toHaveLength((n * (n - 1)) / 2);
       expect(new Set(seq.map(([a, b]) => `${a}|${b}`)).size).toBe(seq.length);

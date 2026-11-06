@@ -265,17 +265,28 @@ export function buildGroupPlan(
 
 /**
  * Orden competitivo:
+ * 0) seed_number ASC — el sembrado que fijó el organizador en "Sembrado"
+ *    MANDA. Antes era el 3er criterio (debajo del ranking): el organizador
+ *    intercambiaba jugadores, la lista se veía reordenada pero los grupos y
+ *    los cabezas de serie seguían saliendo por ranking. El sembrado que
+ *    propone la pantalla ya viene por ranking, así que sin cambios manuales
+ *    el resultado es el mismo de siempre.
  * 1) ranking_points DESC
  * 2) ranking_position ASC
- * 3) seed_number ASC
- * 4) id_user ASC
+ * 3) id_user ASC
  *
- * null queda al final.
+ * null queda al final (un inscrito sin sembrado va después de los sembrados).
  */
 export function sortPlayersForGrouping(
   players: CompetitionPlayerInput[]
 ): CompetitionPlayerInput[] {
   return [...players].sort((a, b) => {
+    const aManual = a.seed_number ?? Number.POSITIVE_INFINITY;
+    const bManual = b.seed_number ?? Number.POSITIVE_INFINITY;
+    if (aManual !== bManual) {
+      return aManual - bManual;
+    }
+
     const aPoints = a.ranking_points ?? Number.NEGATIVE_INFINITY;
     const bPoints = b.ranking_points ?? Number.NEGATIVE_INFINITY;
 
@@ -447,15 +458,18 @@ export function assignPlayersToGroups(
 }
 
 /**
- * Orden de los partidos de un todos contra todos, intercalado para que nadie
- * juegue dos partidos seguidos. Antes era "de papeleta" (1vN, 1v(N-1), …,
- * 1v2, después 2vN, …): el jugador 1 jugaba todos sus partidos de corrido.
+ * Orden de los partidos de un todos contra todos: intercalado (nadie juega dos
+ * partidos seguidos) y respetando la siembra. Antes era "de papeleta" (1vN,
+ * 1v(N-1), …): el cabeza de serie jugaba todos sus partidos de corrido.
  *
  * - 2 o 3 jugadores: el orden de siempre (con 3 alguien repite sí o sí).
- * - 4 o más: método del círculo (jornadas donde cada uno juega una vez) y,
- *   sobre eso, se elige siempre el partido cuyos jugadores llevan más tiempo
- *   sin jugar. Con 4 da el orden ITTF (1v4, 2v3, 1v3, 2v4, 1v2, 3v4: el
- *   mínimo posible de repeticiones); con 5 o más, nadie juega dos seguidos.
+ * - 4 o más: método del círculo con jornadas donde cada uno juega una vez.
+ *   El cabeza de serie (índice 0) juega SIEMPRE el partido 1; con N impar el
+ *   que descansa en la primera jornada es el último sembrado (no el 1), y
+ *   dentro de cada jornada van primero los cruces de mejor siembra. Después
+ *   se reordena por descanso y una pasada de ajuste deshace los choques que
+ *   queden. Con 4 da el orden ITTF (1v4, 2v3, 1v3, 2v4, 1v2, 3v4: el mínimo
+ *   posible de repeticiones); con 5 a 24 (probado) nadie juega dos seguidos.
  *
  * Devuelve pares de índices [i, j] con i < j (el de mejor siembra va como
  * jugador 1, igual que antes).
@@ -468,27 +482,30 @@ export function roundRobinOrder(n: number): Array<[number, number]> {
     return out;
   }
 
-  // Método del círculo: el primero fijo, el resto rota. Con N impar se suma
-  // un "descanso" (-1) y ese cruce no se genera.
+  // Círculo: el primero queda fijo y el resto rota. Con N impar el fijo es el
+  // "descanso" (-1): así en la jornada 1 descansa el último y no el 1.
   const ring = Array.from({ length: n }, (_, i) => i);
-  if (n % 2 === 1) ring.push(-1);
+  if (n % 2 === 1) ring.unshift(-1);
   const m = ring.length;
   const pairs: Array<[number, number]> = [];
   for (let r = 0; r < m - 1; r++) {
+    const round: Array<[number, number]> = [];
     for (let k = 0; k < m / 2; k++) {
       const a = ring[k];
       const b = ring[m - 1 - k];
-      if (a !== -1 && b !== -1) pairs.push([Math.min(a, b), Math.max(a, b)]);
+      if (a !== -1 && b !== -1) round.push([Math.min(a, b), Math.max(a, b)]);
     }
+    round.sort((x, y) => x[0] - y[0] || x[1] - y[1]); // mejor siembra primero
+    pairs.push(...round);
     ring.splice(1, 0, ring.pop() as number);
   }
 
-  // Reordenar por descanso: el partido cuyo jugador menos descansado lleva
-  // más tiempo sin jugar va primero; empate, el orden de las jornadas.
-  // (Probado de 5 a 20 jugadores: nadie juega dos partidos seguidos.)
+  // Reordenar por descanso: va primero el partido cuyo jugador menos
+  // descansado lleva más tiempo sin jugar; empate, el orden de las jornadas
+  // (por eso el partido 1 es el del cabeza de serie).
   const left = pairs.slice();
   const lastPlayed = new Map<number, number>();
-  const out: Array<[number, number]> = [];
+  let out: Array<[number, number]> = [];
   while (left.length > 0) {
     const idx = out.length;
     const rest = (p: number) => (lastPlayed.has(p) ? idx - (lastPlayed.get(p) as number) - 1 : Number.MAX_SAFE_INTEGER);
@@ -505,6 +522,31 @@ export function roundRobinOrder(n: number): Array<[number, number]> {
     lastPlayed.set(pick[0], idx);
     lastPlayed.set(pick[1], idx);
     out.push(pick);
+  }
+
+  // Ajuste fino: si un jugador todavía repite, intercambiar ese partido con
+  // otro (nunca el 1) cuando eso baja el total de partidos seguidos.
+  const seguidos = (seq: Array<[number, number]>) =>
+    seq.slice(1).filter(([a, b], k) => seq[k].includes(a) || seq[k].includes(b)).length;
+  let current = seguidos(out);
+  for (let pass = 0; pass < 5 && current > 0; pass++) {
+    let improved = false;
+    for (let i = 1; i < out.length && current > 0; i++) {
+      if (!out[i].some((p) => out[i - 1].includes(p))) continue;
+      for (let j = 1; j < out.length; j++) {
+        if (j === i) continue;
+        const trial = out.slice();
+        [trial[i], trial[j]] = [trial[j], trial[i]];
+        const c = seguidos(trial);
+        if (c < current) {
+          out = trial;
+          current = c;
+          improved = true;
+          break;
+        }
+      }
+    }
+    if (!improved) break;
   }
   return out;
 }
