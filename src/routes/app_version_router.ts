@@ -30,4 +30,15 @@ appVersionRouter.get("/version", (_req, res) => {
   });
 });
 
+// GET /api/v1/app/download — el botón "Descargar para Android" de la web.
+// Redirige al APK de APP_UPDATE_URL: un solo lugar (Render) define qué
+// versión baja la web y a cuál se actualizan las apps instaladas. Sin APK
+// configurado, vuelve a la web.
+appVersionRouter.get("/download", (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  const url = process.env.APP_UPDATE_URL ?? "";
+  if (/\.apk(\?|$)/i.test(url)) return res.redirect(302, url);
+  return res.redirect(302, "https://www.myttm.cl");
+});
+
 export default appVersionRouter;
