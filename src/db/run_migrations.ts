@@ -91,6 +91,7 @@ const INCREMENTAL = [
   "083_bracket_group_slots.sql",
   "084_normalize_text_nfc.sql",
   "085_rankings.sql",
+  "086_tournament_followers.sql",
 ];
 
 export async function runMigrations(): Promise<void> {

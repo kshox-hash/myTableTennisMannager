@@ -45,6 +45,8 @@ export const PUSH_TYPES: ReadonlySet<string> = new Set([
   "referee_assigned",
   "tournament_finished",
   "organizer_invited",
+  // Campeonato que sigues sin jugarlo (ver followers.ts).
+  "followed_update",
 ]);
 
 export type NotificationType =
@@ -77,7 +79,9 @@ export type NotificationType =
   | "tournament_reminder"
   // Coorganizadores: te sumaron (o te cambiaron el rol) / te sacaron.
   | "organizer_invited"
-  | "organizer_removed";
+  | "organizer_removed"
+  // Novedad de un campeonato que sigues como visita (no inscrito).
+  | "followed_update";
 
 export type NotificationRow = {
   id_notification: string;

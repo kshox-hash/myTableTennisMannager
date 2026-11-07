@@ -1,6 +1,7 @@
 import DB from "../db/db_configuration";
 import { NotificationsRepository } from "./notifications_repository";
 import { PlayerRepository } from "../player/player_repository";
+import { followersChampion } from "./followers";
 
 // Avisos de "cómo te fue" que antes no existían — el jugador tenía que
 // entrar a mirar la tabla o la llave para enterarse:
@@ -97,6 +98,9 @@ export async function notifyFinalPositions(idCategory: string): Promise<void> {
           : `Terminó ${cat} (${names.tournament_name}): quedaste en el lugar ${p}. ¡Gracias por jugar!`;
       await repo.create({ idUser: s.id_user, type: "final_position", title, message, idTournament: names.id_tournament, idCategory });
     }
+    // Quienes siguen el campeonato sin jugarlo: quién salió campeón.
+    const champion = (standings as { id_user: string; position: number }[]).find((s) => Number(s.position) === 1);
+    await followersChampion(idCategory, champion?.id_user ?? null);
   } catch (err) {
     console.error("[notifyFinalPositions]", err);
   }

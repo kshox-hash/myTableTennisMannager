@@ -30,6 +30,7 @@ import type {
   GenerateBracketInput,
 } from "./schema/brackets_schema";
 import { type Result, ok, fail } from "../core/constants/result";
+import { followersBracketReady, followersCategoryStarted } from "../notifications/followers";
 
 // Si vienen los puntajes por set, deben ser consistentes con los sets ganados declarados
 // (ningún set puede terminar empatado, y la cuenta de sets ganados por cada uno debe calzar).
@@ -231,6 +232,8 @@ export class BracketsService {
         }
       );
     }
+    // Quienes siguen el campeonato sin jugarlo.
+    void followersCategoryStarted(categoryId);
 
     return this.getGroups(tournamentId, categoryId);
   }
@@ -847,6 +850,8 @@ export class BracketsService {
         idTournament: tournamentId,
         idCategory: categoryId,
       });
+      // Quienes siguen el campeonato sin jugarlo.
+      void followersBracketReady(categoryId);
 
       // Avisar aparte a quienes avanzan directo por bye (sin jugar) en la ronda 1
       const byeWinners = generated.matches

@@ -28,12 +28,16 @@ import { startPhaseScheduler } from "./tournament/phases/phase_scheduler";
 import { startTableScheduleScheduler } from "./tournament/schedule/table_schedule_scheduler";
 import { startQueueNoticeScheduler } from "./tournament/schedule/queue_notice_scheduler";
 import { startTournamentReminderScheduler } from "./tournament/schedule/tournament_reminder_scheduler";
+import { followersRouter } from "./notifications/followers";
 
 const path    = "api";
 const version = "v1";
 
 export default function registerRoutes(app: Express) {
   app.use(`/${path}/${version}/auth`,        authRouter);
+  // Seguir un campeonato como visita: antes que el resto de /tournament para
+  // que "/me/following" no lo capture una ruta genérica "/:id/...".
+  app.use(`/${path}/${version}/tournament`,  followersRouter);
   app.use(`/${path}/${version}/tournament`,  tournamentRouter);
   app.use(`/${path}/${version}/enrollments`, enrollmentsRouter);
   app.use(`/${path}/${version}/calendar`,    calendarRouter);

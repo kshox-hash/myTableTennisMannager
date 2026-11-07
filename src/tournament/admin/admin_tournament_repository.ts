@@ -2,6 +2,7 @@ import type { Pool, PoolClient, QueryResult } from "pg";
 import DB from "../../db/db_configuration";
 import { categoryIneligibility } from "../../age_category_logic";
 import { NotificationsRepository } from "../../notifications/notifications_repository";
+import { notifyFollowers } from "../../notifications/followers";
 import { ActivityLogRepository, type ActivityLogRow } from "../../activity/activity_log_repository";
 import { BracketsRepository } from "../../brackets/brackets_repository";
 
@@ -704,6 +705,18 @@ export class AdminTournamentRepository {
       }
 
       await client.query("COMMIT");
+      // Quienes siguen el campeonato sin jugarlo (después del COMMIT: si la
+      // edición falla no se avisa nada). El título lleva el cambio para que
+      // un segundo cambio distinto también avise.
+      if (changes.length > 0) {
+        const what = changes.length === 1 ? changes[0] : `${changes.slice(0, -1).join(", ")} y ${changes[changes.length - 1]}`;
+        const whenWhere = [norm(after.event_date), normTime(after.event_time), after.address ?? ""].filter(Boolean).join(" · ");
+        void notifyFollowers({
+          idTournament: tournamentId,
+          title: `Cambió ${what} de ${after.tournament_name}`,
+          message: whenWhere ? `Ahora: ${whenWhere}. Revisa los detalles del campeonato.` : "Revisa los detalles del campeonato.",
+        });
+      }
 
       return {
         tournament: this.mapTournamentRowToITournament(tournamentRes.rows[0], categoryRes.rows),
@@ -1886,6 +1899,11 @@ export class AdminTournamentRepository {
       await this.activityLog.record(idTournament, requestedBy, "tournament_cancelled", null, client);
 
       await client.query("COMMIT");
+      void notifyFollowers({
+        idTournament,
+        title: `Se canceló ${t.tournament_name}`,
+        message: "El organizador canceló el campeonato.",
+      });
       return { cancelled: true };
     } catch (error) {
       try {

@@ -1,5 +1,6 @@
 import DB from "../../db/db_configuration";
 import { NotificationsRepository } from "../../notifications/notifications_repository";
+import { notifyFollowers } from "../../notifications/followers";
 import { ActivityLogRepository } from "../../activity/activity_log_repository";
 
 // "Finalizar campeonato" en cualquier momento (sin tener que jugar todo):
@@ -81,6 +82,12 @@ export async function finishTournament(idTournament: string, requestedBy: string
     }
     await new ActivityLogRepository(pool).record(idTournament, requestedBy, "tournament_finished", null, client);
     await client.query("COMMIT");
+    // Quienes siguen el campeonato sin jugarlo.
+    void notifyFollowers({
+      idTournament,
+      title: `Terminó ${t.tournament_name}`,
+      message: `El campeonato terminó. Mira los resultados finales y los podios.`,
+    });
     return { ok: true, categories: open.length, cancelledMatches: (g.rowCount ?? 0) + (b.rowCount ?? 0) };
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});

@@ -1,5 +1,6 @@
 import DB from "../../db/db_configuration";
 import { NotificationsRepository } from "../../notifications/notifications_repository";
+import { notifyFollowers } from "../../notifications/followers";
 
 // Recordatorio el día antes: cada 10 min busca los campeonatos activos que
 // son MAÑANA (hora de Chile) y avisa una vez a cada inscrito ("Mañana juegas
@@ -47,6 +48,24 @@ export function startTournamentReminderScheduler(intervalMs = 10 * 60_000) {
           title: `Mañana juegas ${r.tournament_name}`,
           message: when ? `Te esperamos ${when}. ¡Llega con tiempo para calentar!` : "¡Llega con tiempo para calentar!",
           idTournament: r.id_tournament,
+        });
+      }
+
+      // Quienes siguen el campeonato sin jugarlo (notifyFollowers no repite
+      // el mismo título, así que correr cada 10 min no duplica).
+      const followed = await pool.query<{ id_tournament: string; tournament_name: string; event_time: string | null; address: string | null }>(
+        `SELECT t.id_tournament, t.tournament_name, to_char(t.event_time, 'HH24:MI') AS event_time, t.address
+           FROM tournaments t
+          WHERE t.status = 'active'
+            AND t.event_date = (now() AT TIME ZONE 'America/Santiago')::date + 1
+            AND EXISTS (SELECT 1 FROM tournament_followers f WHERE f.id_tournament = t.id_tournament)`
+      );
+      for (const t of followed.rows) {
+        const when = [t.event_time ? `a las ${t.event_time}` : null, t.address ? `en ${t.address}` : null].filter(Boolean).join(" ");
+        await notifyFollowers({
+          idTournament: t.id_tournament,
+          title: `Mañana es ${t.tournament_name}`,
+          message: when ? `Empieza ${when}. Sigue los grupos y resultados desde la app.` : "Sigue los grupos y resultados desde la app.",
         });
       }
     } catch (e) {
