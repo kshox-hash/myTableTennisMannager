@@ -597,6 +597,71 @@ export class BracketsRepository {
     await this.pool.query(`UPDATE ${table} SET result_reason = $1 WHERE id_match = $2`, [reason, matchId]);
   }
 
+  /**
+   * Intercambia de lugar a dos jugadores de la llave (misma ronda, partidos
+   * sin jugar): cada uno ocupa el cupo del otro, con su número de siembra.
+   * No se puede si alguno de los dos partidos ya tiene marcador en vivo.
+   */
+  async swapBracketPlayers(params: { tournamentId: string; categoryId: string; userA: string; userB: string }): Promise<
+    { swapped: true } | { swapped: false; error: "SAME_PLAYER" | "NOT_IN_BRACKET" | "DIFFERENT_ROUND" | "MATCH_LIVE" }
+  > {
+    const { tournamentId, categoryId, userA, userB } = params;
+    if (userA === userB) return { swapped: false, error: "SAME_PLAYER" };
+    return this.withTransaction(async (client) => {
+      type Slot = { id_match: string; round: number; slot: 1 | 2; seed: number | null; live: boolean };
+      const find = async (userId: string): Promise<Slot | null> => {
+        const r = await client.query<{ id_match: string; round: number; player1_id: string | null; seed1: number | null; seed2: number | null; live: boolean }>(
+          `SELECT id_match, round, player1_id, seed1, seed2, (set_scores IS NOT NULL) AS live
+             FROM bracket_matches
+            WHERE id_tournament = $1 AND id_category = $2 AND (player1_id = $3 OR player2_id = $3)
+              AND status IN ('pending', 'ready') AND NOT is_bye
+            ORDER BY round ASC
+            LIMIT 1
+            FOR UPDATE`,
+          [tournamentId, categoryId, userId]
+        );
+        const m = r.rows[0];
+        if (!m) return null;
+        const slot = m.player1_id === userId ? 1 : 2;
+        return { id_match: m.id_match, round: m.round, slot, seed: slot === 1 ? m.seed1 : m.seed2, live: m.live };
+      };
+      const a = await find(userA);
+      const b = await find(userB);
+      if (!a || !b) return { swapped: false, error: "NOT_IN_BRACKET" as const };
+      if (a.round !== b.round) return { swapped: false, error: "DIFFERENT_ROUND" as const };
+      if (a.live || b.live) return { swapped: false, error: "MATCH_LIVE" as const };
+
+      const put = (s: Slot, userId: string, seed: number | null) =>
+        client.query(
+          s.slot === 1
+            ? `UPDATE bracket_matches SET player1_id = $2, seed1 = $3 WHERE id_match = $1`
+            : `UPDATE bracket_matches SET player2_id = $2, seed2 = $3 WHERE id_match = $1`,
+          [s.id_match, userId, seed]
+        );
+      await put(a, userB, b.seed);
+      await put(b, userA, a.seed);
+      // Si era árbitro del partido al que ahora entra a jugar, deja de serlo.
+      await client.query(
+        `UPDATE bracket_matches SET referee_id = NULL
+          WHERE id_match = ANY($1::uuid[]) AND referee_id IN (player1_id, player2_id)`,
+        [[a.id_match, b.id_match]]
+      );
+      await this.notifications.createForMany(
+        [userA, userB],
+        {
+          type: "next_match_ready",
+          title: "Cambió tu partido en la llave",
+          message: "El organizador te cambió de lugar en la llave. Revisa contra quién juegas.",
+          idTournament: tournamentId,
+          idCategory: categoryId,
+          matchType: "bracket",
+        },
+        client
+      );
+      return { swapped: true as const };
+    });
+  }
+
   /** Grupo de un inscrito en la categoría (null si no está en ninguno). */
   async findUserGroup(tournamentId: string, categoryId: string, userId: string): Promise<string | null> {
     const r = await this.pool.query<{ id_group: string }>(

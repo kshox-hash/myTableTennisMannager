@@ -246,6 +246,36 @@ router.post(
   })
 );
 
+// Intercambiar de lugar a dos jugadores de la llave (misma ronda, sin jugar).
+// POST /api/v1/bracket/tournaments/:id_tournament/categories/:id_category/swap-bracket-players
+const swapBracketSchema = z.object({ user_a: z.string().uuid(), user_b: z.string().uuid() }).strict();
+router.post(
+  "/tournaments/:id_tournament/categories/:id_category/swap-bracket-players",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(),
+  validateBody(swapBracketSchema),
+  asyncHandler(async (req, res) => {
+    const { user_a, user_b } = req.body as z.infer<typeof swapBracketSchema>;
+    const r = await repo.swapBracketPlayers({
+      tournamentId: String(req.params.id_tournament),
+      categoryId: String(req.params.id_category),
+      userA: user_a,
+      userB: user_b,
+    });
+    if (!r.swapped) {
+      const msg: Record<string, string> = {
+        SAME_PLAYER: "Elegiste al mismo jugador",
+        NOT_IN_BRACKET: "Alguno de los dos ya jugó su partido o no está en la llave",
+        DIFFERENT_ROUND: "Solo se pueden cambiar jugadores de la misma ronda",
+        MATCH_LIVE: "Uno de los partidos ya tiene marcador en vivo",
+      };
+      return res.status(409).json({ ok: false, message: msg[r.error] ?? r.error });
+    }
+    return res.json({ ok: true, data: { swapped: true } });
+  })
+);
+
 // Registrar resultado de partido de grupo
 // POST /api/v1/bracket/matches/:id_match/result
 router.post(
