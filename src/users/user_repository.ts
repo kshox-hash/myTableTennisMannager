@@ -6,6 +6,19 @@ import type { UpdateProfileDTO } from "./schema/user_schema";
 import { hashPassword } from "../bcrypt/bcrypt";
 import { ROLE_IDS } from "../core/constants/roles";
 
+// Texto para buscar sin distinguir mayúsculas, tildes ni espacios de más
+// (sin la extensión unaccent: translate cubre las letras del español).
+const FOLD_FROM = "áéíóúüàèìòùâêîôûñç";
+const FOLD_TO = "aeiouuaeiouaeiounc";
+const foldSql = (expr: string) => `translate(lower(regexp_replace(${expr}, '\\s+', ' ', 'g')), '${FOLD_FROM}', '${FOLD_TO}')`;
+const foldText = (s: string) =>
+  s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
 export class UserRepository {
   private pool: Pool;
 
@@ -180,15 +193,15 @@ export class UserRepository {
         AND u.is_team = false
         AND (
           u.email ILIKE $1
-          OR COALESCE(u.first_name, '') ILIKE $1
-          OR COALESCE(u.last_name, '') ILIKE $1
-          OR TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) ILIKE $1
+          -- Sin distinguir mayúsculas ni tildes: "caceres" encuentra a "Cáceres".
+          OR ${foldSql("TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, ''))")} LIKE $4
+          OR ${foldSql("COALESCE(u.last_name, '')")} LIKE $4
         )
       ORDER BY u.last_name NULLS LAST, u.first_name NULLS LAST, u.email ASC
       LIMIT $2;
     `;
 
-    const res = await this.pool.query<UserSearchRow>(query, [`%${q}%`, limit, forReferee]);
+    const res = await this.pool.query<UserSearchRow>(query, [`%${q}%`, limit, forReferee, `%${foldText(q)}%`]);
     return res.rows;
   }
 
