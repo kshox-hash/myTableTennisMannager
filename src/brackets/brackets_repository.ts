@@ -1707,7 +1707,7 @@ export class BracketsRepository {
   // el que entra ocupa su lugar (mismos partidos pendientes, misma fila de
   // la tabla y posición en el grupo); el que sale queda con la inscripción
   // cancelada. Solo si el que sale todavía no jugó ni está en mesa. El que
-  // entra tiene que estar inscrito en la categoría y sin grupo.
+  // entra no puede estar ya en un grupo; se inscribe solo (sin cupos).
   async replaceGroupMember(params: {
     tournamentId: string;
     categoryId: string;
@@ -1736,11 +1736,6 @@ export class BracketsRepository {
       const group = await groupOf(outUser);
       if (!group) return { replaced: false, error: "PLAYER_NOT_IN_GROUP" as BracketsError };
       if (await groupOf(inUser)) return { replaced: false, error: "ALREADY_IN_A_GROUP" as BracketsError };
-      const enrolled = await client.query(
-        `SELECT 1 FROM enrollments WHERE id_tournament = $1 AND id_category = $2 AND id_user = $3 AND status = 'active'`,
-        [tournamentId, categoryId, inUser]
-      );
-      if (!enrolled.rowCount) return { replaced: false, error: "PLAYER_NOT_ENROLLED" as BracketsError };
 
       const st = await client.query<{ played: boolean | null; busy: boolean | null }>(
         `SELECT bool_or(status <> 'scheduled') AS played,
@@ -1768,6 +1763,17 @@ export class BracketsRepository {
         `UPDATE enrollments SET status = 'cancelled'
           WHERE id_tournament = $1 AND id_category = $2 AND id_user = $3 AND status = 'active'`,
         [tournamentId, categoryId, outUser]
+      );
+      // El que entra queda inscrito acá mismo, SIN mirar cupos: ocupa el
+      // lugar del que sale (antes había que inscribirlo aparte y, con la
+      // categoría llena, "cupos completos" no dejaba reemplazar). Si ya
+      // tenía una inscripción (activa o cancelada) se reactiva esa.
+      await client.query(
+        `INSERT INTO enrollments (id_user, id_tournament, id_category, status, attendance, checked_in)
+         VALUES ($3, $1, $2, 'active', 'present', true)
+         ON CONFLICT (id_user, id_tournament, id_category)
+         DO UPDATE SET status = 'active', attendance = 'present', checked_in = true`,
+        [tournamentId, categoryId, inUser]
       );
       await this.notifications.create(
         {
