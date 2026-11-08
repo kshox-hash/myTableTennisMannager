@@ -26,7 +26,7 @@ router.use(authRequired, requireRole("superadmin"));
 
 const playersQuerySchema = z.object({
   q: z.string().trim().max(100).default(""),
-  filter: z.enum(["all", "enrolled"]).default("all"),
+  filter: z.enum(["all", "enrolled", "new"]).default("all"),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
@@ -193,6 +193,17 @@ router.get(
   })
 );
 
+// GET /api/v1/superadmin/stats/downloads — descargas del APK (ver
+// app_version_router /download): totales, hoy, 7 y 30 días, web vs app, y
+// por día los últimos 30.
+router.get(
+  "/stats/downloads",
+  asyncHandler(async (_req, res) => {
+    const data = await repo.getDownloadStats();
+    return res.json({ ok: true, data });
+  })
+);
+
 // GET /api/v1/superadmin/stats/registrations?days=30
 router.get(
   "/stats/registrations",
@@ -251,6 +262,7 @@ router.get(
     const data = await repo.listPlayers({
       q: p.data.q,
       enrolledOnly: p.data.filter === "enrolled",
+      newOnly: p.data.filter === "new",
       limit: p.data.limit,
       offset: p.data.offset,
     });

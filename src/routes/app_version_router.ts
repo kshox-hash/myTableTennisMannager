@@ -1,4 +1,5 @@
 import { Router } from "express";
+import DB from "../db/db_configuration";
 
 // GET /api/v1/app/version — sin login. La app del jugador lo consulta al
 // abrir: si su número de build es menor que min_build, bloquea con
@@ -34,10 +35,23 @@ appVersionRouter.get("/version", (_req, res) => {
 // Redirige al APK de APP_UPDATE_URL: un solo lugar (Render) define qué
 // versión baja la web y a cuál se actualizan las apps instaladas. Sin APK
 // configurado, vuelve a la web.
-appVersionRouter.get("/download", (_req, res) => {
+appVersionRouter.get("/download", (req, res) => {
   res.set("Cache-Control", "no-store");
   const url = process.env.APP_UPDATE_URL ?? "";
-  if (/\.apk(\?|$)/i.test(url)) return res.redirect(302, url);
+  if (/\.apk(\?|$)/i.test(url)) {
+    // Contador de descargas (panel de superusuario). Sin await: nunca
+    // demora ni corta la descarga. ?src=app = actualización desde la app.
+    const source = req.query.src === "app" ? "app" : "web";
+    const ua = String(req.headers["user-agent"] ?? "").slice(0, 300);
+    DB.getPool()
+      .query(`INSERT INTO app_downloads (source, build, user_agent) VALUES ($1, $2, $3)`, [
+        source,
+        int(process.env.APP_LATEST_BUILD) || null,
+        ua || null,
+      ])
+      .catch((e) => console.error("[app_downloads]", e));
+    return res.redirect(302, url);
+  }
   return res.redirect(302, "https://www.myttm.cl");
 });
 

@@ -138,9 +138,41 @@ export class SuperadminRepository {
   // Personas registradas, las más nuevas primero. Una pareja de dobles se
   // inscribe como usuario equipo (migración 044): sus campeonatos se le
   // cuentan a los dos jugadores reales, que son quienes aparecen acá.
+  async getDownloadStats(): Promise<{
+    total: number;
+    today: number;
+    week: number;
+    month: number;
+    web: number;
+    app: number;
+    daily: { day: string; count: number }[];
+  }> {
+    const tz = "America/Santiago";
+    const t = await this.pool.query(
+      `SELECT COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE (created_at AT TIME ZONE $1)::date = (NOW() AT TIME ZONE $1)::date)::int AS today,
+              COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days')::int AS week,
+              COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '30 days')::int AS month,
+              COUNT(*) FILTER (WHERE source = 'web')::int AS web,
+              COUNT(*) FILTER (WHERE source = 'app')::int AS app
+         FROM app_downloads`,
+      [tz]
+    );
+    const d = await this.pool.query<{ day: string; count: number }>(
+      `SELECT to_char(g.day, 'YYYY-MM-DD') AS day, COUNT(a.id_download)::int AS count
+         FROM generate_series((NOW() AT TIME ZONE $1)::date - 29, (NOW() AT TIME ZONE $1)::date, '1 day') AS g(day)
+         LEFT JOIN app_downloads a ON (a.created_at AT TIME ZONE $1)::date = g.day
+        GROUP BY g.day ORDER BY g.day`,
+      [tz]
+    );
+    return { ...t.rows[0], daily: d.rows };
+  }
+
   async listPlayers(params: {
     q: string;
     enrolledOnly: boolean;
+    /** Solo los registrados (o agregados) en los últimos 7 días. */
+    newOnly?: boolean;
     limit: number;
     offset: number;
   }): Promise<{ players: PlayerListRow[]; total: number }> {
@@ -165,9 +197,10 @@ export class SuperadminRepository {
            OR u.email ILIKE $1
            OR TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) ILIKE $1)
          AND (NOT $2 OR en.names IS NOT NULL)
+         AND (NOT $5 OR u.created_at >= NOW() - INTERVAL '7 days')
        ORDER BY u.created_at DESC, u.id_user
        LIMIT $3 OFFSET $4`,
-      [`%${params.q}%`, params.enrolledOnly, params.limit, params.offset]
+      [`%${params.q}%`, params.enrolledOnly, params.limit, params.offset, params.newOnly ?? false]
     );
     return { players: res.rows, total: res.rows[0]?.total ?? 0 };
   }
