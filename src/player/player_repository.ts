@@ -132,6 +132,8 @@ export class PlayerRepository {
          LEFT JOIN clubs oppcl ON oppcl.id_club = opp.id_club
          WHERE (gm.player1_id = ANY($1::uuid[]) OR gm.player2_id = ANY($1::uuid[]))
            AND gm.winner_id IS NULL
+           -- Un W.O. doble queda sin ganador pero ya está cerrado.
+           AND gm.status NOT IN ('played', 'walkover')
            AND gm.player1_id IS NOT NULL AND gm.player2_id IS NOT NULL
            AND t.status <> 'cancelled'
          ORDER BY tc.id_category, gm.table_number DESC NULLS LAST`,

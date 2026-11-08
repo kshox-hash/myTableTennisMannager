@@ -459,11 +459,27 @@ export class BracketsService {
     if (match.status !== "scheduled") return fail(BRACKETS_ERRORS.MATCH_ALREADY_PLAYED);
 
     const { winner_id, sets_player1, sets_player2, set_scores, result_reason } = input;
+
+    // No se presentó ninguno: se cierra sin ganador y pierden los dos.
+    if (result_reason === "double_no_show") {
+      if (!match.player1_id || !match.player2_id) return fail(BRACKETS_ERRORS.INVALID_WINNER);
+      await this.repo.recordDoubleNoShow({
+        matchId,
+        groupId: match.id_group,
+        player1Id: match.player1_id,
+        player2Id: match.player2_id,
+        tournamentId: match.id_tournament,
+        categoryId: match.id_category,
+      });
+      await this.fillBracketSlotsIfGroupFinished(match.id_group, match.id_tournament, match.id_category);
+      return ok({ recorded: true, tournamentId: match.id_tournament, categoryId: match.id_category });
+    }
+
     // Un motivo (lesión, abandono, no se presentó, descalificación) siempre
     // es un resultado no jugado: se guarda como walkover + el motivo.
     const walkover = input.walkover === true || !!result_reason;
 
-    if (winner_id !== match.player1_id && winner_id !== match.player2_id) {
+    if (!winner_id || (winner_id !== match.player1_id && winner_id !== match.player2_id)) {
       return fail(BRACKETS_ERRORS.INVALID_WINNER);
     }
 
@@ -555,6 +571,20 @@ export class BracketsService {
     const hasSlots = phase === "bracket" && (await this.repo.groupHasBracketSlots(match.id_group));
     if (phase !== "groups" && !reopenRoundRobin && !hasSlots) return fail(BRACKETS_ERRORS.CATEGORY_ALREADY_ADVANCED);
     if (hasSlots && (await this.repo.groupSlotsPlayed(match.id_group))) return fail(BRACKETS_ERRORS.GROUP_LOCKED_BY_BRACKET);
+
+    if (match.status === "walkover" && !match.winner_id) {
+      await this.repo.undoDoubleNoShow({
+        matchId,
+        groupId: match.id_group,
+        player1Id: match.player1_id!,
+        player2Id: match.player2_id!,
+        tournamentId: match.id_tournament,
+        requestedBy,
+      });
+      if (reopenRoundRobin) await this.repo.reopenRoundRobinCategory(match.id_category);
+      if (hasSlots) await this.repo.clearGroupSlots(match.id_group);
+      return ok({ undone: true, tournamentId: match.id_tournament, categoryId: match.id_category });
+    }
 
     const winnerIsPlayer1 = match.winner_id === match.player1_id;
     const loserId = winnerIsPlayer1 ? match.player2_id : match.player1_id;
@@ -990,7 +1020,8 @@ export class BracketsService {
     // es un resultado no jugado: se guarda como walkover + el motivo.
     const walkover = input.walkover === true || !!result_reason;
 
-    if (winner_id !== match.player1_id && winner_id !== match.player2_id) {
+    if (result_reason === "double_no_show") return fail(BRACKETS_ERRORS.DOUBLE_NO_SHOW_NOT_IN_BRACKET);
+    if (!winner_id || (winner_id !== match.player1_id && winner_id !== match.player2_id)) {
       return fail(BRACKETS_ERRORS.INVALID_WINNER);
     }
 
@@ -1007,7 +1038,7 @@ export class BracketsService {
     }
 
     const loserId = winner_id === match.player1_id ? match.player2_id : match.player1_id;
-    const winnerSetsFor     = winner_id === match.player1_id ? sets_player1 : sets_player2;
+    const winnerSetsFor    = winner_id === match.player1_id ? sets_player1 : sets_player2;
     const winnerSetsAgainst = winner_id === match.player1_id ? sets_player2 : sets_player1;
 
     await this.repo.recordBracketResult({

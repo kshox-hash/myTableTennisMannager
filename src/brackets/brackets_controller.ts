@@ -483,6 +483,8 @@ export class BracketsController {
       const messages: Record<string, string> = {
         [BRACKETS_ERRORS.MATCH_NOT_FOUND]:      "Partido de llave no encontrado",
         [BRACKETS_ERRORS.MATCH_NOT_READY]:      "El partido aún no está listo (faltan jugadores definidos)",
+        [BRACKETS_ERRORS.DOUBLE_NO_SHOW_NOT_IN_BRACKET]:
+          "En la llave alguien tiene que avanzar: marca como no presentado a uno de los dos",
         [BRACKETS_ERRORS.INVALID_WINNER]:       "winner_id no corresponde a ningún jugador de este partido",
         [BRACKETS_ERRORS.INVALID_SET_COUNT]:    "Marcador de sets inválido para el formato del partido",
       };

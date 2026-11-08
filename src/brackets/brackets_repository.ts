@@ -597,6 +597,121 @@ export class BracketsRepository {
     await this.pool.query(`UPDATE ${table} SET result_reason = $1 WHERE id_match = $2`, [reason, matchId]);
   }
 
+  // Recalcula la posición dentro del grupo (mismo criterio que recordMatchResult).
+  private async rerankGroup(client: PoolClient, groupId: string): Promise<void> {
+    await client.query(
+      `WITH ranked AS (
+         SELECT id_user,
+                ROW_NUMBER() OVER (
+                  ORDER BY won DESC, (sets_for - sets_against) DESC,
+                           (points_for - points_against) DESC, id_user ASC
+                ) AS rnk
+         FROM group_standings
+         WHERE id_group = $1
+       )
+       UPDATE group_standings gs
+       SET position = ranked.rnk
+       FROM ranked
+       WHERE gs.id_group = $1 AND gs.id_user = ranked.id_user`,
+      [groupId]
+    );
+  }
+
+  // No se presentó ninguno (ver 088): el partido se cierra sin ganador y los
+  // dos lo pierden 0-0 — partido jugado y perdido en la tabla del grupo y en
+  // sus estadísticas, sin victoria para nadie.
+  async recordDoubleNoShow(params: {
+    matchId: string;
+    groupId: string;
+    player1Id: string;
+    player2Id: string;
+    tournamentId: string;
+    categoryId: string;
+  }): Promise<void> {
+    const { matchId, groupId, player1Id, player2Id, tournamentId, categoryId } = params;
+    await this.withTransaction(async (client) => {
+      await client.query(
+        `UPDATE group_matches
+         SET winner_id = NULL, sets_player1 = 0, sets_player2 = 0,
+             status = 'walkover', played_at = NOW(), set_scores = NULL, result_reason = 'double_no_show',
+             played_table_number = table_number, table_number = NULL
+         WHERE id_match = $1`,
+        [matchId]
+      );
+      await client.query(
+        `UPDATE group_standings SET played = played + 1, lost = lost + 1
+         WHERE id_group = $1 AND id_user = ANY($2::uuid[])`,
+        [groupId, [player1Id, player2Id]]
+      );
+      await this.creditLoserStats(client, player1Id, 0, 0);
+      await this.creditLoserStats(client, player2Id, 0, 0);
+      await this.rerankGroup(client, groupId);
+      await this.notifications.createForMany(
+        [player1Id, player2Id],
+        {
+          type: "match_result",
+          title: "Partido no jugado",
+          message: "Tu partido de grupo se cerró porque no se presentó ninguno de los dos.",
+          idTournament: tournamentId,
+          idCategory: categoryId,
+          idMatch: matchId,
+          matchType: "group",
+        },
+        client
+      );
+    });
+  }
+
+  async undoDoubleNoShow(params: {
+    matchId: string;
+    groupId: string;
+    player1Id: string;
+    player2Id: string;
+    tournamentId: string;
+    requestedBy: string;
+  }): Promise<void> {
+    const { matchId, groupId, player1Id, player2Id, tournamentId, requestedBy } = params;
+    await this.withTransaction(async (client) => {
+      await client.query(
+        `UPDATE group_matches
+         SET winner_id = NULL, sets_player1 = 0, sets_player2 = 0,
+             status = 'scheduled', played_at = NULL, set_scores = NULL, result_reason = NULL,
+             table_number = played_table_number, played_table_number = NULL
+         WHERE id_match = $1`,
+        [matchId]
+      );
+      await client.query(
+        `UPDATE group_standings SET played = played - 1, lost = lost - 1
+         WHERE id_group = $1 AND id_user = ANY($2::uuid[])`,
+        [groupId, [player1Id, player2Id]]
+      );
+      for (const participant of [player1Id, player2Id]) {
+        for (const id of await this.statTargets(client, participant)) {
+          await client.query(
+            `UPDATE player_stats
+             SET matches_played = matches_played - 1, matches_lost = matches_lost - 1, updated_at = NOW()
+             WHERE id_user = $1`,
+            [id]
+          );
+        }
+      }
+      await this.rerankGroup(client, groupId);
+      await this.activityLog.record(tournamentId, requestedBy, "match_result_undone", null, client);
+      await this.notifications.createForMany(
+        [player1Id, player2Id],
+        {
+          type: "match_result_corrected",
+          title: "Se corrigió el resultado de tu partido",
+          message: "El organizador borró el resultado cargado. El partido vuelve a quedar por jugar hasta que se registre el correcto.",
+          idTournament: tournamentId,
+          idMatch: matchId,
+          matchType: "group",
+        },
+        client
+      );
+    });
+  }
+
   async reverseTournamentStats(client: PoolClient, tournamentId: string): Promise<void> {
     const isRanked = await this.isTournamentRanked(client, tournamentId);
     const pointsToRevert = LEGACY_WIN_POINTS_ENABLED && isRanked ? RANKING_POINTS_PER_WIN : 0;
@@ -642,6 +757,25 @@ export class BracketsRepository {
                  sets_won = sets_won - $1, sets_lost = sets_lost - $2, updated_at = NOW()
              WHERE id_user = $3`,
             [winnerSetsAgainst, winnerSetsFor, id]
+          );
+        }
+      }
+    }
+
+    // No se presentó ninguno (088): los dos sumaron un partido perdido 0-0.
+    const doubleRes = await client.query<{ player1_id: string; player2_id: string }>(
+      `SELECT player1_id, player2_id FROM group_matches
+       WHERE id_tournament = $1 AND status = 'walkover' AND winner_id IS NULL AND result_reason = 'double_no_show'`,
+      [tournamentId]
+    );
+    for (const m of doubleRes.rows) {
+      for (const participant of [m.player1_id, m.player2_id]) {
+        for (const id of await this.statTargets(client, participant)) {
+          await client.query(
+            `UPDATE player_stats
+             SET matches_played = matches_played - 1, matches_lost = matches_lost - 1, updated_at = NOW()
+             WHERE id_user = $1`,
+            [id]
           );
         }
       }

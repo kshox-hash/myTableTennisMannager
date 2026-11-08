@@ -21,16 +21,21 @@ const setScoreSchema = z.object({
 
 export const matchResultSchema = z
   .object({
-    winner_id: z.string().uuid("winner_id inválido"),
+    // Falta solo con "double_no_show": no se presentó ninguno y no hay ganador.
+    winner_id: z.string().uuid("winner_id inválido").optional(),
     sets_player1: z.number().int().min(0).max(7),
     sets_player2: z.number().int().min(0).max(7),
     walkover: z.boolean().optional(),
     set_scores: z.array(setScoreSchema).max(7).optional(),
     // Motivo de un resultado no jugado (lesión, abandono, no se presentó,
-    // descalificación) — ver 060_match_result_reason.sql. Implica walkover.
-    result_reason: z.enum(["no_show", "injury", "retired", "disqualified"]).optional(),
+    // descalificación, no se presentó ninguno) — ver 060 y 088. Implica walkover.
+    result_reason: z.enum(["no_show", "injury", "retired", "disqualified", "double_no_show"]).optional(),
   })
-  .strict();
+  .strict()
+  .refine((r) => r.result_reason === "double_no_show" || !!r.winner_id, {
+    message: "Falta el ganador del partido",
+    path: ["winner_id"],
+  });
 
 // Marcador parcial "en vivo": los sets jugados hasta ahora, sin cerrar el
 // partido (no hay ganador todavía). El último set puede ir a medias.
