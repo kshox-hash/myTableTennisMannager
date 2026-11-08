@@ -211,8 +211,6 @@ export class TournamentPhaseController {
         return res.status(404).json({ ok: false, message: "Categoría no encontrada" });
       if (result.error === PHASE_ERRORS.WRONG_PHASE)
         return res.status(409).json({ ok: false, message: "La categoría no está en fase de grupos" });
-      if (result.error === PHASE_ERRORS.GROUPS_NOT_FINISHED)
-        return res.status(409).json({ ok: false, message: "Aún hay partidos de grupo sin resultado", code: "GROUPS_NOT_FINISHED" });
       if (result.error === "NOT_ENOUGH_QUALIFIERS")
         return res.status(400).json({ ok: false, message: "No hay suficientes clasificados para armar un cuadro" });
       if (result.error === "INVALID_BRACKET_SIZE")

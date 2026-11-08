@@ -87,6 +87,10 @@ function pointsFor(bestOfSets: number, pointsPerSet?: 11 | 21): 11 | 21 {
 export class BracketsService {
   constructor(private repo: BracketsRepository) {}
 
+  /** Llave adelantada: se llama cuando el último grupo con cupos termina
+   *  (la usa TournamentPhaseService para armar la Plata recién ahí). */
+  onAllGroupSlotsFilled?: (tournamentId: string, categoryId: string) => Promise<void>;
+
   // ─── GRUPOS ──────────────────────────────────────────────
 
   // Lo que elige el admin manda. Sin elección, Oro arma de a 4 (con 2
@@ -595,6 +599,7 @@ export class BracketsService {
     if (!(await this.repo.hasPendingGroupSlots(categoryId))) {
       const seeded = await this.loadSeededPlayers(tournamentId, categoryId);
       void notifyGroupOutcome(categoryId, seeded.map((p) => p.id_user));
+      await this.onAllGroupSlotsFilled?.(tournamentId, categoryId);
     }
   }
 

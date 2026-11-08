@@ -21,7 +21,18 @@ export class TournamentPhaseService {
     private bracketsService: BracketsService,
     private bracketsRepo: BracketsRepository = new BracketsRepository(),
     private adminRepo: AdminTournamentRepository = new AdminTournamentRepository()
-  ) {}
+  ) {
+    // Oro y Plata con la llave adelantada: la Plata se arma cuando termina el
+    // último grupo (antes no se sabe quién sale 3°), con el mismo formato de
+    // sets que la llave de Oro.
+    bracketsService.onAllGroupSlotsFilled = async (tournamentId, categoryId) => {
+      const gold = (await this.bracketsRepo.findBracket(tournamentId, categoryId)).find((m) => !m.is_bye);
+      await this.populateSilverBracket(categoryId, tournamentId, {
+        bestOfSets: (gold?.best_of_sets as 1 | 3 | 5 | 7 | undefined) ?? 5,
+        pointsPerSet: (gold?.points_per_set as 11 | 21 | undefined) ?? 11,
+      });
+    };
+  }
 
   // Formato "Oro y Plata": si `goldCategoryId` tiene una categoría Plata
   // vinculada (silver_category_id), la puebla con el 3° de cada
@@ -141,13 +152,16 @@ export class TournamentPhaseService {
     }
 
     // Si no es force, verificar que todos los partidos de grupo tengan
-    // resultado. Se puede adelantar la llave salvo con Oro y Plata: Plata se
-    // arma con quienes quedan fuera de cada grupo, y eso aún no se sabe.
-    const canAdvanceEarly = opts.early === true && !cat.silver_category_id;
-    if (!opts.force && !canAdvanceEarly) {
-      const done = await this.repo.allGroupMatchesFinished(id_category);
-      if (!done) return { ok: false as const, error: PHASE_ERRORS.GROUPS_NOT_FINISHED };
+    // resultado, salvo al adelantar la llave. Con Oro y Plata también se
+    // puede: la Plata se arma sola cuando termina el último grupo (ver
+    // onAllGroupSlotsFilled en el constructor).
+    const canAdvanceEarly = opts.early === true;
+    const groupsDone = await this.repo.allGroupMatchesFinished(id_category);
+    if (!opts.force && !canAdvanceEarly && !groupsDone) {
+      return { ok: false as const, error: PHASE_ERRORS.GROUPS_NOT_FINISHED };
     }
+    // Plata ahora solo si ya terminaron todos los grupos; si no, al terminar el último.
+    const silverNow = groupsDone || !canAdvanceEarly;
 
     const result = await this.bracketsService.generateBracket(
       id_tournament,
@@ -166,14 +180,14 @@ export class TournamentPhaseService {
       // existe" y dejar la pestaña Llave trabada.
       if (result.error === BRACKETS_ERRORS.BRACKET_ALREADY_EXISTS) {
         await this.repo.setPhase(id_category, "bracket");
-        await this.populateSilverBracket(id_category, id_tournament, opts);
+        if (silverNow) await this.populateSilverBracket(id_category, id_tournament, opts);
         return { ok: true as const, data: null };
       }
       return result;
     }
 
     await this.repo.setPhase(id_category, "bracket");
-    await this.populateSilverBracket(id_category, id_tournament, opts);
+    if (silverNow) await this.populateSilverBracket(id_category, id_tournament, opts);
     return { ok: true as const, data: result.data };
   }
 
@@ -186,12 +200,10 @@ export class TournamentPhaseService {
     if (!cat) return { ok: false as const, error: PHASE_ERRORS.CATEGORY_NOT_FOUND };
     if (cat.phase !== "groups") return { ok: false as const, error: PHASE_ERRORS.WRONG_PHASE };
 
+    // Con grupos en juego se previsualiza la llave adelantada (también con
+    // Oro y Plata: la Plata se arma al terminar el último grupo).
     let early = false;
-    if (!force) {
-      const done = await this.repo.allGroupMatchesFinished(id_category);
-      if (!done && cat.silver_category_id) return { ok: false as const, error: PHASE_ERRORS.GROUPS_NOT_FINISHED };
-      early = !done;
-    }
+    if (!force) early = !(await this.repo.allGroupMatchesFinished(id_category));
 
     return this.bracketsService.previewBracket(id_tournament, id_category, bracketSize, early);
   }
