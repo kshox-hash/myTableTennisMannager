@@ -13,6 +13,7 @@ import { saveTournamentSchedule } from "../admin/tournament_schedule";
 import { z } from "zod";
 import { RANKED_PLAYERS_CTE, RankingRepository } from "../../ranking/ranking_repository";
 import { requireTournamentOwnership } from "../../middlewares/require_tournament_ownership_middleware";
+import { closeAbsentMatchesAfterAttendance } from "../../brackets/absent_close";
 
 import {
   createTournamentSchema,
@@ -362,6 +363,11 @@ router.post(
       [req.params.id_tournament, p.data.id_user, p.data.id_category, p.data.attendance]
     );
     if ((r.rowCount ?? 0) === 0) return res.status(404).json({ ok: false, message: "No se encontró inscripción activa" });
+    // Con los grupos en juego, "No vino" puede ser lo último que faltaba para
+    // cerrar su grupo: sus partidos pasan a W.O. y clasifican los que jugaron.
+    if (p.data.attendance === "absent") {
+      await closeAbsentMatchesAfterAttendance(req.params.id_tournament, p.data.id_category, p.data.id_user);
+    }
     return res.json({ ok: true });
   })
 );

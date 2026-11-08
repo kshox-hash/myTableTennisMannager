@@ -452,7 +452,9 @@ export class BracketsService {
 
   async recordResult(
     matchId: string,
-    input: MatchResultInput
+    input: MatchResultInput,
+    // Interno: los W.O. que cierra closeAbsentMatches no vuelven a dispararlo.
+    opts: { fromAbsentClose?: boolean } = {}
   ): Promise<Result<{ recorded: true; tournamentId: string; categoryId: string }, BracketsError>> {
     const match = await this.repo.findMatch(matchId);
     if (!match) return fail(BRACKETS_ERRORS.MATCH_NOT_FOUND);
@@ -471,7 +473,7 @@ export class BracketsService {
         tournamentId: match.id_tournament,
         categoryId: match.id_category,
       });
-      await this.fillBracketSlotsIfGroupFinished(match.id_group, match.id_tournament, match.id_category);
+      await this.afterGroupResult(match.id_group, match.id_tournament, match.id_category, opts);
       return ok({ recorded: true, tournamentId: match.id_tournament, categoryId: match.id_category });
     }
 
@@ -521,8 +523,54 @@ export class BracketsService {
     });
 
     await this.repo.setResultReason("group", matchId, walkover ? result_reason ?? null : null);
-    await this.fillBracketSlotsIfGroupFinished(match.id_group, match.id_tournament, match.id_category);
+    await this.afterGroupResult(match.id_group, match.id_tournament, match.id_category, opts);
     return ok({ recorded: true, tournamentId: match.id_tournament, categoryId: match.id_category });
+  }
+
+  // Tras un resultado de grupo: si con eso solo quedan partidos de jugadores
+  // marcados "No vino", se cierran solos (y ese cierre ya llena la llave);
+  // si no, se revisa si el grupo terminó para llenar sus cupos.
+  private async afterGroupResult(groupId: string, tournamentId: string, categoryId: string, opts: { fromAbsentClose?: boolean }) {
+    const closed = opts.fromAbsentClose ? 0 : await this.closeAbsentMatches(groupId);
+    if (closed === 0) await this.fillBracketSlotsIfGroupFinished(groupId, tournamentId, categoryId);
+  }
+
+  /**
+   * Jugadores marcados "No vino" en la mesa de control: sus partidos se
+   * cierran solos recién cuando ya se jugó todo lo que queda entre los que
+   * sí vinieron (antes no, para poder reemplazarlos). Contra uno que vino es
+   * W.O. para el que vino; si faltaron los dos, "no se presentó ninguno".
+   * Así el grupo termina y clasifican los que jugaron. Devuelve cuántos cerró.
+   */
+  async closeAbsentMatches(groupId: string): Promise<number> {
+    const pending = await this.repo.pendingGroupMatchesWithAbsence(groupId);
+    if (pending.length === 0) return 0;
+    if (pending.some((m) => !m.p1_absent && !m.p2_absent)) return 0;
+
+    let closed = 0;
+    for (const m of pending) {
+      const need = Math.ceil(m.best_of_sets / 2);
+      const input: MatchResultInput =
+        m.p1_absent && m.p2_absent
+          ? { sets_player1: 0, sets_player2: 0, walkover: true, result_reason: "double_no_show" }
+          : {
+              winner_id: m.p1_absent ? m.player2_id : m.player1_id,
+              sets_player1: m.p1_absent ? 0 : need,
+              sets_player2: m.p1_absent ? need : 0,
+              walkover: true,
+              result_reason: "no_show",
+            };
+      const r = await this.recordResult(m.id_match, input, { fromAbsentClose: true });
+      if (r.ok) closed++;
+    }
+    return closed;
+  }
+
+  /** Al marcar "No vino" con los grupos en juego: por si con eso el grupo ya puede cerrarse. */
+  async closeAbsentMatchesForPlayer(tournamentId: string, categoryId: string, userId: string): Promise<number> {
+    if ((await this.repo.getCategoryPhase(categoryId)) !== "groups") return 0;
+    const groupId = await this.repo.findUserGroup(tournamentId, categoryId, userId);
+    return groupId ? this.closeAbsentMatches(groupId) : 0;
   }
 
   // Llave adelantada: al terminar el grupo, sus clasificados entran a la llave.

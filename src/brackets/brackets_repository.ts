@@ -597,6 +597,39 @@ export class BracketsRepository {
     await this.pool.query(`UPDATE ${table} SET result_reason = $1 WHERE id_match = $2`, [reason, matchId]);
   }
 
+  /** Grupo de un inscrito en la categoría (null si no está en ninguno). */
+  async findUserGroup(tournamentId: string, categoryId: string, userId: string): Promise<string | null> {
+    const r = await this.pool.query<{ id_group: string }>(
+      `SELECT cg.id_group FROM group_members gm
+         JOIN category_groups cg ON cg.id_group = gm.id_group
+        WHERE gm.id_user = $1 AND cg.id_tournament = $2 AND cg.id_category = $3
+        LIMIT 1`,
+      [userId, tournamentId, categoryId]
+    );
+    return r.rows[0]?.id_group ?? null;
+  }
+
+  /** Partidos por jugar del grupo, con quién de los dos está marcado "No vino". */
+  async pendingGroupMatchesWithAbsence(groupId: string): Promise<
+    Array<{ id_match: string; player1_id: string; player2_id: string; best_of_sets: number; p1_absent: boolean; p2_absent: boolean }>
+  > {
+    const r = await this.pool.query(
+      `SELECT gm.id_match, gm.player1_id, gm.player2_id, gm.best_of_sets,
+              COALESCE(e1.attendance = 'absent', false) AS p1_absent,
+              COALESCE(e2.attendance = 'absent', false) AS p2_absent
+         FROM group_matches gm
+         JOIN category_groups cg ON cg.id_group = gm.id_group
+         LEFT JOIN enrollments e1 ON e1.id_user = gm.player1_id AND e1.id_tournament = cg.id_tournament
+                                 AND e1.id_category = cg.id_category AND e1.status = 'active'
+         LEFT JOIN enrollments e2 ON e2.id_user = gm.player2_id AND e2.id_tournament = cg.id_tournament
+                                 AND e2.id_category = cg.id_category AND e2.status = 'active'
+        WHERE gm.id_group = $1 AND gm.status = 'scheduled'
+          AND gm.player1_id IS NOT NULL AND gm.player2_id IS NOT NULL`,
+      [groupId]
+    );
+    return r.rows;
+  }
+
   // Recalcula la posición dentro del grupo (mismo criterio que recordMatchResult).
   private async rerankGroup(client: PoolClient, groupId: string): Promise<void> {
     await client.query(
@@ -1221,6 +1254,12 @@ export class BracketsRepository {
       FROM ranked
       JOIN users u ON u.id_user = ranked.id_user
       WHERE rank_in_group <= qualifiers_per_group
+        -- "No vino" (mesa de control) nunca clasifica, aunque quede en puesto.
+        AND NOT EXISTS (
+          SELECT 1 FROM enrollments ea
+           WHERE ea.id_user = ranked.id_user AND ea.id_tournament = $1 AND ea.id_category = $2
+             AND ea.status = 'active' AND ea.attendance = 'absent'
+        )
       ORDER BY rank_in_group ASC, group_sort_order ASC;
     `;
 
@@ -1356,6 +1395,12 @@ export class BracketsRepository {
       FROM ranked
       JOIN users u ON u.id_user = ranked.id_user
       WHERE rank_in_group = qualifiers_per_group + 1
+        -- "No vino" (mesa de control) nunca clasifica, aunque quede en puesto.
+        AND NOT EXISTS (
+          SELECT 1 FROM enrollments ea
+           WHERE ea.id_user = ranked.id_user AND ea.id_tournament = $1 AND ea.id_category = $2
+             AND ea.status = 'active' AND ea.attendance = 'absent'
+        )
       ORDER BY rank_in_group ASC, group_sort_order ASC;
     `;
 
@@ -1398,7 +1443,13 @@ export class BracketsRepository {
        FROM ranked
        WHERE gs.id_group = ranked.id_group AND gs.id_user = ranked.id_user
          AND ranked.rank_in_group <= ranked.qualifiers_per_group
-         AND ($3::uuid[] IS NULL OR gs.id_group = ANY($3))`,
+         AND ($3::uuid[] IS NULL OR gs.id_group = ANY($3))
+         -- "No vino" (mesa de control) nunca clasifica, aunque quede en puesto.
+         AND NOT EXISTS (
+           SELECT 1 FROM enrollments ea
+            WHERE ea.id_user = gs.id_user AND ea.id_tournament = $1 AND ea.id_category = $2
+              AND ea.status = 'active' AND ea.attendance = 'absent'
+         )`,
       [tournamentId, categoryId, onlyGroups ?? null]
     );
   }

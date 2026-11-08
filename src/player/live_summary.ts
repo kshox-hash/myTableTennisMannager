@@ -87,11 +87,13 @@ export async function getLiveSummary(id_user: string): Promise<LiveSummary[]> {
           ORDER BY MAX(gm.played_at) DESC NULLS LAST`,
         [c.id_category]
       ),
-      pool().query<{ id_group: string; id_user: string; name: string; qualified_to_bracket: boolean }>(
-        `SELECT gs.id_group, gs.id_user, ${name("u")} AS name, gs.qualified_to_bracket
+      pool().query<{ id_group: string; id_user: string; name: string; qualified_to_bracket: boolean; absent: boolean }>(
+        `SELECT gs.id_group, gs.id_user, ${name("u")} AS name, gs.qualified_to_bracket,
+                COALESCE(e.attendance = 'absent', false) AS absent
            FROM group_standings gs
            JOIN category_groups cg ON cg.id_group = gs.id_group
            JOIN users u ON u.id_user = gs.id_user
+           LEFT JOIN enrollments e ON e.id_user = gs.id_user AND e.id_category = cg.id_category AND e.status = 'active'
           WHERE cg.id_category = $1
           ORDER BY gs.position NULLS LAST, gs.won DESC, (gs.sets_for - gs.sets_against) DESC`,
         [c.id_category]
@@ -145,12 +147,13 @@ export async function getLiveSummary(id_user: string): Promise<LiveSummary[]> {
       rows.forEach((s, i) => {
         // Pasan: los marcados al generar la llave; antes, los primeros
         // qualifiers_per_group del grupo terminado.
-        const passes = bracketDrawn ? s.qualified_to_bracket : i < g.qualifiers;
+        // El que no vino nunca pasa, aunque quede en puesto de clasificar.
+        const passes = bracketDrawn ? s.qualified_to_bracket : i < g.qualifiers && !s.absent;
         if (!passes) {
           // A Plata va el siguiente a los clasificados de cada grupo (misma
           // regla que loadGroupSilverPlayers). Se muestra apenas termina SU
           // grupo: la inscripción en Plata llega recién cuando terminan todos.
-          const toSilver = inSilver.has(s.id_user) || (!!c.silver_category_id && i === g.qualifiers);
+          const toSilver = inSilver.has(s.id_user) || (!!c.silver_category_id && i === g.qualifiers && !s.absent);
           const stage = toSilver ? "Pasó a Plata" : `Grupo ${g.group_name.replace(/^GR-?/i, "")}`;
           eliminated.push({ ...person(s.id_user, s.name), stage });
         } else if (!lostInBracket.has(s.id_user)) classified.push(person(s.id_user, s.name));
