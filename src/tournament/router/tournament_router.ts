@@ -132,6 +132,28 @@ const rankingChoiceSchema = z.object({
   id_ranking: z.string().uuid().optional(),
 });
 
+// Visibilidad del campeonato (público / interno / privado), editable en
+// cualquier momento — también con el campeonato empezado (antes había que
+// cambiarlo directo en la base).
+const visibilitySchema = z.object({ visibility: z.enum(["public", "internal", "private"]) });
+
+router.patch(
+  "/admin/tournaments/:id_tournament/visibility",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(),
+  validateBody(visibilitySchema),
+  asyncHandler(async (req, res) => {
+    const { visibility } = req.body as z.infer<typeof visibilitySchema>;
+    const r = await DB.getPool().query(
+      `UPDATE tournaments SET visibility = $2 WHERE id_tournament = $1 RETURNING visibility`,
+      [String(req.params.id_tournament), visibility]
+    );
+    if (!r.rows[0]) return res.status(404).json({ ok: false, message: "Campeonato no encontrado" });
+    return res.json({ ok: true, data: { visibility: r.rows[0].visibility } });
+  })
+);
+
 router.post(
   "/admin/tournaments/:id_tournament/ranking",
   authRequired,

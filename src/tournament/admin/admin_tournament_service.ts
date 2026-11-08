@@ -32,7 +32,9 @@ import {
 // LOCK_PUBLIC_TOURNAMENTS=false en las env vars. Cuando termine la fase
 // de prueba, sacar esto (y el comentario en AdminTournamentCreatePage.tsx
 // que lo menciona del lado del front).
-const PUBLIC_VISIBILITY_LOCKED = process.env.LOCK_PUBLIC_TOURNAMENTS !== "false";
+// 2026-11-08: en producción ya se permiten campeonatos públicos; la traba
+// queda solo si se pide explícitamente (LOCK_PUBLIC_TOURNAMENTS=true).
+const PUBLIC_VISIBILITY_LOCKED = process.env.LOCK_PUBLIC_TOURNAMENTS === "true";
 
 function lockPublicVisibility<T extends { visibility?: string }>(payload: T): T {
   if (PUBLIC_VISIBILITY_LOCKED && payload.visibility === "public") {
