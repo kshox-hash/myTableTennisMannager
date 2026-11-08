@@ -662,6 +662,69 @@ export class BracketsRepository {
     });
   }
 
+  /** ¿Algún jugador de este grupo ya jugó (o ganó por W.O.) un partido de la llave? */
+  async groupMembersPlayedInBracket(groupId: string): Promise<boolean> {
+    const r = await this.pool.query(
+      `SELECT 1
+         FROM bracket_matches bm
+         JOIN category_groups cg ON cg.id_category = bm.id_category AND cg.id_tournament = bm.id_tournament
+         JOIN group_members gm ON gm.id_group = cg.id_group
+        WHERE cg.id_group = $1 AND bm.status IN ('played', 'walkover') AND NOT bm.is_bye
+          AND gm.id_user IN (bm.player1_id, bm.player2_id)
+        LIMIT 1`,
+      [groupId]
+    );
+    return (r.rowCount ?? 0) > 0;
+  }
+
+  /** Jugadores de este grupo que están en la llave, con su siembra (la más baja = mejor puesto). */
+  async groupPlayersInBracket(groupId: string): Promise<Array<{ id_user: string; seed: number | null }>> {
+    const r = await this.pool.query<{ id_user: string; seed: number | null }>(
+      `SELECT gm.id_user, MIN(CASE WHEN bm.player1_id = gm.id_user THEN bm.seed1 ELSE bm.seed2 END) AS seed
+         FROM group_members gm
+         JOIN category_groups cg ON cg.id_group = gm.id_group
+         JOIN bracket_matches bm ON bm.id_category = cg.id_category AND bm.id_tournament = cg.id_tournament
+                                AND gm.id_user IN (bm.player1_id, bm.player2_id)
+        WHERE gm.id_group = $1
+        GROUP BY gm.id_user`,
+      [groupId]
+    );
+    return r.rows;
+  }
+
+  /**
+   * Cambia jugadores en la llave según [moves] (de → a), en todos los partidos
+   * que aún no se juegan (incluido un BYE y el partido al que ese BYE lo hizo
+   * avanzar), conservando cupo y siembra. Un solo UPDATE: así también sirve
+   * para dos que solo cambian de lugar entre sí (A→B y B→A).
+   */
+  async replaceInUnplayedBracket(tournamentId: string, categoryId: string, moves: Array<{ from: string; to: string }>): Promise<void> {
+    if (moves.length === 0) return;
+    const from = moves.map((m) => m.from);
+    const to = moves.map((m) => m.to);
+    const mapped = (col: string) =>
+      `COALESCE((SELECT m.t FROM unnest($3::uuid[], $4::uuid[]) AS m(f, t) WHERE m.f = ${col}), ${col})`;
+    await this.pool.query(
+      `UPDATE bracket_matches
+          SET player1_id = ${mapped("player1_id")},
+              player2_id = ${mapped("player2_id")},
+              winner_id  = CASE WHEN status = 'bye' THEN ${mapped("winner_id")} ELSE winner_id END,
+              referee_id = CASE WHEN referee_id = ANY($4::uuid[]) THEN NULL ELSE referee_id END
+        WHERE id_tournament = $1 AND id_category = $2 AND status IN ('pending', 'ready', 'bye')
+          AND (player1_id = ANY($3::uuid[]) OR player2_id = ANY($3::uuid[]))`,
+      [tournamentId, categoryId, from, to]
+    );
+  }
+
+  /** Vuelve a marcar quién clasificó en un grupo (después de corregir un resultado). */
+  async remarkGroupQualifiers(tournamentId: string, categoryId: string, groupId: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE group_standings SET qualified_to_bracket = FALSE, qualification_label = NULL WHERE id_group = $1`,
+      [groupId]
+    );
+    await this.markGroupQualifiers(tournamentId, categoryId, [groupId]);
+  }
+
   /** Grupo de un inscrito en la categoría (null si no está en ninguno). */
   async findUserGroup(tournamentId: string, categoryId: string, userId: string): Promise<string | null> {
     const r = await this.pool.query<{ id_group: string }>(

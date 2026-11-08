@@ -536,7 +536,41 @@ export class BracketsService {
   // si no, se revisa si el grupo terminó para llenar sus cupos.
   private async afterGroupResult(groupId: string, tournamentId: string, categoryId: string, opts: { fromAbsentClose?: boolean }) {
     const closed = opts.fromAbsentClose ? 0 : await this.closeAbsentMatches(groupId);
-    if (closed === 0) await this.fillBracketSlotsIfGroupFinished(groupId, tournamentId, categoryId);
+    if (closed === 0) {
+      await this.fillBracketSlotsIfGroupFinished(groupId, tournamentId, categoryId);
+      await this.syncGroupIntoBracket(groupId, tournamentId, categoryId);
+    }
+  }
+
+  /**
+   * Resultado de grupo corregido con la llave ya armada: si cambió quién
+   * clasifica (o en qué orden), la llave se ajusta en los partidos que aún no
+   * se juegan. El que ya no pasa sale y entra el que sí, en el mismo cupo: el
+   * mejor clasificado toma el cupo de mejor siembra.
+   */
+  private async syncGroupIntoBracket(groupId: string, tournamentId: string, categoryId: string): Promise<void> {
+    if ((await this.repo.getCategoryPhase(categoryId)) !== "bracket") return;
+    if (await this.repo.groupHasBracketSlots(groupId)) return; // llave adelantada: sus cupos se llenan solos
+    const qualifiers = (await this.repo.loadGroupQualifiers(tournamentId, categoryId))
+      .filter((q) => q.id_group === groupId)
+      .sort((a, b) => a.rank_in_group - b.rank_in_group);
+    if (qualifiers.length === 0 || !qualifiers[0].group_finished) return;
+
+    // Los cupos que este grupo tiene en la llave, del de mejor siembra al peor.
+    const slots = (await this.repo.groupPlayersInBracket(groupId)).sort(
+      (a, b) => (a.seed ?? 999) - (b.seed ?? 999)
+    );
+    const wanted = qualifiers.map((q) => q.id_user).slice(0, slots.length);
+    if (wanted.length < slots.length) return; // no hay suficientes clasificados: no se toca
+
+    // Cupo i debe tenerlo el clasificado i (si solo cambiaron de orden entre
+    // ellos, es un intercambio y va en el mismo paso).
+    const moves = slots
+      .map((slot, i) => ({ from: slot.id_user, to: wanted[i] }))
+      .filter((m) => m.from !== m.to);
+    if (moves.length === 0) return;
+    await this.repo.replaceInUnplayedBracket(tournamentId, categoryId, moves);
+    await this.repo.remarkGroupQualifiers(tournamentId, categoryId, groupId);
   }
 
   /**
@@ -622,7 +656,13 @@ export class BracketsService {
     const reopenRoundRobin =
       phase === "finished" && (await this.repo.isRoundRobinCategory(match.id_category));
     const hasSlots = phase === "bracket" && (await this.repo.groupHasBracketSlots(match.id_group));
-    if (phase !== "groups" && !reopenRoundRobin && !hasSlots) return fail(BRACKETS_ERRORS.CATEGORY_ALREADY_ADVANCED);
+    // Llave armada (sin cupos por grupo): se puede corregir mientras nadie de
+    // este grupo haya jugado en la llave. Al cargar el resultado correcto, la
+    // llave se ajusta sola (ver syncGroupIntoBracket).
+    const bracketUntouched =
+      phase === "bracket" && !hasSlots && !(await this.repo.groupMembersPlayedInBracket(match.id_group));
+    if (phase === "bracket" && !hasSlots && !bracketUntouched) return fail(BRACKETS_ERRORS.GROUP_LOCKED_BY_BRACKET);
+    if (phase !== "groups" && !reopenRoundRobin && !hasSlots && !bracketUntouched) return fail(BRACKETS_ERRORS.CATEGORY_ALREADY_ADVANCED);
     if (hasSlots && (await this.repo.groupSlotsPlayed(match.id_group))) return fail(BRACKETS_ERRORS.GROUP_LOCKED_BY_BRACKET);
 
     if (match.status === "walkover" && !match.winner_id) {
