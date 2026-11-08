@@ -147,7 +147,11 @@ export async function getLiveSummary(id_user: string): Promise<LiveSummary[]> {
         // qualifiers_per_group del grupo terminado.
         const passes = bracketDrawn ? s.qualified_to_bracket : i < g.qualifiers;
         if (!passes) {
-          const stage = inSilver.has(s.id_user) ? "Pasó a Plata" : `Grupo ${g.group_name.replace(/^GR-?/i, "")}`;
+          // A Plata va el siguiente a los clasificados de cada grupo (misma
+          // regla que loadGroupSilverPlayers). Se muestra apenas termina SU
+          // grupo: la inscripción en Plata llega recién cuando terminan todos.
+          const toSilver = inSilver.has(s.id_user) || (!!c.silver_category_id && i === g.qualifiers);
+          const stage = toSilver ? "Pasó a Plata" : `Grupo ${g.group_name.replace(/^GR-?/i, "")}`;
           eliminated.push({ ...person(s.id_user, s.name), stage });
         } else if (!lostInBracket.has(s.id_user)) classified.push(person(s.id_user, s.name));
       });

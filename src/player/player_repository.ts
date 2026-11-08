@@ -292,8 +292,9 @@ export class PlayerRepository {
     const ids = await this.myIds(id_user);
     const [phase, myGroup, myGroupMatches, myBracketMatches] = await Promise.all([
       // Fase actual
-      this.pool.query<{ phase: string; competition_format: string; finished_early: boolean; qualifiers_per_group: number | null }>(
+      this.pool.query<{ phase: string; competition_format: string; finished_early: boolean; qualifiers_per_group: number | null; has_silver: boolean }>(
         `SELECT COALESCE(phase, 'enrollment') AS phase, qualifiers_per_group,
+                silver_category_id IS NOT NULL AS has_silver,
                 COALESCE(competition_format, 'groups_bracket') AS competition_format,
                 COALESCE(finished_early, false) AS finished_early
          FROM tournament_categories WHERE id_category = $1`,
@@ -394,7 +395,9 @@ export class PlayerRepository {
       finished_early:     phase.rows[0]?.finished_early ?? false,
       // Cuántos de cada grupo pasan a la llave (para "Clasifican los 2 primeros").
       qualifiers_per_group: phase.rows[0]?.qualifiers_per_group ?? null,
-      my_group:           myGroup.rows[0] ?? null,
+      // Oro y Plata: el siguiente de cada grupo (puesto N+1) pasa a Plata.
+      has_silver:         phase.rows[0]?.has_silver ?? false,
+      my_group:          myGroup.rows[0] ?? null,
       standings:          this.asMe(allStandings, ids, id_user),
       my_group_matches:   this.asMe(myGroupMatches.rows, ids, id_user),
       my_bracket_matches: this.asMe(myBracketMatches.rows, ids, id_user),
