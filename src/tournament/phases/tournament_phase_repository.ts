@@ -99,7 +99,7 @@ export class TournamentPhaseRepository {
       `SELECT
          COUNT(*)                                    AS total,
          -- Cerrado = jugado o W.O. (un W.O. doble no tiene ganador, igual terminó).
-         COUNT(*) FILTER (WHERE status IN ('played', 'walkover')) AS finished
+         COUNT(*) FILTER (WHERE gm.status IN ('played', 'walkover')) AS finished
        FROM group_matches gm
        JOIN category_groups cg ON cg.id_group = gm.id_group
        WHERE cg.id_category = $1`,
