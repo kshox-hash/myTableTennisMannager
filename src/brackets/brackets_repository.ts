@@ -1260,6 +1260,18 @@ export class BracketsRepository {
            WHERE ea.id_user = ranked.id_user AND ea.id_tournament = $1 AND ea.id_category = $2
              AND ea.status = 'active' AND ea.attendance = 'absent'
         )
+        -- Tampoco el que perdió TODOS sus partidos del grupo por "no se presentó"
+        -- (o W.O. doble): no vino, aunque en Inscripciones siga "Presente".
+        AND NOT (
+          EXISTS (SELECT 1 FROM group_matches x
+                   WHERE x.id_group = ranked.id_group AND (x.player1_id = ranked.id_user OR x.player2_id = ranked.id_user))
+          AND NOT EXISTS (
+            SELECT 1 FROM group_matches x
+             WHERE x.id_group = ranked.id_group AND (x.player1_id = ranked.id_user OR x.player2_id = ranked.id_user)
+               AND NOT (x.status = 'walkover' AND (COALESCE(x.result_reason, '') = 'double_no_show'
+                     OR (COALESCE(x.result_reason, '') = 'no_show' AND x.winner_id IS DISTINCT FROM ranked.id_user)))
+          )
+        )
       ORDER BY rank_in_group ASC, group_sort_order ASC;
     `;
 
@@ -1377,6 +1389,7 @@ export class BracketsRepository {
       WITH ranked AS (
         SELECT
           gs.id_user,
+          gs.id_group,
           cg.group_name,
           ROW_NUMBER() OVER (
             PARTITION BY gs.id_group
@@ -1400,6 +1413,18 @@ export class BracketsRepository {
           SELECT 1 FROM enrollments ea
            WHERE ea.id_user = ranked.id_user AND ea.id_tournament = $1 AND ea.id_category = $2
              AND ea.status = 'active' AND ea.attendance = 'absent'
+        )
+        -- Tampoco el que perdió TODOS sus partidos del grupo por "no se presentó"
+        -- (o W.O. doble): no vino, aunque en Inscripciones siga "Presente".
+        AND NOT (
+          EXISTS (SELECT 1 FROM group_matches x
+                   WHERE x.id_group = ranked.id_group AND (x.player1_id = ranked.id_user OR x.player2_id = ranked.id_user))
+          AND NOT EXISTS (
+            SELECT 1 FROM group_matches x
+             WHERE x.id_group = ranked.id_group AND (x.player1_id = ranked.id_user OR x.player2_id = ranked.id_user)
+               AND NOT (x.status = 'walkover' AND (COALESCE(x.result_reason, '') = 'double_no_show'
+                     OR (COALESCE(x.result_reason, '') = 'no_show' AND x.winner_id IS DISTINCT FROM ranked.id_user)))
+          )
         )
       ORDER BY rank_in_group ASC, group_sort_order ASC;
     `;
@@ -1449,6 +1474,18 @@ export class BracketsRepository {
            SELECT 1 FROM enrollments ea
             WHERE ea.id_user = gs.id_user AND ea.id_tournament = $1 AND ea.id_category = $2
               AND ea.status = 'active' AND ea.attendance = 'absent'
+         )
+         -- Tampoco el que perdió TODOS sus partidos del grupo por "no se presentó"
+         -- (o W.O. doble): no vino, aunque en Inscripciones siga "Presente".
+         AND NOT (
+           EXISTS (SELECT 1 FROM group_matches x
+                    WHERE x.id_group = gs.id_group AND (x.player1_id = gs.id_user OR x.player2_id = gs.id_user))
+           AND NOT EXISTS (
+             SELECT 1 FROM group_matches x
+              WHERE x.id_group = gs.id_group AND (x.player1_id = gs.id_user OR x.player2_id = gs.id_user)
+                AND NOT (x.status = 'walkover' AND (COALESCE(x.result_reason, '') = 'double_no_show'
+                      OR (COALESCE(x.result_reason, '') = 'no_show' AND x.winner_id IS DISTINCT FROM gs.id_user)))
+           )
          )`,
       [tournamentId, categoryId, onlyGroups ?? null]
     );

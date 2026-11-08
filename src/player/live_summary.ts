@@ -89,7 +89,17 @@ export async function getLiveSummary(id_user: string): Promise<LiveSummary[]> {
       ),
       pool().query<{ id_group: string; id_user: string; name: string; qualified_to_bracket: boolean; absent: boolean }>(
         `SELECT gs.id_group, gs.id_user, ${name("u")} AS name, gs.qualified_to_bracket,
-                COALESCE(e.attendance = 'absent', false) AS absent
+                (COALESCE(e.attendance = 'absent', false) OR (
+                  -- Perdió todos sus partidos del grupo por "no se presentó": no vino.
+                  EXISTS (SELECT 1 FROM group_matches x
+                           WHERE x.id_group = gs.id_group AND (x.player1_id = gs.id_user OR x.player2_id = gs.id_user))
+                  AND NOT EXISTS (
+                    SELECT 1 FROM group_matches x
+                     WHERE x.id_group = gs.id_group AND (x.player1_id = gs.id_user OR x.player2_id = gs.id_user)
+                       AND NOT (x.status = 'walkover' AND (COALESCE(x.result_reason, '') = 'double_no_show'
+                             OR (COALESCE(x.result_reason, '') = 'no_show' AND x.winner_id IS DISTINCT FROM gs.id_user)))
+                  )
+                )) AS absent
            FROM group_standings gs
            JOIN category_groups cg ON cg.id_group = gs.id_group
            JOIN users u ON u.id_user = gs.id_user
