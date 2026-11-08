@@ -364,6 +364,28 @@ router.post(
 );
 
 // Anotar/limpiar el árbitro sugerido de un partido de llave (no es oficial)
+// Cambiar el formato de UN partido de llave pendiente (p. ej. la final al
+// mejor de 5 o 7 sin tocar el resto).
+// PATCH /api/v1/bracket/bracket-matches/:id_match/best-of
+router.patch(
+  "/bracket-matches/:id_match/best-of",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(resolveTournamentFromBracketMatch),
+  validateBody(setMatchesBestOfSchema),
+  asyncHandler(async (req, res) => {
+    const { best_of_sets } = req.body as { best_of_sets: 3 | 5 | 7 };
+    const r = await DB.getPool().query(
+      `UPDATE bracket_matches SET best_of_sets = $2, points_per_set = 11
+        WHERE id_match = $1 AND status NOT IN ('played', 'walkover', 'bye')
+        RETURNING best_of_sets`,
+      [String(req.params.id_match), best_of_sets]
+    );
+    if (!r.rowCount) return res.status(409).json({ ok: false, message: "Ese partido ya se jugó o no existe" });
+    return res.json({ ok: true, data: { best_of_sets: r.rows[0].best_of_sets } });
+  })
+);
+
 // PATCH /api/v1/bracket/bracket-matches/:id_match/referee
 router.patch(
   "/bracket-matches/:id_match/referee",
