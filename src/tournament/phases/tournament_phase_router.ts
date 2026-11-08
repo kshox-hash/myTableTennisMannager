@@ -84,7 +84,11 @@ router.post(
   requireRole("admin"),
   requireTournamentOwnership(),
   asyncHandler(async (req, res) => {
-    const r = await phaseService.buildSilverNow(String(req.params.id_category), String(req.params.id_tournament));
+    const r = await phaseService.buildSilverNow(
+      String(req.params.id_category),
+      String(req.params.id_tournament),
+      req.body?.rebuild === true
+    );
     if (!r.ok) return res.status(409).json({ ok: false, message: r.message });
     return res.json({ ok: true, data: { players: r.players } });
   })

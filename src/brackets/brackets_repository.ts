@@ -725,6 +725,19 @@ export class BracketsRepository {
     await this.markGroupQualifiers(tournamentId, categoryId, [groupId]);
   }
 
+  async getSilverCategoryId(categoryId: string): Promise<string | null> {
+    const r = await this.pool.query<{ silver_category_id: string | null }>(
+      `SELECT silver_category_id FROM tournament_categories WHERE id_category = $1`,
+      [categoryId]
+    );
+    return r.rows[0]?.silver_category_id ?? null;
+  }
+
+  async groupMemberIds(groupId: string): Promise<string[]> {
+    const r = await this.pool.query<{ id_user: string }>(`SELECT id_user FROM group_members WHERE id_group = $1`, [groupId]);
+    return r.rows.map((x) => x.id_user);
+  }
+
   /** Grupo de un inscrito en la categoría (null si no está en ninguno). */
   async findUserGroup(tournamentId: string, categoryId: string, userId: string): Promise<string | null> {
     const r = await this.pool.query<{ id_group: string }>(
@@ -1321,6 +1334,321 @@ export class BracketsRepository {
 
 
       return { undone: true };
+    });
+  }
+
+  /**
+   * "Cambiar ganador": el resultado de un partido de llave se cargó al revés.
+   * El otro jugador pasa a ser el ganador (el marcador se da vuelta) y toma
+   * el lugar del que figuraba como ganador en los partidos siguientes, con
+   * los resultados que ya tengan (en la mesa los jugó él). Las estadísticas
+   * de los dos se corrigen partido por partido.
+   */
+  async fixBracketWinner(matchId: string, requestedBy: string): Promise<
+    | { fixed: true; tournamentId: string; categoryId: string; newWinnerId: string; oldWinnerId: string }
+    | { fixed: false; error: "MATCH_NOT_FOUND" | "MATCH_NOT_PLAYED" }
+  > {
+    return this.withTransaction(async (client) => {
+      const r = await client.query<{
+        id_tournament: string; id_category: string; round: number; status: string;
+        player1_id: string | null; player2_id: string | null; winner_id: string | null;
+        sets_player1: number; sets_player2: number;
+      }>(
+        `SELECT id_tournament, id_category, round, status, player1_id, player2_id, winner_id, sets_player1, sets_player2
+           FROM bracket_matches WHERE id_match = $1 FOR UPDATE`,
+        [matchId]
+      );
+      const m = r.rows[0];
+      if (!m) return { fixed: false as const, error: "MATCH_NOT_FOUND" as const };
+      if ((m.status !== "played" && m.status !== "walkover") || !m.winner_id || !m.player1_id || !m.player2_id) {
+        return { fixed: false as const, error: "MATCH_NOT_PLAYED" as const };
+      }
+      const oldW = m.winner_id;
+      const newW = oldW === m.player1_id ? m.player2_id : m.player1_id;
+      const isRanked = await this.isTournamentRanked(client, m.id_tournament);
+      const pts = LEGACY_WIN_POINTS_ENABLED && isRanked ? RANKING_POINTS_PER_WIN : 0;
+
+      const unWin = async (who: string, setsFor: number, setsAgainst: number) => {
+        for (const id of await this.statTargets(client, who)) {
+          await client.query(
+            `UPDATE player_stats SET matches_played = matches_played - 1, matches_won = matches_won - 1,
+                    sets_won = sets_won - $1, sets_lost = sets_lost - $2, ranking_points = ranking_points - $3, updated_at = NOW()
+              WHERE id_user = $4`,
+            [setsFor, setsAgainst, pts, id]
+          );
+        }
+      };
+      const unLose = async (who: string, setsFor: number, setsAgainst: number) => {
+        for (const id of await this.statTargets(client, who)) {
+          await client.query(
+            `UPDATE player_stats SET matches_played = matches_played - 1, matches_lost = matches_lost - 1,
+                    sets_won = sets_won - $1, sets_lost = sets_lost - $2, updated_at = NOW()
+              WHERE id_user = $3`,
+            [setsFor, setsAgainst, id]
+          );
+        }
+      };
+
+      // 1) Este partido: se da vuelta (los sets de cada uno pasan al otro).
+      const wFor = oldW === m.player1_id ? m.sets_player1 : m.sets_player2;
+      const wAgainst = oldW === m.player1_id ? m.sets_player2 : m.sets_player1;
+      await unWin(oldW, wFor, wAgainst);
+      await unLose(newW, wAgainst, wFor);
+      await this.creditWinnerStats(client, newW, wFor, wAgainst, pts);
+      await this.creditLoserStats(client, oldW, wAgainst, wFor);
+      await client.query(
+        `UPDATE bracket_matches
+            SET winner_id = $2, sets_player1 = sets_player2, sets_player2 = sets_player1,
+                set_scores = CASE WHEN set_scores IS NULL THEN NULL ELSE (
+                  SELECT COALESCE(jsonb_agg(jsonb_build_object('p1', e->'p2', 'p2', e->'p1') ORDER BY i), '[]'::jsonb)
+                    FROM jsonb_array_elements(set_scores) WITH ORDINALITY AS t(e, i)
+                ) END
+          WHERE id_match = $1`,
+        [matchId, newW]
+      );
+
+      // 2) Partidos siguientes donde figuraba el ganador equivocado: sus
+      //    resultados ya cargados pasan a ser del ganador correcto.
+      const later = await client.query<{
+        id_match: string; status: string; player1_id: string | null; player2_id: string | null;
+        winner_id: string | null; sets_player1: number; sets_player2: number;
+      }>(
+        `SELECT id_match, status, player1_id, player2_id, winner_id, sets_player1, sets_player2
+           FROM bracket_matches
+          WHERE id_tournament = $1 AND id_category = $2 AND round > $3 AND $4 IN (player1_id, player2_id)
+          FOR UPDATE`,
+        [m.id_tournament, m.id_category, m.round, oldW]
+      );
+      for (const x of later.rows) {
+        if ((x.status === "played" || x.status === "walkover") && x.winner_id) {
+          const mine = oldW === x.player1_id ? x.sets_player1 : x.sets_player2;
+          const theirs = oldW === x.player1_id ? x.sets_player2 : x.sets_player1;
+          if (x.winner_id === oldW) {
+            await unWin(oldW, mine, theirs);
+            await this.creditWinnerStats(client, newW, mine, theirs, pts);
+          } else {
+            await unLose(oldW, mine, theirs);
+            await this.creditLoserStats(client, newW, mine, theirs);
+          }
+        }
+      }
+      await client.query(
+        `UPDATE bracket_matches
+            SET player1_id = CASE WHEN player1_id = $4 THEN $5::uuid ELSE player1_id END,
+                player2_id = CASE WHEN player2_id = $4 THEN $5::uuid ELSE player2_id END,
+                winner_id  = CASE WHEN winner_id  = $4 THEN $5::uuid ELSE winner_id END,
+                referee_id = CASE WHEN referee_id = $5 THEN NULL ELSE referee_id END
+          WHERE id_tournament = $1 AND id_category = $2 AND round > $3 AND $4 IN (player1_id, player2_id)`,
+        [m.id_tournament, m.id_category, m.round, oldW, newW]
+      );
+
+      await this.activityLog.record(m.id_tournament, requestedBy, "bracket_result_undone", null, client);
+      await this.notifications.createForMany(
+        [oldW, newW],
+        {
+          type: "match_result_corrected",
+          title: "Se corrigió el resultado de tu partido",
+          message: "El organizador corrigió quién ganó tu partido de llave. Revisa el cuadro.",
+          idTournament: m.id_tournament,
+          idMatch: matchId,
+          matchType: "bracket",
+        },
+        client
+      );
+      return { fixed: true as const, tournamentId: m.id_tournament, categoryId: m.id_category, newWinnerId: newW, oldWinnerId: oldW };
+    });
+  }
+
+  private async statsUnWin(client: PoolClient, who: string, setsFor: number, setsAgainst: number, pts: number) {
+    for (const id of await this.statTargets(client, who)) {
+      await client.query(
+        `UPDATE player_stats SET matches_played = matches_played - 1, matches_won = matches_won - 1,
+                sets_won = sets_won - $1, sets_lost = sets_lost - $2, ranking_points = ranking_points - $3, updated_at = NOW()
+          WHERE id_user = $4`,
+        [setsFor, setsAgainst, pts, id]
+      );
+    }
+  }
+
+  private async statsUnLose(client: PoolClient, who: string, setsFor: number, setsAgainst: number) {
+    for (const id of await this.statTargets(client, who)) {
+      await client.query(
+        `UPDATE player_stats SET matches_played = matches_played - 1, matches_lost = matches_lost - 1,
+                sets_won = sets_won - $1, sets_lost = sets_lost - $2, updated_at = NOW()
+          WHERE id_user = $3`,
+        [setsFor, setsAgainst, id]
+      );
+    }
+  }
+
+  /**
+   * "Cambiar ganador" de un partido de grupo cargado al revés: el otro pasa a
+   * ganar (marcador al revés), la tabla del grupo y las estadísticas se
+   * corrigen. Lo que eso cambie en la llave lo arregla el servicio.
+   */
+  async fixGroupWinner(matchId: string): Promise<
+    | { fixed: true; groupId: string; tournamentId: string; categoryId: string; oldWinnerId: string; newWinnerId: string }
+    | { fixed: false; error: "MATCH_NOT_FOUND" | "MATCH_NOT_PLAYED" }
+  > {
+    return this.withTransaction(async (client) => {
+      const r = await client.query<{
+        id_group: string; id_tournament: string; id_category: string; status: string;
+        player1_id: string | null; player2_id: string | null; winner_id: string | null;
+        sets_player1: number; sets_player2: number; set_scores: Array<{ p1: number; p2: number }> | null;
+      }>(
+        `SELECT gm.id_group, cg.id_tournament, cg.id_category, gm.status, gm.player1_id, gm.player2_id, gm.winner_id,
+                gm.sets_player1, gm.sets_player2, gm.set_scores
+           FROM group_matches gm JOIN category_groups cg ON cg.id_group = gm.id_group
+          WHERE gm.id_match = $1 FOR UPDATE OF gm`,
+        [matchId]
+      );
+      const m = r.rows[0];
+      if (!m) return { fixed: false as const, error: "MATCH_NOT_FOUND" as const };
+      if ((m.status !== "played" && m.status !== "walkover") || !m.winner_id || !m.player1_id || !m.player2_id) {
+        return { fixed: false as const, error: "MATCH_NOT_PLAYED" as const };
+      }
+      const oldW = m.winner_id;
+      const newW = oldW === m.player1_id ? m.player2_id : m.player1_id;
+      const oldIsP1 = oldW === m.player1_id;
+      const wFor = oldIsP1 ? m.sets_player1 : m.sets_player2;
+      const wAg = oldIsP1 ? m.sets_player2 : m.sets_player1;
+      // Puntos reales jugados (los W.O. no suman puntos).
+      const sets = m.status === "walkover" ? [] : m.set_scores ?? [];
+      const p1Pts = sets.reduce((a, x) => a + (x.p1 ?? 0), 0);
+      const p2Pts = sets.reduce((a, x) => a + (x.p2 ?? 0), 0);
+      const wPts = oldIsP1 ? p1Pts : p2Pts;
+      const lPts = oldIsP1 ? p2Pts : p1Pts;
+
+      // Tabla del grupo: lo que sumó cada uno pasa a ser lo del otro.
+      await client.query(
+        `UPDATE group_standings
+            SET won = won - 1, lost = lost + 1,
+                sets_for = sets_for + $3 - $2, sets_against = sets_against + $2 - $3,
+                points_for = points_for + $5 - $4, points_against = points_against + $4 - $5
+          WHERE id_group = $1 AND id_user = $6`,
+        [m.id_group, wFor, wAg, wPts, lPts, oldW]
+      );
+      await client.query(
+        `UPDATE group_standings
+            SET won = won + 1, lost = lost - 1,
+                sets_for = sets_for + $2 - $3, sets_against = sets_against + $3 - $2,
+                points_for = points_for + $4 - $5, points_against = points_against + $5 - $4
+          WHERE id_group = $1 AND id_user = $6`,
+        [m.id_group, wFor, wAg, wPts, lPts, newW]
+      );
+      await this.rerankGroup(client, m.id_group);
+
+      const isRanked = await this.isTournamentRanked(client, m.id_tournament);
+      const pts = LEGACY_WIN_POINTS_ENABLED && isRanked ? RANKING_POINTS_PER_WIN : 0;
+      await this.statsUnWin(client, oldW, wFor, wAg, pts);
+      await this.statsUnLose(client, newW, wAg, wFor);
+      await this.creditWinnerStats(client, newW, wFor, wAg, pts);
+      await this.creditLoserStats(client, oldW, wAg, wFor);
+
+      await client.query(
+        `UPDATE group_matches
+            SET winner_id = $2, sets_player1 = sets_player2, sets_player2 = sets_player1,
+                set_scores = CASE WHEN set_scores IS NULL THEN NULL ELSE (
+                  SELECT COALESCE(jsonb_agg(jsonb_build_object('p1', e->'p2', 'p2', e->'p1') ORDER BY i), '[]'::jsonb)
+                    FROM jsonb_array_elements(set_scores) WITH ORDINALITY AS t(e, i)
+                ) END
+          WHERE id_match = $1`,
+        [matchId, newW]
+      );
+      await this.notifications.createForMany(
+        [oldW, newW],
+        {
+          type: "match_result_corrected",
+          title: "Se corrigió el resultado de tu partido",
+          message: "El organizador corrigió quién ganó tu partido de grupo.",
+          idTournament: m.id_tournament,
+          idCategory: m.id_category,
+          idMatch: matchId,
+          matchType: "group",
+        },
+        client
+      );
+      return {
+        fixed: true as const, groupId: m.id_group, tournamentId: m.id_tournament, categoryId: m.id_category,
+        oldWinnerId: oldW, newWinnerId: newW,
+      };
+    });
+  }
+
+  /** Jugadores de un grupo que están en la llave de [bracketCategoryId] (puede ser la Plata), con su siembra. */
+  async groupPlayersInCategoryBracket(groupId: string, bracketCategoryId: string): Promise<Array<{ id_user: string; seed: number | null }>> {
+    const r = await this.pool.query<{ id_user: string; seed: number | null }>(
+      `SELECT gm.id_user, MIN(CASE WHEN bm.player1_id = gm.id_user THEN bm.seed1 ELSE bm.seed2 END) AS seed
+         FROM group_members gm
+         JOIN bracket_matches bm ON bm.id_category = $2 AND gm.id_user IN (bm.player1_id, bm.player2_id)
+        WHERE gm.id_group = $1
+        GROUP BY gm.id_user`,
+      [groupId, bracketCategoryId]
+    );
+    return r.rows;
+  }
+
+  /**
+   * Pone a [inUser] en lugar de [outUser] en TODA la llave de una categoría,
+   * con los resultados ya cargados (en la mesa los jugó [inUser]): las
+   * estadísticas de esos partidos pasan de uno al otro. También su
+   * inscripción en esa categoría (para la Plata, que se arma por inscripción).
+   */
+  async transferBracketPlayer(tournamentId: string, categoryId: string, outUser: string, inUser: string): Promise<void> {
+    await this.withTransaction(async (client) => {
+      const isRanked = await this.isTournamentRanked(client, tournamentId);
+      const pts = LEGACY_WIN_POINTS_ENABLED && isRanked ? RANKING_POINTS_PER_WIN : 0;
+      const rows = await client.query<{
+        status: string; player1_id: string | null; winner_id: string | null; sets_player1: number; sets_player2: number; is_bye: boolean;
+      }>(
+        `SELECT status, player1_id, winner_id, sets_player1, sets_player2, is_bye
+           FROM bracket_matches
+          WHERE id_tournament = $1 AND id_category = $2 AND $3 IN (player1_id, player2_id)
+          FOR UPDATE`,
+        [tournamentId, categoryId, outUser]
+      );
+      for (const x of rows.rows) {
+        if (x.is_bye || (x.status !== "played" && x.status !== "walkover") || !x.winner_id) continue;
+        const mine = x.player1_id === outUser ? x.sets_player1 : x.sets_player2;
+        const theirs = x.player1_id === outUser ? x.sets_player2 : x.sets_player1;
+        if (x.winner_id === outUser) {
+          await this.statsUnWin(client, outUser, mine, theirs, pts);
+          await this.creditWinnerStats(client, inUser, mine, theirs, pts);
+        } else {
+          await this.statsUnLose(client, outUser, mine, theirs);
+          await this.creditLoserStats(client, inUser, mine, theirs);
+        }
+      }
+      await client.query(
+        `UPDATE bracket_matches
+            SET player1_id = CASE WHEN player1_id = $3 THEN $4::uuid ELSE player1_id END,
+                player2_id = CASE WHEN player2_id = $3 THEN $4::uuid ELSE player2_id END,
+                winner_id  = CASE WHEN winner_id  = $3 THEN $4::uuid ELSE winner_id END,
+                referee_id = CASE WHEN referee_id = $4 THEN NULL ELSE referee_id END
+          WHERE id_tournament = $1 AND id_category = $2 AND $3 IN (player1_id, player2_id)`,
+        [tournamentId, categoryId, outUser, inUser]
+      );
+      // Inscripción en esa categoría: el que entra queda activo y el que sale
+      // no (solo si esta categoría se arma por inscripción directa, como la
+      // Plata; en el Oro los dos siguen inscritos porque jugaron el grupo).
+      const silver = await client.query(
+        `SELECT 1 FROM tournament_categories WHERE silver_category_id = $1 LIMIT 1`,
+        [categoryId]
+      );
+      if ((silver.rowCount ?? 0) > 0) {
+        await client.query(
+          `UPDATE enrollments SET status = 'cancelled'
+            WHERE id_tournament = $1 AND id_category = $2 AND id_user = $3 AND status = 'active'`,
+          [tournamentId, categoryId, outUser]
+        );
+        await client.query(
+          `INSERT INTO enrollments (id_user, id_tournament, id_category, status, attendance, checked_in)
+           VALUES ($3, $1, $2, 'active', 'present', true)
+           ON CONFLICT (id_user, id_tournament, id_category)
+           DO UPDATE SET status = 'active', attendance = 'present', checked_in = true`,
+          [tournamentId, categoryId, inUser]
+        );
+      }
     });
   }
 

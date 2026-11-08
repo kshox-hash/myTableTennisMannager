@@ -385,6 +385,42 @@ router.post(
   asyncHandler(controller.undoBracketResult)
 );
 
+// "Cambiar ganador" de un partido de GRUPO cargado al revés: corrige el grupo
+// y lleva el cambio a la llave de Oro y a la de Plata si ya están armadas.
+// POST /api/v1/bracket/matches/:id_match/fix-winner
+router.post(
+  "/matches/:id_match/fix-winner",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(resolveTournamentFromGroupMatch),
+  asyncHandler(async (req, res) => {
+    const r = await service.fixGroupWinner(String(req.params.id_match));
+    if (!r.ok) {
+      const msg = r.error === "MATCH_NOT_FOUND" ? "Partido no encontrado" : "Este partido todavía no tiene resultado cargado";
+      return res.status(r.error === "MATCH_NOT_FOUND" ? 404 : 409).json({ ok: false, message: msg });
+    }
+    return res.json({ ok: true, data: r.data });
+  })
+);
+
+// "Cambiar ganador" de un partido de llave cargado al revés: el otro pasa a
+// ganador y toma su lugar (con sus resultados) en los partidos siguientes.
+// POST /api/v1/bracket/bracket-matches/:id_match/fix-winner
+router.post(
+  "/bracket-matches/:id_match/fix-winner",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(resolveTournamentFromBracketMatch),
+  asyncHandler(async (req, res) => {
+    const r = await repo.fixBracketWinner(String(req.params.id_match), req.user!.id_user);
+    if (!r.fixed) {
+      const msg = r.error === "MATCH_NOT_FOUND" ? "Partido no encontrado" : "Este partido todavía no tiene resultado cargado";
+      return res.status(r.error === "MATCH_NOT_FOUND" ? 404 : 409).json({ ok: false, message: msg });
+    }
+    return res.json({ ok: true, data: { new_winner_id: r.newWinnerId } });
+  })
+);
+
 // ─── MARCADOR EN VIVO ────────────────────────────────────────────────────────
 // Guarda los sets jugados hasta ahora para que jugadores y público vean el
 // partido "en vivo". No cambia el estado ni el ganador: el resultado final

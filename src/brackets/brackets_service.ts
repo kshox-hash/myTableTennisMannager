@@ -604,6 +604,54 @@ export class BracketsService {
     return closed;
   }
 
+  /**
+   * "Cambiar ganador" de un partido de grupo (resultado cargado al revés).
+   * Corrige el grupo y, si la llave ya está armada, lleva el cambio a la
+   * llave de Oro y a la de Plata: quien deja de clasificar sale y entra el
+   * que ahora clasifica, con los resultados que ya estén cargados.
+   */
+  async fixGroupWinner(matchId: string): Promise<Result<{ fixed: true; tournamentId: string; categoryId: string }, BracketsError>> {
+    const r = await this.repo.fixGroupWinner(matchId);
+    if (!r.fixed) return fail(r.error === "MATCH_NOT_FOUND" ? BRACKETS_ERRORS.MATCH_NOT_FOUND : BRACKETS_ERRORS.MATCH_NOT_PLAYED);
+    const { groupId, tournamentId, categoryId } = r;
+
+    const phase = await this.repo.getCategoryPhase(categoryId);
+    if (phase === "bracket" || phase === "finished") {
+      const qualifiers = (await this.repo.loadGroupQualifiers(tournamentId, categoryId))
+        .filter((q) => q.id_group === groupId)
+        .sort((a, b) => a.rank_in_group - b.rank_in_group);
+      if (qualifiers.length > 0 && qualifiers[0].group_finished) {
+        await this.swapIntoBracket(groupId, tournamentId, categoryId, qualifiers.map((q) => q.id_user));
+        await this.repo.remarkGroupQualifiers(tournamentId, categoryId, groupId);
+        // Plata: el que ahora sale después de los clasificados.
+        const silverCategoryId = await this.repo.getSilverCategoryId(categoryId);
+        if (silverCategoryId) {
+          const silver = (await this.repo.loadGroupSilverPlayers(tournamentId, categoryId))
+            .filter((p) => p.group_name !== undefined)
+            .map((p) => p.id_user);
+          const groupMembers = new Set((await this.repo.groupMemberIds(groupId)));
+          const wantedSilver = silver.filter((id) => groupMembers.has(id));
+          await this.swapIntoBracket(groupId, tournamentId, silverCategoryId, wantedSilver);
+        }
+      }
+    }
+    return ok({ fixed: true, tournamentId, categoryId });
+  }
+
+  /** En la llave de [bracketCategoryId]: los del grupo que ya no corresponden salen y entran los que sí. */
+  private async swapIntoBracket(groupId: string, tournamentId: string, bracketCategoryId: string, wanted: string[]): Promise<void> {
+    const present = (await this.repo.groupPlayersInCategoryBracket(groupId, bracketCategoryId)).sort(
+      (a, b) => (a.seed ?? 999) - (b.seed ?? 999)
+    );
+    const presentIds = new Set(present.map((p) => p.id_user));
+    const wantedSet = new Set(wanted);
+    const outs = present.filter((p) => !wantedSet.has(p.id_user)).map((p) => p.id_user);
+    const ins = wanted.filter((id) => !presentIds.has(id));
+    for (let i = 0; i < Math.min(outs.length, ins.length); i++) {
+      await this.repo.transferBracketPlayer(tournamentId, bracketCategoryId, outs[i], ins[i]);
+    }
+  }
+
   /** Al marcar "No vino" con los grupos en juego: por si con eso el grupo ya puede cerrarse. */
   async closeAbsentMatchesForPlayer(tournamentId: string, categoryId: string, userId: string): Promise<number> {
     if ((await this.repo.getCategoryPhase(categoryId)) !== "groups") return 0;

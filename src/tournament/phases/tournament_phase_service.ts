@@ -63,7 +63,16 @@ export class TournamentPhaseService {
     const gold = await this.repo.getCategoryPhase(goldCategoryId);
     if (!gold?.silver_category_id) return { ok: false, message: "Esta categoría no tiene Plata vinculada" };
 
-    const silverPlayers = await this.bracketsRepo.loadGroupSilverPlayers(id_tournament, goldCategoryId);
+    // Nadie juega las dos llaves: el que está en la de Oro no va a Plata.
+    const inGold = await DB.getPool().query<{ id: string }>(
+      `SELECT DISTINCT unnest(ARRAY[player1_id, player2_id]) AS id
+         FROM bracket_matches WHERE id_tournament = $1 AND id_category = $2`,
+      [id_tournament, goldCategoryId]
+    );
+    const goldIds = new Set(inGold.rows.map((r) => r.id).filter(Boolean));
+    const silverPlayers = (await this.bracketsRepo.loadGroupSilverPlayers(id_tournament, goldCategoryId)).filter(
+      (p) => !goldIds.has(p.id_user)
+    );
     if (silverPlayers.length < 2) {
       return {
         ok: false,
@@ -71,6 +80,13 @@ export class TournamentPhaseService {
       };
     }
 
+    // La Plata se arma con sus inscritos: los que quedaron de un intento
+    // anterior (con otros resultados de grupo) y ya no van, se dan de baja.
+    await DB.getPool().query(
+      `UPDATE enrollments SET status = 'cancelled'
+        WHERE id_tournament = $1 AND id_category = $2 AND status = 'active' AND NOT (id_user = ANY($3::uuid[]))`,
+      [id_tournament, gold.silver_category_id, silverPlayers.map((p) => p.id_user)]
+    );
     await this.adminRepo.bulkEnrollDirectAdvance(id_tournament, gold.silver_category_id, silverPlayers.map((p) => p.id_user));
     const result = await this.bracketsService.generateBracket(id_tournament, gold.silver_category_id, {
       best_of_sets: format.bestOfSets ?? 5,
@@ -87,7 +103,7 @@ export class TournamentPhaseService {
    * "Armar llave de Plata" a mano, desde la categoría Plata: por si no se
    * armó sola (o falló). Necesita que los grupos de Oro hayan terminado.
    */
-  async buildSilverNow(silverCategoryId: string, id_tournament: string) {
+  async buildSilverNow(silverCategoryId: string, id_tournament: string, rebuild = false) {
     const gold = (
       await DB.getPool().query<{ id_category: string }>(
         `SELECT id_category FROM tournament_categories WHERE silver_category_id = $1 AND id_tournament = $2 LIMIT 1`,
@@ -99,14 +115,25 @@ export class TournamentPhaseService {
     // Ya armada = tiene partidos con jugadores. Si quedó a medias (en fase
     // llave pero vacía, porque el armado automático falló a mitad de
     // camino), se borra lo vacío y se vuelve a armar.
-    const silverRows = await DB.getPool().query<{ with_players: number; total: number }>(
+    const silverRows = await DB.getPool().query<{ with_players: number; total: number; played: number }>(
       `SELECT COUNT(*) FILTER (WHERE player1_id IS NOT NULL OR player2_id IS NOT NULL)::int AS with_players,
-              COUNT(*)::int AS total
+              COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE status IN ('played', 'walkover') AND NOT is_bye)::int AS played
          FROM bracket_matches WHERE id_tournament = $1 AND id_category = $2`,
       [id_tournament, silverCategoryId]
     );
-    const { with_players, total } = silverRows.rows[0] ?? { with_players: 0, total: 0 };
-    if (with_players > 0) return { ok: false as const, message: "La llave de Plata ya está armada" };
+    const { with_players, total, played } = silverRows.rows[0] ?? { with_players: 0, total: 0, played: 0 };
+    if (with_players > 0 && !rebuild) {
+      return { ok: false as const, message: "La llave de Plata ya está armada. Si está mal, usa \"Rehacer llave de Plata\"." };
+    }
+    if (played > 0) {
+      return {
+        ok: false as const,
+        message: `Ya se jugaron ${played} partido${played === 1 ? "" : "s"} de Plata: deshaz esos resultados antes de rehacer la llave.`,
+      };
+    }
+    // Rehacer: la llave vuelve a fase de inscripción y se arma de nuevo.
+    if (with_players > 0) await this.repo.setPhase(silverCategoryId, "enrollment");
     if (total > 0) {
       await DB.getPool().query(`DELETE FROM bracket_matches WHERE id_tournament = $1 AND id_category = $2`, [
         id_tournament,
