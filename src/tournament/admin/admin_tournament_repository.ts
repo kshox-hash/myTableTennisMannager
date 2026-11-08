@@ -1370,7 +1370,9 @@ export class AdminTournamentRepository {
 
           c.category_type,
           c.category_range,
-          c.gender AS category_gender
+          c.gender AS category_gender,
+          -- Grupo en que quedó (null mientras no se arman los grupos).
+          grp.group_name
         FROM ${this.enrollmentsTable} e
         JOIN ${this.usersTable} u
           ON u.id_user = e.id_user
@@ -1380,6 +1382,13 @@ export class AdminTournamentRepository {
           ON pc.id_club = u.id_club
         JOIN ${this.tournamentCategoriesTable} c
           ON c.id_category = e.id_category
+        LEFT JOIN LATERAL (
+          SELECT cg.group_name
+          FROM group_members gm
+          JOIN category_groups cg ON cg.id_group = gm.id_group
+          WHERE cg.id_category = e.id_category AND gm.id_user = e.id_user
+          LIMIT 1
+        ) grp ON TRUE
         WHERE e.id_tournament = $1
           AND e.status = 'active'
         ORDER BY

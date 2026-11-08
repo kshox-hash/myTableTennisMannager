@@ -238,6 +238,8 @@ export type EnrollmentRow = {
   category_type: string;
   category_range: string;
   category_gender: "male" | "female" | "mixed";
+  /** Grupo en que quedó el jugador (null antes de armar los grupos). */
+  group_name?: string | null;
 };
 
 // Pagination
