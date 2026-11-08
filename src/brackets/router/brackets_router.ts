@@ -213,6 +213,39 @@ router.post(
   })
 );
 
+// Reemplazar a un jugador que no vino por otro inscrito (fase de grupos).
+// POST /api/v1/bracket/tournaments/:id_tournament/categories/:id_category/replace-player
+const replacePlayerSchema = z.object({ out_user_id: z.string().uuid(), in_user_id: z.string().uuid() }).strict();
+router.post(
+  "/tournaments/:id_tournament/categories/:id_category/replace-player",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(),
+  validateBody(replacePlayerSchema),
+  asyncHandler(async (req, res) => {
+    const { out_user_id, in_user_id } = req.body as z.infer<typeof replacePlayerSchema>;
+    const r = await repo.replaceGroupMember({
+      tournamentId: String(req.params.id_tournament),
+      categoryId: String(req.params.id_category),
+      outUser: out_user_id,
+      inUser: in_user_id,
+    });
+    if (!r.replaced) {
+      const msg: Record<string, string> = {
+        GROUPS_LOCKED: "La categoría ya no está en fase de grupos",
+        PLAYER_NOT_IN_GROUP: "Ese jugador no está en ningún grupo",
+        ALREADY_IN_A_GROUP: "El jugador nuevo ya está en un grupo",
+        PLAYER_NOT_ENROLLED: "El jugador nuevo no está inscrito en la categoría",
+        PLAYER_ALREADY_PLAYED: "Ese jugador ya jugó un partido: no se puede reemplazar (usa \"Sacar o retirar\")",
+        PLAYER_ON_TABLE: "Ese jugador tiene un partido en mesa ahora",
+        DUPLICATE_PLAYER: "Elegiste al mismo jugador",
+      };
+      return res.status(409).json({ ok: false, message: msg[r.error] ?? r.error });
+    }
+    return res.json({ ok: true, data: { replaced: true, id_group: r.groupId } });
+  })
+);
+
 // Registrar resultado de partido de grupo
 // POST /api/v1/bracket/matches/:id_match/result
 router.post(

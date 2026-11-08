@@ -1703,6 +1703,98 @@ export class BracketsRepository {
   // que "mover jugador" no puede, y no se desordena el orden de partidos.
   // Solo si ninguno de los dos jugó todavía en su grupo, ni tiene un partido
   // en mesa o con marcador en vivo.
+  // Reemplazar a un jugador que NO vino por otro, con los grupos ya armados:
+  // el que entra ocupa su lugar (mismos partidos pendientes, misma fila de
+  // la tabla y posición en el grupo); el que sale queda con la inscripción
+  // cancelada. Solo si el que sale todavía no jugó ni está en mesa. El que
+  // entra tiene que estar inscrito en la categoría y sin grupo.
+  async replaceGroupMember(params: {
+    tournamentId: string;
+    categoryId: string;
+    outUser: string;
+    inUser: string;
+  }): Promise<{ replaced: true; groupId: string } | { replaced: false; error: BracketsError }> {
+    const { tournamentId, categoryId, outUser, inUser } = params;
+    if (outUser === inUser) return { replaced: false, error: "DUPLICATE_PLAYER" as BracketsError };
+    return this.withTransaction(async (client) => {
+      const phaseRes = await client.query<{ phase: string }>(
+        `SELECT phase FROM tournament_categories WHERE id_category = $1 FOR UPDATE`,
+        [categoryId]
+      );
+      if ((phaseRes.rows[0]?.phase ?? "enrollment") !== "groups") {
+        return { replaced: false, error: "GROUPS_LOCKED" as BracketsError };
+      }
+      const groupOf = async (userId: string) => {
+        const r = await client.query<{ id_group: string }>(
+          `SELECT cg.id_group FROM group_members gm
+             JOIN category_groups cg ON cg.id_group = gm.id_group
+            WHERE gm.id_user = $1 AND cg.id_tournament = $2 AND cg.id_category = $3`,
+          [userId, tournamentId, categoryId]
+        );
+        return r.rows[0]?.id_group ?? null;
+      };
+      const group = await groupOf(outUser);
+      if (!group) return { replaced: false, error: "PLAYER_NOT_IN_GROUP" as BracketsError };
+      if (await groupOf(inUser)) return { replaced: false, error: "ALREADY_IN_A_GROUP" as BracketsError };
+      const enrolled = await client.query(
+        `SELECT 1 FROM enrollments WHERE id_tournament = $1 AND id_category = $2 AND id_user = $3 AND status = 'active'`,
+        [tournamentId, categoryId, inUser]
+      );
+      if (!enrolled.rowCount) return { replaced: false, error: "PLAYER_NOT_ENROLLED" as BracketsError };
+
+      const st = await client.query<{ played: boolean | null; busy: boolean | null }>(
+        `SELECT bool_or(status <> 'scheduled') AS played,
+                bool_or(status = 'scheduled' AND (table_number IS NOT NULL OR set_scores IS NOT NULL)) AS busy
+           FROM group_matches WHERE id_group = $1 AND (player1_id = $2 OR player2_id = $2)`,
+        [group, outUser]
+      );
+      if (st.rows[0]?.played) return { replaced: false, error: "PLAYER_ALREADY_PLAYED" as BracketsError };
+      if (st.rows[0]?.busy) return { replaced: false, error: "PLAYER_ON_TABLE" as BracketsError };
+
+      await client.query(
+        `UPDATE group_matches
+            SET player1_id = CASE WHEN player1_id = $2 THEN $3::uuid ELSE player1_id END,
+                player2_id = CASE WHEN player2_id = $2 THEN $3::uuid ELSE player2_id END,
+                referee_id = CASE WHEN referee_id = $2 THEN NULL ELSE referee_id END
+          WHERE id_group = $1 AND (player1_id = $2 OR player2_id = $2 OR referee_id = $2)`,
+        [group, outUser, inUser]
+      );
+      await client.query(`UPDATE group_standings SET id_user = $3 WHERE id_group = $1 AND id_user = $2`, [group, outUser, inUser]);
+      await client.query(
+        `UPDATE group_members SET id_user = $3, assignment_type = 'manual' WHERE id_group = $1 AND id_user = $2`,
+        [group, outUser, inUser]
+      );
+      await client.query(
+        `UPDATE enrollments SET status = 'cancelled'
+          WHERE id_tournament = $1 AND id_category = $2 AND id_user = $3 AND status = 'active'`,
+        [tournamentId, categoryId, outUser]
+      );
+      await this.notifications.create(
+        {
+          idUser: inUser,
+          type: "groups_started",
+          title: "Entraste a un grupo",
+          message: "El organizador te sumó a la fase de grupos en reemplazo de otro jugador. Revisa tu grupo y tus partidos.",
+          idTournament: tournamentId,
+          idCategory: categoryId,
+        },
+        client
+      );
+      await this.notifications.create(
+        {
+          idUser: outUser,
+          type: "enrollment_removed",
+          title: "Inscripción cancelada",
+          message: "No te presentaste y el organizador te reemplazó en tu grupo.",
+          idTournament: tournamentId,
+          idCategory: categoryId,
+        },
+        client
+      );
+      return { replaced: true, groupId: group };
+    });
+  }
+
   async swapGroupMembers(params: {
     tournamentId: string;
     categoryId: string;
