@@ -628,7 +628,7 @@ export class BracketsRepository {
       const a = await find(userA);
       const b = await find(userB);
       if (!a || !b) return { swapped: false, error: "NOT_IN_BRACKET" as const };
-      if (a.round !== b.round) return { swapped: false, error: "DIFFERENT_ROUND" as const };
+      // Se permite entre rondas distintas (p. ej. uno de pre-llave con uno de la llave).
       if (a.live || b.live) return { swapped: false, error: "MATCH_LIVE" as const };
 
       const put = (s: Slot, userId: string, seed: number | null) =>
@@ -640,6 +640,16 @@ export class BracketsRepository {
         );
       await put(a, userB, b.seed);
       await put(b, userA, a.seed);
+      // Si alguno llegó a su partido por BYE, ese BYE pasa a nombre del otro.
+      await client.query(
+        `UPDATE bracket_matches
+            SET player1_id = CASE WHEN player1_id = $3 THEN $4::uuid WHEN player1_id = $4 THEN $3::uuid ELSE player1_id END,
+                player2_id = CASE WHEN player2_id = $3 THEN $4::uuid WHEN player2_id = $4 THEN $3::uuid ELSE player2_id END,
+                winner_id  = CASE WHEN winner_id  = $3 THEN $4::uuid WHEN winner_id  = $4 THEN $3::uuid ELSE winner_id END
+          WHERE id_tournament = $1 AND id_category = $2 AND status = 'bye'
+            AND ($3 IN (player1_id, player2_id) OR $4 IN (player1_id, player2_id))`,
+        [tournamentId, categoryId, userA, userB]
+      );
       // Si era árbitro del partido al que ahora entra a jugar, deja de serlo.
       await client.query(
         `UPDATE bracket_matches SET referee_id = NULL
