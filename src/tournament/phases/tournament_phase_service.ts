@@ -1,4 +1,5 @@
 import { notifyFinalPositions } from "../../notifications/player_outcomes";
+import DB from "../../db/db_configuration";
 import { TournamentPhaseRepository, type PhaseConfig } from "./tournament_phase_repository";
 import { BracketsService } from "../../brackets/brackets_service";
 import { BracketsRepository } from "../../brackets/brackets_repository";
@@ -46,29 +47,67 @@ export class TournamentPhaseService {
     format: { bestOfSets?: 1 | 3 | 5 | 7; pointsPerSet?: 11 | 21 }
   ): Promise<void> {
     try {
-      const gold = await this.repo.getCategoryPhase(goldCategoryId);
-      if (!gold?.silver_category_id) return;
-
-      const silverPlayers = await this.bracketsRepo.loadGroupSilverPlayers(id_tournament, goldCategoryId);
-      if (silverPlayers.length < 2) return; // sin al menos 2, no hay llave de Plata posible
-
-      await this.adminRepo.bulkEnrollDirectAdvance(
-        id_tournament,
-        gold.silver_category_id,
-        silverPlayers.map((p) => p.id_user)
-      );
-      const result = await this.bracketsService.generateBracket(id_tournament, gold.silver_category_id, {
-        best_of_sets: format.bestOfSets ?? 5,
-        points_per_set: format.pointsPerSet ?? 11,
-      });
-      if (result.ok || result.error === BRACKETS_ERRORS.BRACKET_ALREADY_EXISTS) {
-        await this.repo.setPhase(gold.silver_category_id, "bracket");
-      } else {
-        console.error("[TournamentPhaseService.populateSilverBracket] generateBracket falló:", result.error);
-      }
+      const r = await this.buildSilver(goldCategoryId, id_tournament, format);
+      if (!r.ok) console.error("[TournamentPhaseService.populateSilverBracket]", r.message);
     } catch (error) {
       console.error("[TournamentPhaseService.populateSilverBracket] Error:", error);
     }
+  }
+
+  /** Arma la Plata de un Oro: inscribe al 3° de cada grupo (los que vinieron) y genera su llave. */
+  private async buildSilver(
+    goldCategoryId: string,
+    id_tournament: string,
+    format: { bestOfSets?: 1 | 3 | 5 | 7; pointsPerSet?: 11 | 21 }
+  ): Promise<{ ok: true; players: number } | { ok: false; message: string }> {
+    const gold = await this.repo.getCategoryPhase(goldCategoryId);
+    if (!gold?.silver_category_id) return { ok: false, message: "Esta categoría no tiene Plata vinculada" };
+
+    const silverPlayers = await this.bracketsRepo.loadGroupSilverPlayers(id_tournament, goldCategoryId);
+    if (silverPlayers.length < 2) {
+      return {
+        ok: false,
+        message: `Solo hay ${silverPlayers.length} jugador${silverPlayers.length === 1 ? "" : "es"} para Plata (el que sale después de los clasificados en cada grupo, sin contar a los que no vinieron): hacen falta al menos 2.`,
+      };
+    }
+
+    await this.adminRepo.bulkEnrollDirectAdvance(id_tournament, gold.silver_category_id, silverPlayers.map((p) => p.id_user));
+    const result = await this.bracketsService.generateBracket(id_tournament, gold.silver_category_id, {
+      best_of_sets: format.bestOfSets ?? 5,
+      points_per_set: format.pointsPerSet ?? 11,
+    });
+    if (!result.ok && result.error !== BRACKETS_ERRORS.BRACKET_ALREADY_EXISTS) {
+      return { ok: false, message: `No se pudo generar la llave de Plata (${result.error})` };
+    }
+    await this.repo.setPhase(gold.silver_category_id, "bracket");
+    return { ok: true, players: silverPlayers.length };
+  }
+
+  /**
+   * "Armar llave de Plata" a mano, desde la categoría Plata: por si no se
+   * armó sola (o falló). Necesita que los grupos de Oro hayan terminado.
+   */
+  async buildSilverNow(silverCategoryId: string, id_tournament: string) {
+    const gold = (
+      await DB.getPool().query<{ id_category: string }>(
+        `SELECT id_category FROM tournament_categories WHERE silver_category_id = $1 AND id_tournament = $2 LIMIT 1`,
+        [silverCategoryId, id_tournament]
+      )
+    ).rows[0];
+    if (!gold) return { ok: false as const, message: "Esta categoría no es la Plata de ninguna categoría de Oro" };
+
+    const silver = await this.repo.getCategoryPhase(silverCategoryId);
+    if (silver?.phase === "bracket" || silver?.phase === "finished") {
+      return { ok: false as const, message: "La llave de Plata ya está armada" };
+    }
+    if (!(await this.repo.allGroupMatchesFinished(gold.id_category))) {
+      return { ok: false as const, message: "Todavía hay partidos de grupo sin resultado en la categoría de Oro" };
+    }
+    const goldMatch = (await this.bracketsRepo.findBracket(id_tournament, gold.id_category)).find((m) => !m.is_bye);
+    return this.buildSilver(gold.id_category, id_tournament, {
+      bestOfSets: (goldMatch?.best_of_sets as 1 | 3 | 5 | 7 | undefined) ?? 5,
+      pointsPerSet: (goldMatch?.points_per_set as 11 | 21 | undefined) ?? 11,
+    });
   }
 
   // Obtener estado de todas las categorías de un torneo

@@ -77,6 +77,19 @@ router.post(
   asyncHandler(controller.startBracket)
 );
 
+// POST armar a mano la llave de Plata (desde la categoría Plata)
+router.post(
+  "/:id_tournament/categories/:id_category/build-silver",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(),
+  asyncHandler(async (req, res) => {
+    const r = await phaseService.buildSilverNow(String(req.params.id_category), String(req.params.id_tournament));
+    if (!r.ok) return res.status(409).json({ ok: false, message: r.message });
+    return res.json({ ok: true, data: { players: r.players } });
+  })
+);
+
 // GET previsualizar el sorteo del cuadro (sin persistir nada)
 router.get(
   "/:id_tournament/categories/:id_category/preview-bracket",
