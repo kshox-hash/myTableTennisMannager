@@ -96,9 +96,22 @@ export class TournamentPhaseService {
     ).rows[0];
     if (!gold) return { ok: false as const, message: "Esta categoría no es la Plata de ninguna categoría de Oro" };
 
-    const silver = await this.repo.getCategoryPhase(silverCategoryId);
-    if (silver?.phase === "bracket" || silver?.phase === "finished") {
-      return { ok: false as const, message: "La llave de Plata ya está armada" };
+    // Ya armada = tiene partidos con jugadores. Si quedó a medias (en fase
+    // llave pero vacía, porque el armado automático falló a mitad de
+    // camino), se borra lo vacío y se vuelve a armar.
+    const silverRows = await DB.getPool().query<{ with_players: number; total: number }>(
+      `SELECT COUNT(*) FILTER (WHERE player1_id IS NOT NULL OR player2_id IS NOT NULL)::int AS with_players,
+              COUNT(*)::int AS total
+         FROM bracket_matches WHERE id_tournament = $1 AND id_category = $2`,
+      [id_tournament, silverCategoryId]
+    );
+    const { with_players, total } = silverRows.rows[0] ?? { with_players: 0, total: 0 };
+    if (with_players > 0) return { ok: false as const, message: "La llave de Plata ya está armada" };
+    if (total > 0) {
+      await DB.getPool().query(`DELETE FROM bracket_matches WHERE id_tournament = $1 AND id_category = $2`, [
+        id_tournament,
+        silverCategoryId,
+      ]);
     }
     if (!(await this.repo.allGroupMatchesFinished(gold.id_category))) {
       return { ok: false as const, message: "Todavía hay partidos de grupo sin resultado en la categoría de Oro" };
