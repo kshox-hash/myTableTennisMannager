@@ -146,6 +146,12 @@ export type CategoryGroupsView = {
       matches: GroupMatchRow[];
     }
   >;
+  /** Cuántos clasifican a la llave por grupo (para marcar la zona de
+   * clasificación antes y durante el grupo, no solo al terminar). */
+  qualifiers_per_group?: number;
+  /** La categoría tiene Plata: el siguiente puesto después de los
+   * clasificados va a la llave de Plata. */
+  has_silver?: boolean;
 };
 
 export type MoveGroupMemberInput = {

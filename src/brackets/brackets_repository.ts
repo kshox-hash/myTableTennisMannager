@@ -242,6 +242,14 @@ export class BracketsRepository {
     return Number(res.rows[0]?.qualifiers_per_group ?? 2);
   }
 
+  async categoryHasSilver(categoryId: string): Promise<boolean> {
+    const res = await this.pool.query<{ silver_category_id: string | null }>(
+      `SELECT silver_category_id FROM tournament_categories WHERE id_category = $1`,
+      [categoryId]
+    );
+    return !!res.rows[0]?.silver_category_id;
+  }
+
   private async withTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
     const client = await this.pool.connect();
     try {

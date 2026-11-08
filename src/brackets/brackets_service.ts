@@ -443,6 +443,8 @@ export class BracketsService {
         standings: standings.filter((s) => s.id_group === g.id_group),
         matches:   matches.filter((m) => m.id_group === g.id_group),
       })),
+      qualifiers_per_group: await this.repo.getCategoryQualifiersPerGroup(categoryId),
+      has_silver: await this.repo.categoryHasSilver(categoryId),
     };
 
     return ok(view);
