@@ -98,7 +98,8 @@ export class TournamentPhaseRepository {
     const res = await this.pool.query<{ total: string; finished: string }>(
       `SELECT
          COUNT(*)                                    AS total,
-         COUNT(*) FILTER (WHERE winner_id IS NOT NULL) AS finished
+         -- Cerrado = jugado o W.O. (un W.O. doble no tiene ganador, igual terminó).
+         COUNT(*) FILTER (WHERE status IN ('played', 'walkover')) AS finished
        FROM group_matches gm
        JOIN category_groups cg ON cg.id_group = gm.id_group
        WHERE cg.id_category = $1`,
