@@ -1,5 +1,11 @@
 import { generateGroupsFromPlayers, buildManualGroups } from "../group_generation_logic";
 import {
+  clubSuggestions as computeClubSuggestions,
+  type ClubSuggestion,
+  type Occupant,
+  type Position as SuggestionPosition,
+} from "./club_suggestions";
+import {
   drawBracketSlotsForGroups,
   buildBracketForSize,
   bracketSizeOptions,
@@ -564,14 +570,23 @@ export class BracketsService {
   ): Promise<{ changed: boolean; blockedBy?: string[] }> {
     const phase = await this.repo.getCategoryPhase(categoryId);
     if (phase !== "bracket" && phase !== "finished") return { changed: false };
-    if (await this.repo.groupHasBracketSlots(groupId)) return { changed: false }; // llave adelantada: sus cupos se llenan solos
     const qualifiers = (await this.repo.loadGroupQualifiers(tournamentId, categoryId))
       .filter((q) => q.id_group === groupId)
       .sort((a, b) => a.rank_in_group - b.rank_in_group);
     if (qualifiers.length === 0 || !qualifiers[0].group_finished) return { changed: false };
 
     const plan: Array<{ categoryId: string; moves: Array<{ from: string; to: string }>; silver: boolean }> = [];
-    const gold = await this.slotMoves(groupId, categoryId, qualifiers.map((q) => q.id_user));
+    // Llave adelantada: cada cupo dice de qué puesto del grupo es ("2° GR-7"),
+    // así que se compara directo quién lo ocupa con quién ocupa ese puesto ahora.
+    // Si no, por quién tenía el cupo del 1° y del 2° (ver slotMoves).
+    const sourced = (await this.repo.groupSourcePositions(groupId)).filter((p) => p.id_category === categoryId);
+    const gold =
+      sourced.length > 0
+        ? sourced
+            .filter((p) => p.player !== null && qualifiers[p.rank - 1])
+            .map((p) => ({ from: p.player as string, to: qualifiers[p.rank - 1].id_user }))
+            .filter((m) => m.from !== m.to)
+        : await this.slotMoves(groupId, categoryId, qualifiers.map((q) => q.id_user));
     if (gold.length > 0) plan.push({ categoryId, moves: gold, silver: false });
 
     const silverCategoryId = await this.repo.getSilverCategoryId(categoryId);
@@ -624,6 +639,59 @@ export class BracketsService {
       await this.repo.activityLog.record(tournamentId, requestedBy, "bracket_adjusted", detail);
     }
     return { changed: true };
+  }
+
+  /**
+   * Recomendaciones para la mesa de control: primeros partidos entre dos del
+   * mismo club que todavía se pueden cambiar, con un cambio de lugar que no
+   * rompe ninguna regla (ver club_suggestions.ts). No cambia nada.
+   */
+  async clubSuggestions(tournamentId: string, categoryId: string): Promise<ClubSuggestion[]> {
+    const rows = await this.repo.bracketPositions(tournamentId, categoryId);
+    if (rows.length === 0) return [];
+    const players = [...new Set(rows.map((r) => r.player).filter((p): p is string => !!p))];
+    const info = await this.repo.bracketPlayerInfo(tournamentId, categoryId, players);
+    const groupNames = await this.repo.groupNames([
+      ...new Set(
+        [...rows.map((r) => r.source_group), ...[...info.values()].map((p) => p.group)].filter((g): g is string => !!g)
+      ),
+    ]);
+    const positions: SuggestionPosition[] = rows.map((r) => {
+      let occupant: Occupant | null = null;
+      if (r.player) {
+        const p = info.get(r.player);
+        occupant = {
+          ref: r.player,
+          name: p?.name || "Jugador",
+          club: p?.club ?? null,
+          clubName: p?.clubName ?? null,
+          group: p?.group ?? r.source_group ?? null,
+          groupName: groupNames.get(p?.group ?? r.source_group ?? "") ?? null,
+          rank: p?.label === "first" ? 1 : p?.label === "second" ? 2 : r.source_rank === 1 || r.source_rank === 2 ? (r.source_rank as 1 | 2) : null,
+        };
+      } else if (r.source_group) {
+        occupant = {
+          ref: `slot:${r.source_group}:${r.source_rank}`,
+          name: `cupo ${r.source_rank}° ${groupNames.get(r.source_group) ?? ""}`.trim(),
+          club: null,
+          clubName: null,
+          group: r.source_group,
+          groupName: groupNames.get(r.source_group) ?? null,
+          rank: r.source_rank === 1 || r.source_rank === 2 ? (r.source_rank as 1 | 2) : null,
+        };
+      }
+      return {
+        round: r.round,
+        match_number: r.match_number,
+        next_match_number: r.next_match_number,
+        next_match_slot: r.next_match_slot,
+        slot: r.slot,
+        seed: r.seed,
+        locked: r.locked,
+        occupant,
+      };
+    });
+    return computeClubSuggestions(positions);
   }
 
   /**

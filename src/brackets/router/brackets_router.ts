@@ -254,10 +254,31 @@ router.post(
   })
 );
 
+const BRACKET_POSITION_REF = /^(slot:)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(:\d+)?$/i;
+
+// Recomendaciones para la mesa de control: cruces del mismo club que todavía
+// se pueden cambiar, con el cambio que no rompe reglas. No cambia nada.
+// GET /api/v1/bracket/tournaments/:id_tournament/categories/:id_category/suggestions
+router.get(
+  "/tournaments/:id_tournament/categories/:id_category/suggestions",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(),
+  asyncHandler(async (req, res) => {
+    const data = await service.clubSuggestions(String(req.params.id_tournament), String(req.params.id_category));
+    return res.json({ ok: true, data });
+  })
+);
+
 // Intercambiar de lugar a dos jugadores de la llave (misma ronda, sin jugar).
 // POST /api/v1/bracket/tournaments/:id_tournament/categories/:id_category/swap-bracket-players
 const swapBracketSchema = z
-  .object({ user_a: z.string().uuid(), user_b: z.string().uuid(), confirm: z.boolean().optional() })
+  .object({
+    // Un jugador (uuid) o un cupo sin llenar de la llave adelantada ("slot:<grupo>:<puesto>").
+    user_a: z.string().regex(BRACKET_POSITION_REF),
+    user_b: z.string().regex(BRACKET_POSITION_REF),
+    confirm: z.boolean().optional(),
+  })
   .strict();
 router.post(
   "/tournaments/:id_tournament/categories/:id_category/swap-bracket-players",

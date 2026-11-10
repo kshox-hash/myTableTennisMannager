@@ -238,6 +238,9 @@ export type BracketMatchRow = {
   dead_slot: 1 | 2 | null;
   player1_slot_label?: string | null; // "1° GR-3" mientras el cupo no se llena
   player2_slot_label?: string | null;
+  /** "slot:<grupo>:<puesto>" mientras el cupo no se llena (para moverlo con cambiar jugadores). */
+  player1_slot_ref?: string | null;
+  player2_slot_ref?: string | null;
   seed1: number | null;
   seed2: number | null;
 };

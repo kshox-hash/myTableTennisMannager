@@ -107,7 +107,7 @@ export function getSeedPositions(n: number): number[] {
  * de la misma banda son "intercambiables" sin romper la garantía de que no
  * se crucen antes de tiempo con las semillas superiores.
  */
-function seedBand(seed: number): number {
+export function seedBand(seed: number): number {
   return seed <= 1 ? 0 : Math.ceil(Math.log2(seed));
 }
 

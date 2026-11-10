@@ -63,6 +63,35 @@ const GROUP_RANKING_CTE = `
         )
       )
   )`;
+/** Un puesto de la llave al cambiar jugadores: su ocupante (jugador o cupo) y su rival. */
+type SwapPosition = {
+  id_match: string;
+  round: number;
+  match_number: number;
+  slot: 1 | 2;
+  player: string | null;
+  sourceGroup: string | null;
+  sourceRank: number | null;
+  rival: string | null;
+  rivalSourceGroup: string | null;
+  live: boolean;
+};
+
+/** Puesto de la pre-llave o la primera ronda (ver bracketPositions). */
+export type BracketPosition = {
+  id_match: string;
+  round: number;
+  match_number: number;
+  next_match_number: number | null;
+  next_match_slot: 1 | 2 | null;
+  slot: 1 | 2;
+  player: string | null;
+  source_group: string | null;
+  source_rank: number | null;
+  seed: number | null;
+  locked: boolean;
+};
+
 const REFEREE_NAME_SQL = (alias: string) =>
   `(SELECT COALESCE(NULLIF(TRIM(COALESCE(r.first_name, '') || ' ' || COALESCE(r.last_name, '')), ''), r.email)
     FROM users r WHERE r.id_user = ${alias}.referee_id)`;
@@ -642,10 +671,12 @@ export class BracketsRepository {
   }
 
   /**
-   * Intercambia de lugar a dos jugadores de la llave (partidos sin jugar, de
-   * cualquier ronda): cada uno ocupa el cupo del otro. La semilla es del
-   * PUESTO, no del jugador: queda donde estaba (así lo que se ve en la llave
-   * sigue siendo el sorteo).
+   * Intercambia de lugar dos puestos de la llave que aún no se juegan, de
+   * cualquier ronda. Cada lado es un jugador (su id) o, con la llave
+   * adelantada, un cupo que todavía no se llena ("slot:<grupo>:<puesto>"):
+   * así la mesa de control puede ir acomodando la llave a medida que terminan
+   * los grupos. Se mueve el ocupante con su origen (de qué grupo y puesto
+   * viene); la semilla es del PUESTO y queda donde estaba.
    *
    * Sin `confirm`, si el cambio deja a alguien frente a uno de su mismo grupo
    * o de su mismo club en su próximo partido, no cambia nada y devuelve los
@@ -666,103 +697,75 @@ export class BracketsRepository {
     const { tournamentId, categoryId, userA, userB } = params;
     if (userA === userB) return { swapped: false, error: "SAME_PLAYER" };
     return this.withTransaction(async (client) => {
-      type Slot = {
-        id_match: string;
-        round: number;
-        match_number: number;
-        slot: 1 | 2;
-        rival: string | null;
-        live: boolean;
-      };
-      const find = async (userId: string): Promise<Slot | null> => {
-        const r = await client.query<{
-          id_match: string;
-          round: number;
-          match_number: number;
-          player1_id: string | null;
-          player2_id: string | null;
-          live: boolean;
-        }>(
-          `SELECT id_match, round, match_number, player1_id, player2_id, (set_scores IS NOT NULL) AS live
-             FROM bracket_matches
-            WHERE id_tournament = $1 AND id_category = $2 AND (player1_id = $3 OR player2_id = $3)
-              AND status IN ('pending', 'ready') AND NOT is_bye
-            ORDER BY round ASC
-            LIMIT 1
-            FOR UPDATE`,
-          [tournamentId, categoryId, userId]
-        );
-        const m = r.rows[0];
-        if (!m) return null;
-        const slot = m.player1_id === userId ? 1 : 2;
-        return {
-          id_match: m.id_match,
-          round: m.round,
-          match_number: m.match_number,
-          slot,
-          rival: slot === 1 ? m.player2_id : m.player1_id,
-          live: m.live,
-        };
-      };
-      const a = await find(userA);
-      const b = await find(userB);
+      const a = await this.findSwapPosition(client, tournamentId, categoryId, userA);
+      const b = await this.findSwapPosition(client, tournamentId, categoryId, userB);
       if (!a || !b) return { swapped: false, error: "NOT_IN_BRACKET" as const };
       // Se permite entre rondas distintas (p. ej. uno de pre-llave con uno de la llave).
       if (a.live || b.live) return { swapped: false, error: "MATCH_LIVE" as const };
 
       if (!params.confirm) {
         const warnings = await this.swapWarnings(client, tournamentId, categoryId, [
-          { player: userB, into: a, other: userA },
-          { player: userA, into: b, other: userB },
+          { occupant: b, into: a },
+          { occupant: a, into: b },
         ]);
         if (warnings.length > 0) return { swapped: false, error: "NEEDS_CONFIRM" as const, warnings };
       }
 
-      const put = (s: Slot, userId: string) =>
+      const put = (s: SwapPosition, from: SwapPosition) =>
         client.query(
           s.slot === 1
-            ? `UPDATE bracket_matches SET player1_id = $2 WHERE id_match = $1`
-            : `UPDATE bracket_matches SET player2_id = $2 WHERE id_match = $1`,
-          [s.id_match, userId]
+            ? `UPDATE bracket_matches SET player1_id = $2, player1_source_group = $3, player1_source_rank = $4 WHERE id_match = $1`
+            : `UPDATE bracket_matches SET player2_id = $2, player2_source_group = $3, player2_source_rank = $4 WHERE id_match = $1`,
+          [s.id_match, from.player, from.sourceGroup, from.sourceRank]
         );
-      await put(a, userB);
-      await put(b, userA);
-      // Si alguno llegó a su partido por BYE, ese BYE pasa a nombre del otro.
+      await put(a, b);
+      await put(b, a);
+      // Estado: con los dos jugadores el partido queda listo; con un cupo vacío, pendiente.
       await client.query(
         `UPDATE bracket_matches
-            SET player1_id = CASE WHEN player1_id = $3 THEN $4::uuid WHEN player1_id = $4 THEN $3::uuid ELSE player1_id END,
-                player2_id = CASE WHEN player2_id = $3 THEN $4::uuid WHEN player2_id = $4 THEN $3::uuid ELSE player2_id END,
-                winner_id  = CASE WHEN winner_id  = $3 THEN $4::uuid WHEN winner_id  = $4 THEN $3::uuid ELSE winner_id END
-          WHERE id_tournament = $1 AND id_category = $2 AND status = 'bye'
-            AND ($3 IN (player1_id, player2_id) OR $4 IN (player1_id, player2_id))`,
-        [tournamentId, categoryId, userA, userB]
+            SET status = CASE WHEN player1_id IS NOT NULL AND player2_id IS NOT NULL THEN 'ready' ELSE 'pending' END
+          WHERE id_match = ANY($1::uuid[]) AND status IN ('pending', 'ready')`,
+        [[a.id_match, b.id_match]]
       );
+      const players = [a.player, b.player].filter((p): p is string => !!p);
+      if (a.player && b.player) {
+        // Si alguno llegó a su partido por BYE, ese BYE pasa a nombre del otro.
+        await client.query(
+          `UPDATE bracket_matches
+              SET player1_id = CASE WHEN player1_id = $3 THEN $4::uuid WHEN player1_id = $4 THEN $3::uuid ELSE player1_id END,
+                  player2_id = CASE WHEN player2_id = $3 THEN $4::uuid WHEN player2_id = $4 THEN $3::uuid ELSE player2_id END,
+                  winner_id  = CASE WHEN winner_id  = $3 THEN $4::uuid WHEN winner_id  = $4 THEN $3::uuid ELSE winner_id END
+            WHERE id_tournament = $1 AND id_category = $2 AND status = 'bye'
+              AND ($3 IN (player1_id, player2_id) OR $4 IN (player1_id, player2_id))`,
+          [tournamentId, categoryId, a.player, b.player]
+        );
+      }
       // Si era árbitro del partido al que ahora entra a jugar, deja de serlo.
       await client.query(
         `UPDATE bracket_matches SET referee_id = NULL
           WHERE id_match = ANY($1::uuid[]) AND referee_id IN (player1_id, player2_id)`,
         [[a.id_match, b.id_match]]
       );
-      await this.notifications.createForMany(
-        [userA, userB],
-        {
-          type: "next_match_ready",
-          title: "Cambió tu partido en la llave",
-          message: "El organizador te cambió de lugar en la llave. Revisa contra quién juegas.",
-          idTournament: tournamentId,
-          idCategory: categoryId,
-          matchType: "bracket",
-        },
-        client
-      );
+      if (players.length > 0) {
+        await this.notifications.createForMany(
+          players,
+          {
+            type: "next_match_ready",
+            title: "Cambió tu partido en la llave",
+            message: "El organizador te cambió de lugar en la llave. Revisa contra quién juegas.",
+            idTournament: tournamentId,
+            idCategory: categoryId,
+            matchType: "bracket",
+          },
+          client
+        );
+      }
       if (params.requestedBy) {
-        const names = await this.getUserNames([userA, userB]);
-        const nm = (id: string) => [names.get(id)?.first_name, names.get(id)?.last_name].filter(Boolean).join(" ");
         await this.activityLog.record(
           tournamentId,
           params.requestedBy,
           "bracket_players_swapped",
-          `${nm(userA)} ↔ ${nm(userB)}${params.confirm ? " (con aviso confirmado)" : ""}`,
+          `${await this.positionName(client, a)} ↔ ${await this.positionName(client, b)}${params.confirm ? " (con aviso confirmado)" : ""}`,
           client
         );
       }
@@ -770,58 +773,223 @@ export class BracketsRepository {
     });
   }
 
+  /** Puesto de la llave sin jugar de un jugador (su primer partido pendiente) o de un cupo "slot:<grupo>:<puesto>". */
+  private async findSwapPosition(
+    client: PoolClient,
+    tournamentId: string,
+    categoryId: string,
+    ref: string
+  ): Promise<SwapPosition | null> {
+    const slotRef = /^slot:([0-9a-f-]{36}):(\d+)$/i.exec(ref);
+    const r = await client.query<{
+      id_match: string;
+      round: number;
+      match_number: number;
+      player1_id: string | null;
+      player2_id: string | null;
+      player1_source_group: string | null;
+      player1_source_rank: number | null;
+      player2_source_group: string | null;
+      player2_source_rank: number | null;
+      live: boolean;
+    }>(
+      `SELECT id_match, round, match_number, player1_id, player2_id,
+              player1_source_group, player1_source_rank, player2_source_group, player2_source_rank,
+              (set_scores IS NOT NULL OR table_number IS NOT NULL) AS live
+         FROM bracket_matches
+        WHERE id_tournament = $1 AND id_category = $2
+          AND status IN ('pending', 'ready') AND NOT is_bye
+          AND (${
+            slotRef
+              ? `(player1_id IS NULL AND player1_source_group = $3::uuid AND player1_source_rank = $4)
+                 OR (player2_id IS NULL AND player2_source_group = $3::uuid AND player2_source_rank = $4)`
+              : `player1_id = $3::uuid OR player2_id = $3::uuid`
+          })
+        ORDER BY round ASC
+        LIMIT 1
+        FOR UPDATE`,
+      slotRef ? [tournamentId, categoryId, slotRef[1], Number(slotRef[2])] : [tournamentId, categoryId, ref]
+    );
+    const m = r.rows[0];
+    if (!m) return null;
+    const isOne = slotRef
+      ? m.player1_id === null && m.player1_source_group === slotRef[1] && Number(m.player1_source_rank) === Number(slotRef[2])
+      : m.player1_id === ref;
+    const slot: 1 | 2 = isOne ? 1 : 2;
+    return {
+      id_match: m.id_match,
+      round: m.round,
+      match_number: m.match_number,
+      slot,
+      player: slot === 1 ? m.player1_id : m.player2_id,
+      sourceGroup: slot === 1 ? m.player1_source_group : m.player2_source_group,
+      sourceRank: slot === 1 ? m.player1_source_rank : m.player2_source_rank,
+      rival: slot === 1 ? m.player2_id : m.player1_id,
+      rivalSourceGroup: slot === 1 ? m.player2_source_group : m.player1_source_group,
+      live: m.live,
+    };
+  }
+
+  /** "Juan Pérez" o "cupo 2° GR-12" (para el historial y los avisos). */
+  private async positionName(client: PoolClient, p: SwapPosition): Promise<string> {
+    if (p.player) {
+      const r = await client.query<{ n: string }>(
+        `SELECT TRIM(CONCAT(first_name, ' ', last_name)) AS n FROM users WHERE id_user = $1`,
+        [p.player]
+      );
+      return r.rows[0]?.n ?? "un jugador";
+    }
+    const g = await client.query<{ group_name: string }>(`SELECT group_name FROM category_groups WHERE id_group = $1`, [
+      p.sourceGroup,
+    ]);
+    return `cupo ${p.sourceRank}° ${g.rows[0]?.group_name ?? ""}`.trim();
+  }
+
   /**
    * Avisos de un cambio de lugar en la llave: contra quién quedaría cada uno
    * en su próximo partido (el rival que ya está, o los que juegan el partido
-   * que define a ese rival) y si es de su mismo grupo o de su mismo club.
+   * que define a ese rival) y si es de su mismo grupo o de su mismo club. Un
+   * cupo sin llenar avisa si quedaría contra alguien de su mismo grupo.
    */
   private async swapWarnings(
     client: PoolClient,
     tournamentId: string,
     categoryId: string,
-    moves: Array<{ player: string; other: string; into: { id_match: string; round: number; match_number: number; slot: 1 | 2; rival: string | null } }>
+    moves: Array<{ occupant: SwapPosition; into: SwapPosition }>
   ): Promise<string[]> {
     const warnings: string[] = [];
-    for (const mv of moves) {
-      let rivals: string[] = [];
-      if (mv.into.rival) {
-        rivals = [mv.into.rival === mv.player ? mv.other : mv.into.rival];
+    // Grupo de cada jugador en esta categoría (o en el Oro, si esta es la Plata).
+    const groupOf = async (userId: string): Promise<string | null> => {
+      const r = await client.query<{ id_group: string }>(
+        `SELECT g1.id_group FROM group_members g1
+           JOIN category_groups cg ON cg.id_group = g1.id_group
+           LEFT JOIN tournament_categories tc ON tc.id_category = cg.id_category
+          WHERE g1.id_user = $1 AND cg.id_tournament = $2 AND (cg.id_category = $3 OR tc.silver_category_id = $3)
+          LIMIT 1`,
+        [userId, tournamentId, categoryId]
+      );
+      return r.rows[0]?.id_group ?? null;
+    };
+    for (const { occupant, into } of moves) {
+      const other = moves.find((m) => m.into !== into)!.into; // el puesto que deja
+      // Rivales en el puesto nuevo: { jugador | null, grupo }.
+      type Rival = { player: string | null; group: string | null };
+      let rivals: Rival[] = [];
+      if (into.rival || into.rivalSourceGroup) {
+        const same = into.rival !== null && into.rival === occupant.player;
+        rivals = same ? [] : [{ player: into.rival, group: into.rival ? await groupOf(into.rival) : into.rivalSourceGroup }];
+        if (into.id_match === other.id_match) rivals = []; // los dos en el mismo partido: siguen enfrentados
       } else {
         const feeder = await client.query<{ player1_id: string | null; player2_id: string | null }>(
           `SELECT player1_id, player2_id FROM bracket_matches
             WHERE id_tournament = $1 AND id_category = $2 AND next_round = $3 AND next_match_number = $4
               AND next_match_slot = $5`,
-          [tournamentId, categoryId, mv.into.round, mv.into.match_number, mv.into.slot === 1 ? 2 : 1]
+          [tournamentId, categoryId, into.round, into.match_number, into.slot === 1 ? 2 : 1]
         );
-        rivals = feeder.rows.flatMap((f) => [f.player1_id, f.player2_id]).filter((p): p is string => !!p);
-        rivals = rivals.map((r) => (r === mv.player ? mv.other : r));
+        for (const f of feeder.rows) {
+          for (const p of [f.player1_id, f.player2_id]) {
+            if (!p) continue;
+            const who = p === occupant.player ? other.player : p;
+            if (who) rivals.push({ player: who, group: await groupOf(who) });
+          }
+        }
       }
-      rivals = rivals.filter((r) => r !== mv.player);
-      if (rivals.length === 0) continue;
-      const r = await client.query<{ rival: string; same_group: boolean; same_club: boolean; name: string; rival_name: string }>(
-        `SELECT rv.id AS rival,
-                EXISTS (
-                  SELECT 1 FROM group_members g1
-                    JOIN group_members g2 ON g2.id_group = g1.id_group
-                    JOIN category_groups cg ON cg.id_group = g1.id_group
-                    LEFT JOIN tournament_categories tc ON tc.id_category = cg.id_category
-                   WHERE g1.id_user = $3 AND g2.id_user = rv.id AND cg.id_tournament = $1
-                     AND (cg.id_category = $2 OR tc.silver_category_id = $2)
-                ) AS same_group,
-                (pu.id_club IS NOT NULL AND pu.id_club = ru.id_club) AS same_club,
-                TRIM(CONCAT(pu.first_name, ' ', pu.last_name)) AS name,
-                TRIM(CONCAT(ru.first_name, ' ', ru.last_name)) AS rival_name
-           FROM unnest($4::uuid[]) AS rv(id)
-           JOIN users pu ON pu.id_user = $3
-           JOIN users ru ON ru.id_user = rv.id`,
-        [tournamentId, categoryId, mv.player, rivals]
-      );
-      for (const row of r.rows) {
-        if (row.same_group) warnings.push(`${row.name} quedaría contra ${row.rival_name}, que estuvo en su mismo grupo`);
-        else if (row.same_club) warnings.push(`${row.name} quedaría contra ${row.rival_name}, de su mismo club`);
+      const myGroup = occupant.player ? await groupOf(occupant.player) : occupant.sourceGroup;
+      const myName = await this.positionName(client, occupant);
+      for (const rv of rivals) {
+        const rivalName = rv.player
+          ? await this.positionName(client, { ...occupant, player: rv.player })
+          : "un cupo de su mismo grupo";
+        if (myGroup && rv.group && myGroup === rv.group) {
+          warnings.push(`${myName} quedaría contra ${rivalName}, que estuvo en su mismo grupo`);
+          continue;
+        }
+        if (occupant.player && rv.player) {
+          const c = await client.query<{ same: boolean }>(
+            `SELECT (a.id_club IS NOT NULL AND a.id_club = b.id_club) AS same FROM users a, users b
+              WHERE a.id_user = $1 AND b.id_user = $2`,
+            [occupant.player, rv.player]
+          );
+          if (c.rows[0]?.same) warnings.push(`${myName} quedaría contra ${rivalName}, de su mismo club`);
+        }
       }
     }
     return warnings;
+  }
+
+  /**
+   * Puestos de la pre-llave y la primera ronda (los primeros partidos de cada
+   * uno). locked = ya no se puede mover (jugado, en vivo o en una mesa).
+   */
+  async bracketPositions(tournamentId: string, categoryId: string): Promise<BracketPosition[]> {
+    const r = await this.pool.query<BracketPosition>(
+      `SELECT bm.id_match, bm.round, bm.match_number, bm.next_match_number, bm.next_match_slot, s.slot,
+              CASE s.slot WHEN 1 THEN bm.player1_id ELSE bm.player2_id END AS player,
+              CASE s.slot WHEN 1 THEN bm.player1_source_group ELSE bm.player2_source_group END AS source_group,
+              CASE s.slot WHEN 1 THEN bm.player1_source_rank ELSE bm.player2_source_rank END AS source_rank,
+              CASE s.slot WHEN 1 THEN bm.seed1 ELSE bm.seed2 END AS seed,
+              (bm.status NOT IN ('pending', 'ready') OR bm.is_bye OR bm.set_scores IS NOT NULL
+                 OR bm.table_number IS NOT NULL) AS locked
+         FROM bracket_matches bm CROSS JOIN (VALUES (1), (2)) AS s(slot)
+        WHERE bm.id_tournament = $1 AND bm.id_category = $2 AND bm.round IN (0, 1)
+        ORDER BY bm.round, bm.match_number, s.slot`,
+      [tournamentId, categoryId]
+    );
+    return r.rows.map((x) => ({ ...x, source_rank: x.source_rank === null ? null : Number(x.source_rank) }));
+  }
+
+  /** Nombre, club, grupo y puesto con que clasificó cada jugador (grupo del Oro si es la Plata). */
+  async bracketPlayerInfo(
+    tournamentId: string,
+    categoryId: string,
+    ids: string[]
+  ): Promise<Map<string, { name: string; club: string | null; clubName: string | null; group: string | null; label: string | null }>> {
+    const r = await this.pool.query<{
+      id_user: string;
+      name: string;
+      id_club: string | null;
+      club_name: string | null;
+      id_group: string | null;
+      label: string | null;
+    }>(
+      `SELECT u.id_user, TRIM(CONCAT(u.first_name, ' ', u.last_name)) AS name, u.id_club, c.name AS club_name,
+              g.id_group, gs.qualification_label AS label
+         FROM users u
+         LEFT JOIN clubs c ON c.id_club = u.id_club
+         LEFT JOIN LATERAL (
+           SELECT gm.id_group FROM group_members gm
+             JOIN category_groups cg ON cg.id_group = gm.id_group
+             LEFT JOIN tournament_categories tc ON tc.id_category = cg.id_category
+            WHERE gm.id_user = u.id_user AND cg.id_tournament = $1 AND (cg.id_category = $2 OR tc.silver_category_id = $2)
+            LIMIT 1
+         ) g ON TRUE
+         LEFT JOIN group_standings gs ON gs.id_group = g.id_group AND gs.id_user = u.id_user
+        WHERE u.id_user = ANY($3::uuid[])`,
+      [tournamentId, categoryId, ids]
+    );
+    return new Map(
+      r.rows.map((x) => [x.id_user, { name: x.name, club: x.id_club, clubName: x.club_name, group: x.id_group, label: x.label }])
+    );
+  }
+
+  async groupNames(ids: string[]): Promise<Map<string, string>> {
+    if (ids.length === 0) return new Map();
+    const r = await this.pool.query<{ id_group: string; group_name: string }>(
+      `SELECT id_group, group_name FROM category_groups WHERE id_group = ANY($1::uuid[])`,
+      [ids]
+    );
+    return new Map(r.rows.map((x) => [x.id_group, x.group_name]));
+  }
+
+  /** Cupos de un grupo en la llave adelantada: quién los ocupa y de qué puesto son. */
+  async groupSourcePositions(groupId: string): Promise<Array<{ id_category: string; player: string | null; rank: number }>> {
+    const r = await this.pool.query<{ id_category: string; player: string | null; rank: number }>(
+      `SELECT id_category, player1_id AS player, player1_source_rank AS rank FROM bracket_matches WHERE player1_source_group = $1
+       UNION ALL
+       SELECT id_category, player2_id, player2_source_rank FROM bracket_matches WHERE player2_source_group = $1`,
+      [groupId]
+    );
+    return r.rows.map((x) => ({ ...x, rank: Number(x.rank) }));
   }
 
   /** ¿Algún jugador de este grupo ya jugó (o ganó por W.O.) un partido de la llave de Oro o de Plata? */
@@ -2062,7 +2230,11 @@ export class BracketsRepository {
               (SELECT player1_source_rank::text || '° ' || cg.group_name FROM category_groups cg
                 WHERE cg.id_group = player1_source_group) AS player1_slot_label,
               (SELECT player2_source_rank::text || '° ' || cg.group_name FROM category_groups cg
-                WHERE cg.id_group = player2_source_group) AS player2_slot_label
+                WHERE cg.id_group = player2_source_group) AS player2_slot_label,
+              CASE WHEN player1_id IS NULL AND player1_source_group IS NOT NULL
+                   THEN 'slot:' || player1_source_group || ':' || player1_source_rank END AS player1_slot_ref,
+              CASE WHEN player2_id IS NULL AND player2_source_group IS NOT NULL
+                   THEN 'slot:' || player2_source_group || ':' || player2_source_rank END AS player2_slot_ref
        FROM bracket_matches
        WHERE id_tournament = $1 AND id_category = $2
        ORDER BY round ASC, match_number ASC`,
