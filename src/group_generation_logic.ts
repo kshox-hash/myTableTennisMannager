@@ -436,23 +436,62 @@ function pickBestGroupIndex(
 }
 
 /**
- * Distribución principal:
- * - ordena por ranking
- * - aplica serpentina
- * - intenta evitar mismo club si puede
+ * Distribución principal, por "filas" (bombos):
+ * - Los jugadores vienen ordenados por sembrado/ranking.
+ * - Fila 1 = los primeros (uno por grupo: cabezas de serie, GR-1 el mejor),
+ *   fila 2 = los siguientes, y así. Cada fila va en serpentina (ida y vuelta)
+ *   y solo entre los grupos que todavía tienen lugar en esa fila (un grupo de
+ *   3 no recibe a nadie de la fila 4). Así cada grupo tiene exactamente un
+ *   jugador de cada fila y todos quedan parejos.
+ * - Separar clubes: si alguien cae en un grupo donde ya hay uno de su club, se
+ *   intercambia con un jugador de SU MISMA FILA de otro grupo (el más cercano)
+ *   cuando a ninguno de los dos le queda un compañero de club. Nunca se manda
+ *   a alguien a otra fila: antes eso dejaba grupos con dos jugadores de la
+ *   fila 2 y otros sin ninguno (grupos disparejos).
  */
 export function assignPlayersToGroups(
   players: CompetitionPlayerInput[],
   plan: Array<2 | 3 | 4>
 ): InternalGroupBucket[] {
   const groups = createEmptyBuckets(plan);
-  const order = buildSerpentineGroupOrder(groups.length, players.length);
+  const maxSize = Math.max(...plan);
+  let next = 0;
 
-  players.forEach((player, playerIndex) => {
-    const suggestedIndex = order[playerIndex];
-    const chosenIndex = pickBestGroupIndex(groups, suggestedIndex, player);
-    groups[chosenIndex].players.push(player);
-  });
+  for (let row = 0; row < maxSize && next < players.length; row++) {
+    const eligible = groups.map((_, i) => i).filter((i) => groups[i].target_size > row);
+    if (row % 2 === 1) eligible.reverse();
+    const rowPlayers = players.slice(next, next + eligible.length);
+    next += rowPlayers.length;
+
+    // placed[k] = jugador de esta fila en el grupo eligible[k].
+    const placed = rowPlayers.slice();
+    const clashes = (player: CompetitionPlayerInput, groupIndex: number) => groupHasSameClub(groups[groupIndex], player);
+    let improved = true;
+    for (let pass = 0; improved && pass < 10; pass++) {
+      improved = false;
+      for (let k = 0; k < placed.length; k++) {
+        if (!clashes(placed[k], eligible[k])) continue;
+        const candidates = placed
+          .map((_, j) => j)
+          .filter((j) => j !== k)
+          .sort((x, y) => Math.abs(x - k) - Math.abs(y - k));
+        for (const j of candidates) {
+          if (!clashes(placed[k], eligible[j]) && !clashes(placed[j], eligible[k])) {
+            [placed[k], placed[j]] = [placed[j], placed[k]];
+            improved = true;
+            break;
+          }
+        }
+      }
+    }
+    placed.forEach((player, k) => groups[eligible[k]].players.push(player));
+  }
+
+  // Por si el plan no cuadra con la cantidad (no debería): el resto, donde haya lugar.
+  for (const player of players.slice(next)) {
+    const index = pickBestGroupIndex(groups, groups.length - 1, player);
+    groups[index].players.push(player);
+  }
 
   return groups;
 }

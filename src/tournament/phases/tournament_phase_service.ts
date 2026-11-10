@@ -88,6 +88,15 @@ export class TournamentPhaseService {
       [id_tournament, gold.silver_category_id, silverPlayers.map((p) => p.id_user)]
     );
     await this.adminRepo.bulkEnrollDirectAdvance(id_tournament, gold.silver_category_id, silverPlayers.map((p) => p.id_user));
+    // Semilla de Plata = orden de los grupos (el 3° de GR-1 primero, como en
+    // el Oro). Antes quedaba por hora de inscripción, que es la misma para
+    // todos: el orden no estaba definido.
+    await DB.getPool().query(
+      `UPDATE enrollments e SET seed = o.n
+         FROM unnest($3::uuid[]) WITH ORDINALITY AS o(id_user, n)
+        WHERE e.id_tournament = $1 AND e.id_category = $2 AND e.id_user = o.id_user`,
+      [id_tournament, gold.silver_category_id, silverPlayers.map((p) => p.id_user)]
+    );
     const result = await this.bracketsService.generateBracket(id_tournament, gold.silver_category_id, {
       best_of_sets: format.bestOfSets ?? 5,
       points_per_set: format.pointsPerSet ?? 11,
@@ -103,7 +112,7 @@ export class TournamentPhaseService {
    * "Armar llave de Plata" a mano, desde la categoría Plata: por si no se
    * armó sola (o falló). Necesita que los grupos de Oro hayan terminado.
    */
-  async buildSilverNow(silverCategoryId: string, id_tournament: string, rebuild = false) {
+  async buildSilverNow(silverCategoryId: string, id_tournament: string, rebuild = false, requestedBy?: string) {
     const gold = (
       await DB.getPool().query<{ id_category: string }>(
         `SELECT id_category FROM tournament_categories WHERE silver_category_id = $1 AND id_tournament = $2 LIMIT 1`,
@@ -144,10 +153,19 @@ export class TournamentPhaseService {
       return { ok: false as const, message: "Todavía hay partidos de grupo sin resultado en la categoría de Oro" };
     }
     const goldMatch = (await this.bracketsRepo.findBracket(id_tournament, gold.id_category)).find((m) => !m.is_bye);
-    return this.buildSilver(gold.id_category, id_tournament, {
+    const built = await this.buildSilver(gold.id_category, id_tournament, {
       bestOfSets: (goldMatch?.best_of_sets as 1 | 3 | 5 | 7 | undefined) ?? 5,
       pointsPerSet: (goldMatch?.points_per_set as 11 | 21 | undefined) ?? 11,
     });
+    if (built.ok && requestedBy) {
+      await this.bracketsRepo.activityLog.record(
+        id_tournament,
+        requestedBy,
+        with_players > 0 ? "silver_rebuilt" : "bracket_generated",
+        with_players > 0 ? `${built.players} jugadores` : "Llave de Plata"
+      );
+    }
+    return built;
   }
 
   // Obtener estado de todas las categorías de un torneo

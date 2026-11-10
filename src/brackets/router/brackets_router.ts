@@ -242,13 +242,23 @@ router.post(
       };
       return res.status(409).json({ ok: false, message: msg[r.error] ?? r.error });
     }
+    const names = await repo.getUserNames([out_user_id, in_user_id]);
+    const nm = (id: string) => [names.get(id)?.first_name, names.get(id)?.last_name].filter(Boolean).join(" ");
+    await repo.activityLog.record(
+      String(req.params.id_tournament),
+      req.user!.id_user,
+      "player_replaced",
+      `${nm(in_user_id)} en lugar de ${nm(out_user_id)}`
+    );
     return res.json({ ok: true, data: { replaced: true, id_group: r.groupId } });
   })
 );
 
 // Intercambiar de lugar a dos jugadores de la llave (misma ronda, sin jugar).
 // POST /api/v1/bracket/tournaments/:id_tournament/categories/:id_category/swap-bracket-players
-const swapBracketSchema = z.object({ user_a: z.string().uuid(), user_b: z.string().uuid() }).strict();
+const swapBracketSchema = z
+  .object({ user_a: z.string().uuid(), user_b: z.string().uuid(), confirm: z.boolean().optional() })
+  .strict();
 router.post(
   "/tournaments/:id_tournament/categories/:id_category/swap-bracket-players",
   authRequired,
@@ -256,13 +266,19 @@ router.post(
   requireTournamentOwnership(),
   validateBody(swapBracketSchema),
   asyncHandler(async (req, res) => {
-    const { user_a, user_b } = req.body as z.infer<typeof swapBracketSchema>;
+    const { user_a, user_b, confirm } = req.body as z.infer<typeof swapBracketSchema>;
     const r = await repo.swapBracketPlayers({
       tournamentId: String(req.params.id_tournament),
       categoryId: String(req.params.id_category),
       userA: user_a,
       userB: user_b,
+      confirm: confirm === true,
+      requestedBy: req.user!.id_user,
     });
+    if (!r.swapped && r.error === "NEEDS_CONFIRM") {
+      // Sin cambios todavía: la web muestra los avisos y vuelve a llamar con confirm.
+      return res.json({ ok: true, data: { swapped: false, needs_confirm: true, warnings: r.warnings } });
+    }
     if (!r.swapped) {
       const msg: Record<string, string> = {
         SAME_PLAYER: "Elegiste al mismo jugador",
@@ -416,7 +432,7 @@ router.post(
   requireRole("admin"),
   requireTournamentOwnership(resolveTournamentFromGroupMatch),
   asyncHandler(async (req, res) => {
-    const r = await service.fixGroupWinner(String(req.params.id_match));
+    const r = await service.fixGroupWinner(String(req.params.id_match), req.user!.id_user);
     if (!r.ok) {
       const msg = r.error === "MATCH_NOT_FOUND" ? "Partido no encontrado" : "Este partido todavía no tiene resultado cargado";
       return res.status(r.error === "MATCH_NOT_FOUND" ? 404 : 409).json({ ok: false, message: msg });

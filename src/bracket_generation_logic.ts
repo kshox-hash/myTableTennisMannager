@@ -117,9 +117,15 @@ function seedBand(seed: number): number {
  * (BYE) de otra banda: los BYE siempre quedan para las semillas más bajas,
  * nunca le "roban" el pase libre a un jugador mejor rankeado.
  */
-export function shuffleWithinSeedBands<T>(players: T[], isReal: (p: T) => boolean): T[] {
+export function shuffleWithinSeedBands<T>(players: T[], isReal: (p: T) => boolean, byeCount = 0): T[] {
   const result = [...players];
   const numReal = result.filter(isReal).length;
+  const shuffleRange = (from: number, to: number) => {
+    for (let j = to - 1; j > from; j--) {
+      const k = from + Math.floor(Math.random() * (j - from + 1));
+      [result[j], result[k]] = [result[k], result[j]];
+    }
+  };
 
   let i = 0;
   while (i < result.length) {
@@ -128,10 +134,14 @@ export function shuffleWithinSeedBands<T>(players: T[], isReal: (p: T) => boolea
     while (end < result.length && seedBand(end + 1) === band) end++;
 
     const shuffleEnd = Math.min(end, numReal);
-    for (let j = shuffleEnd - 1; j > i; j--) {
-      const k = i + Math.floor(Math.random() * (j - i + 1));
-      [result[j], result[k]] = [result[k], result[j]];
-    }
+    // Los BYE son de las [byeCount] mejores semillas, EN ORDEN ("placed first
+    // against seeded places, in seeding order"). Si una banda queda partida
+    // (p. ej. 10 BYE en la banda 9-16), se sortea por separado entre los que
+    // reciben BYE y entre los que no: así el BYE nunca se lo lleva un peor
+    // sembrado por suerte (antes al 1° de GR-15 le tocaba y al de GR-10 no).
+    const cut = Math.min(Math.max(byeCount, i), shuffleEnd);
+    shuffleRange(i, cut);
+    shuffleRange(cut, shuffleEnd);
     i = end;
   }
 
@@ -165,7 +175,7 @@ export function drawBracketSlots(
   while (padded.length < bracketSize) padded.push(null);
 
   const indexed = padded.map((p, i) => ({ player: p, seed: i + 1 }));
-  return shuffleWithinSeedBands(indexed, (x) => x.player !== null);
+  return shuffleWithinSeedBands(indexed, (x) => x.player !== null, bracketSize - realPlayers);
 }
 
 export type GroupSeededEntry = {
@@ -216,9 +226,38 @@ function drawBracketSlotsForGroupsOnce(entries: GroupSeededEntry[]): DrawnSlot[]
     ...new Array(bracketSize - winners.length).fill(null),
   ];
   const winnerIndexed = winnerPadded.map((p, i) => ({ player: p, seed: i + 1 }));
-  const winnerPlaced = shuffleWithinSeedBands(winnerIndexed, (x) => x.player !== null);
+  // Cuántos BYE hay: van a las mejores semillas, en orden.
+  const byeCount = bracketSize - realPlayers;
+  const winnerPlaced = shuffleWithinSeedBands(winnerIndexed, (x) => x.player !== null, byeCount);
 
   const bySeed: Array<string | null> = winnerPlaced.map((x) => x.player);
+
+  // Banda a medio llenar (p. ej. 33 ganadores: el 33° cae en la banda 33-64):
+  // su lugar exacto se sortea dentro de la banda (entre los puestos que no son
+  // BYE), igual que en un sorteo real. Si no, el ganador 33 quedaría siempre
+  // al lado del semilla 1 y sería el semilla 1 quien juega 1° contra 1°.
+  // El sorteo se hace por separado entre los puestos CON BYE y los SIN BYE de
+  // la banda: un ganador que tenía BYE lo conserva y uno que no, no se lo
+  // quita a otro.
+  if (winners.length > 2) {
+    const lastBand = seedBand(winners.length);
+    const bandFirst = lastBand === 0 ? 1 : 2 ** (lastBand - 1) + 1;
+    const bandLast = Math.min(2 ** lastBand, realPlayers);
+    const classes: Array<[number, number]> = [
+      [bandFirst, Math.min(bandLast, byeCount)], // con BYE
+      [Math.max(bandFirst, byeCount + 1), bandLast], // sin BYE
+    ];
+    for (const [from, to] of classes) {
+      const lastWinner = Math.min(winners.length, to);
+      if (from > lastWinner || to <= lastWinner) continue; // sin ganadores, o la clase ya está llena
+      const inClass = bySeed.slice(from - 1, lastWinner).filter((p): p is string => p !== null);
+      for (let s = from; s <= lastWinner; s++) bySeed[s - 1] = null;
+      const spots = shuffleArray(Array.from({ length: to - from + 1 }, (_, i) => from + i));
+      inClass.forEach((p, i) => {
+        bySeed[spots[i] - 1] = p;
+      });
+    }
+  }
   const pendingSeeds = new Set<number>();
   const winnerHalfByGroup = new Map<string, "top" | "bottom">();
   for (let i = 0; i < bracketSize; i++) {
@@ -260,7 +299,15 @@ function drawBracketSlotsForGroupsOnce(entries: GroupSeededEntry[]): DrawnSlot[]
   // para que lo que quede libre (BYE) sean siempre las semillas más débiles
   // — mismo criterio de protección que en drawBracketSlots.
   const pendingStrongestFirst = [...pendingSeeds].sort((a, b) => a - b);
-  for (const entry of direct) {
+  // Sorteo dentro de cada banda (como con los ganadores): sin esto los pases
+  // directos — toda la Plata — salían siempre en el mismo lugar y los intentos
+  // de separar clubes eran todos iguales.
+  const directDrawn = shuffleWithinSeedBands(
+    direct,
+    () => true,
+    pendingStrongestFirst.filter((seedNum) => seedNum <= byeCount).length
+  );
+  for (const entry of directDrawn) {
     const seedNum = pendingStrongestFirst.shift();
     if (seedNum === undefined) break; // no debería pasar si los conteos cuadran
     bySeed[seedNum - 1] = entry.id;
@@ -274,23 +321,40 @@ function drawBracketSlotsForGroupsOnce(entries: GroupSeededEntry[]): DrawnSlot[]
 // Partidos de la ronda 1 con los dos jugadores del mismo club (id_club no
 // nulo, igual entre ambos) — cuenta cuántos "cruces de asociación" tiene un
 // sorteo, para poder comparar intentos y quedarse con el mejor.
-function countClubClashes(
+//
+// Se mide sobre el PRIMER partido real de cada uno en el cuadro grande (el
+// mismo que después se guarda, con o sin pre-llave): en la ronda 1 los que
+// juegan; el que pasa por BYE, contra cualquiera que pueda salirle en la
+// ronda 2. Antes se medía sobre otro cuadro distinto al que se guardaba.
+export function countClubClashes(
   drawn: DrawnSlot[],
   clubById: Map<string, string | null>,
   seedOrder: number[]
 ): number {
+  const bySeed = new Map(drawn.map((d) => [d.seed, d.player]));
+  const at = (i: number) => bySeed.get(seedOrder[i]) ?? null;
+  const club = (p: string | null) => (p ? clubById.get(p) ?? null : null);
+  const same = (a: string | null, b: string | null) => {
+    const ca = club(a);
+    return !!ca && ca === club(b);
+  };
   let clashes = 0;
-  for (let i = 0; i < seedOrder.length; i += 2) {
-    const a = drawn.find((d) => d.seed === seedOrder[i]);
-    const b = drawn.find((d) => d.seed === seedOrder[i + 1]);
-    const clubA = a?.player ? clubById.get(a.player) : null;
-    const clubB = b?.player ? clubById.get(b.player) : null;
-    if (clubA && clubB && clubA === clubB) clashes++;
+  for (let i = 0; i < seedOrder.length; i += 4) {
+    const pairA = [at(i), at(i + 1)];
+    const pairB = [at(i + 2), at(i + 3)];
+    for (const [x, y] of [pairA, pairB]) if (x && y && same(x, y)) clashes += 2;
+    // Ronda 2: un BYE de un lado llega a jugar contra el que salga del otro.
+    const realA = pairA.filter((p): p is string => p !== null);
+    const realB = pairB.filter((p): p is string => p !== null);
+    if (realA.length === 1 || realB.length === 1) {
+      const cross = realA.flatMap((x) => realB.map((y) => same(x, y)));
+      clashes += cross.filter(Boolean).length;
+    }
   }
   return clashes;
 }
 
-const CLUB_SEPARATION_ATTEMPTS = 25;
+const CLUB_SEPARATION_ATTEMPTS = 300;
 
 /**
  * Sorteo según el ITTF Handbook for Tournament Referees, sección 3.7.2
@@ -343,7 +407,71 @@ export function drawBracketSlotsForGroups(entries: GroupSeededEntry[]): DrawnSlo
     }
   }
 
-  return best;
+  return bestClashes > 0 ? improveClubSeparation(best, entries, clubById, seedOrder) : best;
+}
+
+/**
+ * Último ajuste para separar clubes: intercambia de lugar a dos jugadores
+ * mientras eso baje los cruces de club y NO rompa ninguna regla de más
+ * prioridad: dos ganadores solo dentro de su misma banda de semillas, y
+ * cualquier intercambio debe dejar a cada 2° en la mitad opuesta a su 1°. Los
+ * BYE no se mueven.
+ */
+function improveClubSeparation(
+  drawn: DrawnSlot[],
+  entries: GroupSeededEntry[],
+  clubById: Map<string, string | null>,
+  seedOrder: number[]
+): DrawnSlot[] {
+  const size = seedOrder.length;
+  const half = new Map<number, number>();
+  seedOrder.forEach((seed, i) => half.set(seed, i < size / 2 ? 0 : 1));
+  const info = new Map(entries.map((e) => [e.id, e]));
+  const slots = drawn.map((d) => ({ ...d }));
+
+  const valid = () => {
+    const winnerHalf = new Map<string, number>();
+    for (const d of slots) {
+      const e = d.player ? info.get(d.player) : undefined;
+      if (e?.rankInGroup === 1 && e.groupName) winnerHalf.set(e.groupName, half.get(d.seed)!);
+    }
+    return slots.every((d) => {
+      const e = d.player ? info.get(d.player) : undefined;
+      if (e?.rankInGroup !== 2 || !e.groupName || !winnerHalf.has(e.groupName)) return true;
+      return winnerHalf.get(e.groupName) !== half.get(d.seed);
+    });
+  };
+  const byeCount = slots.filter((d) => d.player === null).length;
+  const canSwap = (a: DrawnSlot, b: DrawnSlot) => {
+    if (!a.player || !b.player) return false;
+    if ((a.seed <= byeCount) !== (b.seed <= byeCount)) return false; // el BYE es del mejor sembrado
+    const wa = info.get(a.player)?.rankInGroup === 1;
+    const wb = info.get(b.player)?.rankInGroup === 1;
+    if (wa !== wb) return false; // un ganador nunca cambia con un no-ganador
+    if (wa && seedBand(a.seed) !== seedBand(b.seed)) return false;
+    if (wa && (a.seed <= 2 || b.seed <= 2)) return false; // semillas 1 y 2 fijas
+    return true;
+  };
+
+  let current = countClubClashes(slots, clubById, seedOrder);
+  let improved = true;
+  for (let pass = 0; improved && current > 0 && pass < 20; pass++) {
+    improved = false;
+    for (let i = 0; i < slots.length && current > 0; i++) {
+      for (let j = i + 1; j < slots.length && current > 0; j++) {
+        if (!canSwap(slots[i], slots[j])) continue;
+        [slots[i].player, slots[j].player] = [slots[j].player, slots[i].player];
+        const next = valid() ? countClubClashes(slots, clubById, seedOrder) : Number.POSITIVE_INFINITY;
+        if (next < current) {
+          current = next;
+          improved = true;
+        } else {
+          [slots[i].player, slots[j].player] = [slots[j].player, slots[i].player];
+        }
+      }
+    }
+  }
+  return slots;
 }
 
 /**
@@ -475,20 +603,24 @@ export function buildBracketFromSlots(
 }
 
 /**
- * Variante de buildBracketFromSlots para cuando N no es una potencia de 2
- * exacta: en vez de completar con BYEs hasta la potencia de 2 siguiente
- * (nextPowerOf2), los 2×surplus sembrados más débiles juegan una "pre-llave"
- * (ronda 0) para ganarse su lugar, y la llave oficial (ronda 1 en adelante)
- * queda del tamaño de la potencia de 2 ANTERIOR (prevPowerOf2) —
- * completamente llena, sin ningún BYE. Ver Punto 3 del documento fundacional
- * del proyecto ("Pre-llaves y Byes").
+ * Variante para cuando N no es una potencia de 2 exacta y se elige la llave
+ * chica (prevPowerOf2) con pre-llave en vez de BYEs.
  *
- * `rankedRealPlayers` debe venir sin huecos, ordenado por semilla real
- * (índice 0 = semilla 1) — exactamente el resultado de drawBracketSlots /
- * drawBracketSlotsForGroups filtrando los BYE (que siempre quedan al final:
- * shuffleWithinSeedBands nunca cruza un jugador real más allá de la
- * cantidad total de jugadores reales, así que drawn.slice(0, n) ya da la
- * lista limpia ordenada por semilla).
+ * La pre-llave NO es un cuadro aparte: se arma el cuadro grande
+ * (nextPowerOf2) exactamente como lo sorteó drawBracketSlotsForGroups, con
+ * sus BYE, y se "pliega": los partidos de la ronda 1 del cuadro grande que
+ * tienen dos jugadores son la pre-llave (ronda 0); los que tienen BYE
+ * desaparecen y su jugador entra directo a la llave oficial; la ronda 2 del
+ * cuadro grande es la ronda 1 de la llave oficial. Son los mismos partidos y
+ * los mismos cruces que el cuadro grande, así que se respeta TODO el sorteo:
+ * mitades (el 2° nunca en la mitad de su 1°), BYE para las mejores semillas y
+ * separación por club.
+ *
+ * (Antes se rearmaba una llave chica con otro orden de semillas y eso
+ * deshacía las mitades: salían revanchas de grupo y cruces del mismo club.)
+ *
+ * `rankedRealPlayers`: los jugadores reales con la semilla (= puesto en el
+ * cuadro grande) que les dio el sorteo.
  */
 export function buildBracketWithPreRound(
   rankedRealPlayers: DrawnSlot[],
@@ -497,163 +629,45 @@ export function buildBracketWithPreRound(
 ): GeneratedBracketResult {
   const n = rankedRealPlayers.length;
   const floor = prevPowerOf2(n);
+  if (floor === n) return buildBracketFromSlots(rankedRealPlayers, bestOfSets, pointsPerSet);
 
-  if (floor === n) {
-    // Ya es una potencia de 2 exacta: no hace falta pre-llave, mismo camino
-    // de siempre (cero BYEs de por sí).
-    return buildBracketFromSlots(rankedRealPlayers, bestOfSets, pointsPerSet);
+  const ceil = floor * 2;
+  const bySeed = new Map(rankedRealPlayers.map((d) => [d.seed, d.player]));
+  const slots = Array.from({ length: ceil }, (_, i) => ({ player: bySeed.get(i + 1) ?? null, seed: i + 1 }));
+  const big = buildBracketFromSlots(slots, bestOfSets, pointsPerSet);
+
+  const round1 = big.matches.filter((m) => m.round === 1);
+  const played = round1.filter((m) => m.player1_id !== null && m.player2_id !== null);
+  // Semilla con la que llega cada jugador que pasó por BYE (para mostrarla).
+  const byeSeed = new Map<string, number>();
+  for (const m of round1) {
+    if (m.is_bye && m.winner_id) byeSeed.set(m.winner_id, (m.player1_id === m.winner_id ? m.seed1 : m.seed2) ?? 0);
   }
 
-  const surplus = n - floor;
-  // Semillas 1..floor-surplus: entran directo a la ronda 1.
-  const direct = rankedRealPlayers.slice(0, floor - surplus);
-  // Semillas floor-surplus+1..n (2×surplus jugadores): juegan la ronda 0.
-  const preRoundPool = rankedRealPlayers.slice(floor - surplus);
-
-  const totalRounds = Math.log2(floor);
-  const allMatches: TempBracketMatch[] = [];
-
-  // A qué partido (y a qué cupo, 1 o 2) de la ronda 1 le corresponde cada
-  // semilla del cuadro de tamaño floor — mismo criterio de emparejamiento
-  // que ya usa buildBracketFromSlots para la ronda 1 normal.
-  const round1SeedOrder = getSeedPositions(floor);
-  const round1MatchBySeed = new Map<number, number>();
-  const round1SlotBySeed = new Map<number, 1 | 2>();
-  round1SeedOrder.forEach((seed, i) => {
-    round1MatchBySeed.set(seed, Math.floor(i / 2) + 1);
-    round1SlotBySeed.set(seed, i % 2 === 0 ? 1 : 2);
-  });
-
-  // Ronda 0 (pre-llave): empareja "de afuera hacia adentro" — el sembrado
-  // más fuerte del pool contra el más débil, el segundo más fuerte contra
-  // el segundo más débil, etc. (2×surplus siempre es par, así que no hace
-  // falta lidiar con BYE acá). OJO: NO se usa getSeedPositions para esto —
-  // esa función asume que su tamaño es una potencia de 2 (recursión
-  // n -> n/2 hasta llegar a 1) y 2×surplus casi nunca lo es, así que la
-  // habíamos usado mal acá: para un N feo (ej. 23 jugadores) terminaba en
-  // recursión infinita ("Maximum call stack size exceeded"). Acá alcanza
-  // con un emparejamiento simple: no hay múltiples rondas dentro de la
-  // pre-llave que requieran la garantía "semilla 1 y 2 se cruzan recién en
-  // la final" — cada partido de ronda 0 es autocontenido, el ganador pasa
-  // directo a la ronda 1.
-  for (let matchNum = 1; matchNum <= surplus; matchNum++) {
-    const p1 = preRoundPool[matchNum - 1];
-    const p2 = preRoundPool[preRoundPool.length - matchNum];
-    const targetSeed = floor - surplus + matchNum;
-    allMatches.push({
-      temp_id: `r0_m${matchNum}`,
+  const matches: TempBracketMatch[] = [];
+  played.forEach((m, i) => {
+    matches.push({
+      ...m,
+      temp_id: `r0_m${i + 1}`,
       round: 0,
-      match_number: matchNum,
-      player1_id: p1.player,
-      player2_id: p2.player,
+      match_number: i + 1,
       next_round: 1,
-      next_match_number: round1MatchBySeed.get(targetSeed)!,
-      next_match_slot: round1SlotBySeed.get(targetSeed)!,
-      winner_id: null,
-      is_bye: false,
-      status: "ready",
-      best_of_sets: bestOfSets,
-      points_per_set: pointsPerSet,
-      dead_slot: null,
-      seed1: p1.seed,
-      seed2: p2.seed,
+      next_match_number: Math.ceil(m.match_number / 2),
+    });
+  });
+  for (const m of big.matches.filter((x) => x.round >= 2)) {
+    const isFirst = m.round === 2;
+    matches.push({
+      ...m,
+      temp_id: `r${m.round - 1}_m${m.match_number}`,
+      round: m.round - 1,
+      next_round: m.next_round === null ? null : m.next_round - 1,
+      seed1: isFirst && m.player1_id ? byeSeed.get(m.player1_id) ?? null : null,
+      seed2: isFirst && m.player2_id ? byeSeed.get(m.player2_id) ?? null : null,
     });
   }
 
-  // Rondas 1..totalRounds: mismos "shells" que buildBracketFromSlots.
-  for (let round = 1; round <= totalRounds; round++) {
-    const matchesInRound = floor / Math.pow(2, round);
-    const isLastRound = round === totalRounds;
-
-    for (let matchNum = 1; matchNum <= matchesInRound; matchNum++) {
-      allMatches.push({
-        temp_id: `r${round}_m${matchNum}`,
-        round,
-        match_number: matchNum,
-        player1_id: null,
-        player2_id: null,
-        next_round: isLastRound ? null : round + 1,
-        next_match_number: isLastRound ? null : Math.ceil(matchNum / 2),
-        next_match_slot: isLastRound ? null : ((matchNum % 2 === 1 ? 1 : 2) as 1 | 2),
-        winner_id: null,
-        is_bye: false,
-        status: "pending",
-        best_of_sets: bestOfSets,
-        points_per_set: pointsPerSet,
-        dead_slot: null,
-        seed1: null,
-        seed2: null,
-      });
-    }
-  }
-
-  // Ronda 1: los sembrados directos ya se conocen de entrada; los que
-  // dependen de la pre-llave quedan null hasta que el loop de propagación
-  // de abajo (el mismo de buildBracketFromSlots, generalizado a arrancar en
-  // ronda 0) complete el winner_id de su partido de ronda 0.
-  const round1 = allMatches.filter((m) => m.round === 1);
-  for (const match of round1) {
-    const seedSlot1 = round1SeedOrder[(match.match_number - 1) * 2];
-    const seedSlot2 = round1SeedOrder[(match.match_number - 1) * 2 + 1];
-    if (seedSlot1 <= floor - surplus) {
-      match.player1_id = direct[seedSlot1 - 1].player;
-      match.seed1 = direct[seedSlot1 - 1].seed;
-    }
-    if (seedSlot2 <= floor - surplus) {
-      match.player2_id = direct[seedSlot2 - 1].player;
-      match.seed2 = direct[seedSlot2 - 1].seed;
-    }
-    if (match.player1_id !== null && match.player2_id !== null) {
-      match.status = "ready";
-    }
-  }
-
-  // Mismo mecanismo de propagación que buildBracketFromSlots (realCount /
-  // dead_slot / BYE en cascada) — ver el comentario largo ahí. Acá arranca
-  // en la ronda 0 en vez de la ronda 1, así los partidos de pre-llave
-  // "cuentan" para decidir cuándo la ronda 1 queda lista/pendiente, con el
-  // mismo código sin duplicar nada.
-  const matchMap = new Map(allMatches.map((m) => [m.temp_id, m]));
-  const realCount = new Map<string, number>();
-  for (const match of allMatches.filter((m) => m.round === 0 || m.round === 1)) {
-    realCount.set(match.temp_id, (match.player1_id !== null ? 1 : 0) + (match.player2_id !== null ? 1 : 0));
-  }
-
-  for (let round = 0; round < totalRounds; round++) {
-    const thisRound = allMatches.filter((m) => m.round === round);
-
-    for (const match of thisRound) {
-      if (!match.next_round || !match.next_match_number) continue;
-      const nextMatch = matchMap.get(`r${match.next_round}_m${match.next_match_number}`);
-      if (!nextMatch) continue;
-
-      if (match.winner_id) {
-        if (match.next_match_slot === 1) nextMatch.player1_id = match.winner_id;
-        else nextMatch.player2_id = match.winner_id;
-      }
-
-      const carried = realCount.get(match.temp_id) ?? 0;
-      realCount.set(nextMatch.temp_id, (realCount.get(nextMatch.temp_id) ?? 0) + carried);
-      if (carried === 0 && match.next_match_slot) {
-        nextMatch.dead_slot = match.next_match_slot;
-      }
-    }
-
-    for (const nextMatch of allMatches.filter((m) => m.round === round + 1)) {
-      const count = realCount.get(nextMatch.temp_id) ?? 0;
-      const lone = nextMatch.player1_id ?? nextMatch.player2_id;
-
-      if (count === 1 && lone) {
-        nextMatch.is_bye = true;
-        nextMatch.winner_id = lone;
-        nextMatch.status = "bye";
-      } else if (count >= 2 && nextMatch.player1_id !== null && nextMatch.player2_id !== null) {
-        nextMatch.status = "ready";
-      }
-    }
-  }
-
-  return { matches: allMatches, bracket_size: floor, total_rounds: totalRounds };
+  return { matches, bracket_size: floor, total_rounds: Math.log2(floor) };
 }
 
 /**

@@ -9,7 +9,12 @@ export type ActivityAction =
   | "table_released"
   | "match_result_undone"
   | "bracket_result_undone"
-  | "bracket_generated";
+  | "bracket_generated"
+  | "group_winner_fixed"
+  | "bracket_adjusted"
+  | "bracket_players_swapped"
+  | "player_replaced"
+  | "silver_rebuilt";
 
 export type ActivityLogRow = {
   id_activity: string;

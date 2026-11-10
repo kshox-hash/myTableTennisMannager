@@ -538,39 +538,112 @@ export class BracketsService {
     const closed = opts.fromAbsentClose ? 0 : await this.closeAbsentMatches(groupId);
     if (closed === 0) {
       await this.fillBracketSlotsIfGroupFinished(groupId, tournamentId, categoryId);
-      await this.syncGroupIntoBracket(groupId, tournamentId, categoryId);
+      await this.reconcileGroupWithBrackets(groupId, tournamentId, categoryId);
     }
   }
 
   /**
-   * Resultado de grupo corregido con la llave ya armada: si cambió quién
-   * clasifica (o en qué orden), la llave se ajusta en los partidos que aún no
-   * se juegan. El que ya no pasa sale y entra el que sí, en el mismo cupo: el
-   * mejor clasificado toma el cupo de mejor siembra.
+   * Un grupo corregido con las llaves ya armadas (Oro y, si hay, Plata): ÚNICO
+   * camino para llevar la corrección a las llaves (lo usan "Cambiar ganador" y
+   * volver a cargar un resultado deshecho).
+   *
+   * Cada grupo tiene cupos fijos en el sorteo: el del 1° (lugar de semilla), el
+   * del 2° (mitad opuesta) y el de Plata (el 3°). Cada cupo pasa a quien ahora
+   * ocupa ese puesto en el grupo: si el 1° y el 2° solo se dieron vuelta,
+   * intercambian lugar; si entra uno nuevo, toma el cupo del puesto que ganó.
+   * El que baja de Oro entra a la Plata y viceversa, en el mismo paso.
+   *
+   * Nunca mueve resultados ya jugados: si alguno de los que cambian ya jugó un
+   * partido de llave, no toca nada y devuelve quiénes (lo decide el admin).
    */
-  private async syncGroupIntoBracket(groupId: string, tournamentId: string, categoryId: string): Promise<void> {
-    if ((await this.repo.getCategoryPhase(categoryId)) !== "bracket") return;
-    if (await this.repo.groupHasBracketSlots(groupId)) return; // llave adelantada: sus cupos se llenan solos
+  async reconcileGroupWithBrackets(
+    groupId: string,
+    tournamentId: string,
+    categoryId: string,
+    requestedBy?: string
+  ): Promise<{ changed: boolean; blockedBy?: string[] }> {
+    const phase = await this.repo.getCategoryPhase(categoryId);
+    if (phase !== "bracket" && phase !== "finished") return { changed: false };
+    if (await this.repo.groupHasBracketSlots(groupId)) return { changed: false }; // llave adelantada: sus cupos se llenan solos
     const qualifiers = (await this.repo.loadGroupQualifiers(tournamentId, categoryId))
       .filter((q) => q.id_group === groupId)
       .sort((a, b) => a.rank_in_group - b.rank_in_group);
-    if (qualifiers.length === 0 || !qualifiers[0].group_finished) return;
+    if (qualifiers.length === 0 || !qualifiers[0].group_finished) return { changed: false };
 
-    // Los cupos que este grupo tiene en la llave, del de mejor siembra al peor.
-    const slots = (await this.repo.groupPlayersInBracket(groupId)).sort(
-      (a, b) => (a.seed ?? 999) - (b.seed ?? 999)
-    );
-    const wanted = qualifiers.map((q) => q.id_user).slice(0, slots.length);
-    if (wanted.length < slots.length) return; // no hay suficientes clasificados: no se toca
+    const plan: Array<{ categoryId: string; moves: Array<{ from: string; to: string }>; silver: boolean }> = [];
+    const gold = await this.slotMoves(groupId, categoryId, qualifiers.map((q) => q.id_user));
+    if (gold.length > 0) plan.push({ categoryId, moves: gold, silver: false });
 
-    // Cupo i debe tenerlo el clasificado i (si solo cambiaron de orden entre
-    // ellos, es un intercambio y va en el mismo paso).
-    const moves = slots
-      .map((slot, i) => ({ from: slot.id_user, to: wanted[i] }))
-      .filter((m) => m.from !== m.to);
-    if (moves.length === 0) return;
-    await this.repo.replaceInUnplayedBracket(tournamentId, categoryId, moves);
+    const silverCategoryId = await this.repo.getSilverCategoryId(categoryId);
+    if (silverCategoryId) {
+      const groupMembers = new Set(await this.repo.groupMemberIds(groupId));
+      const wantedSilver = (await this.repo.loadGroupSilverPlayers(tournamentId, categoryId))
+        .filter((p) => groupMembers.has(p.id_user))
+        .map((p) => p.id_user);
+      const silver = await this.slotMoves(groupId, silverCategoryId, wantedSilver);
+      if (silver.length > 0) plan.push({ categoryId: silverCategoryId, moves: silver, silver: true });
+    }
+    if (plan.length === 0) {
+      await this.repo.remarkGroupQualifiers(tournamentId, categoryId, groupId);
+      return { changed: false };
+    }
+
+    // ¿Alguno de los que se mueven ya jugó en esa llave? Entonces no se toca nada.
+    const blocked = new Set<string>();
+    for (const step of plan) {
+      const ids = step.moves.flatMap((m) => [m.from, m.to]);
+      for (const id of await this.repo.playersWithPlayedBracketMatch(step.categoryId, ids)) blocked.add(id);
+    }
+    if (blocked.size > 0) {
+      const names = await this.repo.getUserNames([...blocked]);
+      const label = [...blocked].map((id) => {
+        const n = names.get(id);
+        return [n?.first_name, n?.last_name].filter(Boolean).join(" ") || "un jugador";
+      });
+      await this.repo.remarkGroupQualifiers(tournamentId, categoryId, groupId);
+      return { changed: false, blockedBy: label };
+    }
+
+    for (const step of plan) {
+      await this.repo.replaceInUnplayedBracket(tournamentId, step.categoryId, step.moves);
+      if (step.silver) {
+        for (const m of step.moves) await this.repo.swapSilverEnrollment(tournamentId, step.categoryId, m.from, m.to);
+      }
+    }
     await this.repo.remarkGroupQualifiers(tournamentId, categoryId, groupId);
+    if (requestedBy) {
+      const ids = plan.flatMap((s) => s.moves.flatMap((m) => [m.from, m.to]));
+      const names = await this.repo.getUserNames(ids);
+      const nm = (id: string) => {
+        const n = names.get(id);
+        return [n?.first_name, n?.last_name].filter(Boolean).join(" ");
+      };
+      const detail = plan
+        .map((s) => `${s.silver ? "Plata" : "Oro"}: ${s.moves.map((m) => `${nm(m.to)} en lugar de ${nm(m.from)}`).join(", ")}`)
+        .join(" · ");
+      await this.repo.activityLog.record(tournamentId, requestedBy, "bracket_adjusted", detail);
+    }
+    return { changed: true };
+  }
+
+  /**
+   * Cupos que tiene el grupo en la llave de [bracketCategoryId], en orden de
+   * puesto (el del 1° primero: se reconoce por quién lo tenía marcado como 1°
+   * o 2°; si no, por semilla), y qué cambio necesita cada uno para quedar en
+   * manos de [wanted] (en orden de puesto). Vacío si no hay nada que cambiar o
+   * no alcanzan los clasificados.
+   */
+  private async slotMoves(
+    groupId: string,
+    bracketCategoryId: string,
+    wanted: string[]
+  ): Promise<Array<{ from: string; to: string }>> {
+    const role = (label: string | null) => (label === "first" ? 0 : label === "second" ? 1 : 2);
+    const slots = (await this.repo.groupPlayersInCategoryBracket(groupId, bracketCategoryId)).sort(
+      (a, b) => role(a.label) - role(b.label) || (a.seed ?? 999) - (b.seed ?? 999)
+    );
+    if (slots.length === 0 || wanted.length < slots.length) return [];
+    return slots.map((slot, i) => ({ from: slot.id_user, to: wanted[i] })).filter((m) => m.from !== m.to);
   }
 
   /**
@@ -606,50 +679,30 @@ export class BracketsService {
 
   /**
    * "Cambiar ganador" de un partido de grupo (resultado cargado al revés).
-   * Corrige el grupo y, si la llave ya está armada, lleva el cambio a la
-   * llave de Oro y a la de Plata: quien deja de clasificar sale y entra el
-   * que ahora clasifica, con los resultados que ya estén cargados.
+   * Corrige el grupo y, si las llaves ya están armadas, las ajusta con
+   * reconcileGroupWithBrackets (Oro y Plata a la vez, sin mover resultados
+   * jugados). `bracketBlockedBy`: la llave NO se tocó porque esos jugadores
+   * ya jugaron en ella.
    */
-  async fixGroupWinner(matchId: string): Promise<Result<{ fixed: true; tournamentId: string; categoryId: string }, BracketsError>> {
+  async fixGroupWinner(
+    matchId: string,
+    requestedBy?: string
+  ): Promise<Result<{ fixed: true; tournamentId: string; categoryId: string; bracketBlockedBy?: string[] }, BracketsError>> {
     const r = await this.repo.fixGroupWinner(matchId);
     if (!r.fixed) return fail(r.error === "MATCH_NOT_FOUND" ? BRACKETS_ERRORS.MATCH_NOT_FOUND : BRACKETS_ERRORS.MATCH_NOT_PLAYED);
     const { groupId, tournamentId, categoryId } = r;
-
-    const phase = await this.repo.getCategoryPhase(categoryId);
-    if (phase === "bracket" || phase === "finished") {
-      const qualifiers = (await this.repo.loadGroupQualifiers(tournamentId, categoryId))
-        .filter((q) => q.id_group === groupId)
-        .sort((a, b) => a.rank_in_group - b.rank_in_group);
-      if (qualifiers.length > 0 && qualifiers[0].group_finished) {
-        await this.swapIntoBracket(groupId, tournamentId, categoryId, qualifiers.map((q) => q.id_user));
-        await this.repo.remarkGroupQualifiers(tournamentId, categoryId, groupId);
-        // Plata: el que ahora sale después de los clasificados.
-        const silverCategoryId = await this.repo.getSilverCategoryId(categoryId);
-        if (silverCategoryId) {
-          const silver = (await this.repo.loadGroupSilverPlayers(tournamentId, categoryId))
-            .filter((p) => p.group_name !== undefined)
-            .map((p) => p.id_user);
-          const groupMembers = new Set((await this.repo.groupMemberIds(groupId)));
-          const wantedSilver = silver.filter((id) => groupMembers.has(id));
-          await this.swapIntoBracket(groupId, tournamentId, silverCategoryId, wantedSilver);
-        }
-      }
+    if (requestedBy) {
+      const names = await this.repo.getUserNames([r.oldWinnerId, r.newWinnerId]);
+      const nm = (id: string) => [names.get(id)?.first_name, names.get(id)?.last_name].filter(Boolean).join(" ");
+      await this.repo.activityLog.record(
+        tournamentId,
+        requestedBy,
+        "group_winner_fixed",
+        `Ganador cambiado: ${nm(r.newWinnerId)} (antes ${nm(r.oldWinnerId)})`
+      );
     }
-    return ok({ fixed: true, tournamentId, categoryId });
-  }
-
-  /** En la llave de [bracketCategoryId]: los del grupo que ya no corresponden salen y entran los que sí. */
-  private async swapIntoBracket(groupId: string, tournamentId: string, bracketCategoryId: string, wanted: string[]): Promise<void> {
-    const present = (await this.repo.groupPlayersInCategoryBracket(groupId, bracketCategoryId)).sort(
-      (a, b) => (a.seed ?? 999) - (b.seed ?? 999)
-    );
-    const presentIds = new Set(present.map((p) => p.id_user));
-    const wantedSet = new Set(wanted);
-    const outs = present.filter((p) => !wantedSet.has(p.id_user)).map((p) => p.id_user);
-    const ins = wanted.filter((id) => !presentIds.has(id));
-    for (let i = 0; i < Math.min(outs.length, ins.length); i++) {
-      await this.repo.transferBracketPlayer(tournamentId, bracketCategoryId, outs[i], ins[i]);
-    }
+    const rec = await this.reconcileGroupWithBrackets(groupId, tournamentId, categoryId, requestedBy);
+    return ok({ fixed: true, tournamentId, categoryId, ...(rec.blockedBy ? { bracketBlockedBy: rec.blockedBy } : {}) });
   }
 
   /** Al marcar "No vino" con los grupos en juego: por si con eso el grupo ya puede cerrarse. */
@@ -876,16 +929,28 @@ export class BracketsService {
     // 1..(bracketSize - sobrantes) son los sembrados directos, y las
     // restantes (sobrantes) quedan como "pendiente de pre-llave" en vez de
     // BYE — se resuelven jugando la ronda 0 de abajo, no son un pase gratis.
-    const officialDrawn: DrawnSlot[] =
+    // Con pre-llave, cada fila sale del partido de ronda 1 que se va a guardar
+    // (la llave se arma plegando el cuadro grande, ver buildBracketWithPreRound):
+    // el que entra directo con su semilla, o el cupo que llena una pre-llave
+    // (con la mejor semilla de esa pre-llave, solo para ordenar).
+    const officialRows: DrawnSlot[] | null =
       preRoundTempMatches.length > 0
-        ? [
-            ...rankedRealPlayers.slice(0, bracketSize - preRoundTempMatches.length),
-            ...Array.from({ length: preRoundTempMatches.length }, (_, i) => ({
-              player: null,
-              seed: bracketSize - preRoundTempMatches.length + i + 1,
-            })),
-          ]
-        : [...drawn].sort((a, b) => a.seed - b.seed);
+        ? withPreRound.matches
+            .filter((m) => m.round === 1)
+            .sort((a, b) => a.match_number - b.match_number)
+            .flatMap((m) =>
+              ([1, 2] as const).map((slot) => {
+                const player = slot === 1 ? m.player1_id : m.player2_id;
+                const seed = slot === 1 ? m.seed1 : m.seed2;
+                if (player) return { player, seed: seed ?? 0 };
+                const feeder = preRoundTempMatches.find(
+                  (p) => p.next_match_number === m.match_number && p.next_match_slot === slot
+                );
+                return { player: null, seed: Math.min(feeder?.seed1 ?? 999, feeder?.seed2 ?? 999) };
+              })
+            )
+        : null;
+    const officialDrawn: DrawnSlot[] = [...drawn].sort((a, b) => a.seed - b.seed);
 
     // Pre-llave (ronda 0), lista para mostrar aparte de la sección 2 —
     // mismos partidos exactos que va a persistir generateBracket.
@@ -929,7 +994,7 @@ export class BracketsService {
         ...nameFields(p.id_user),
       })),
       slots: seedOrder.map((seed, i) => {
-        const d = officialDrawn[seed - 1];
+        const d = officialRows ? officialRows[i] : officialDrawn[seed - 1];
         const origin = d.player ? originByUser.get(d.player) : undefined;
         return {
           position: i + 1,
@@ -1236,6 +1301,15 @@ export class BracketsService {
       requestedBy,
     });
     if (!result.undone) return fail(BRACKETS_ERRORS.BRACKET_RESULT_ALREADY_ADVANCED);
+
+    // Si una corrección de grupo había quedado pendiente porque estos dos ya
+    // habían jugado en la llave, ahora que el partido se deshizo la llave se
+    // vuelve a cuadrar con sus grupos.
+    const goldCategoryId = (await this.repo.getGoldCategoryId(match.id_category)) ?? match.id_category;
+    for (const userId of [match.winner_id, loserId]) {
+      const groupId = await this.repo.findUserGroup(match.id_tournament, goldCategoryId, userId);
+      if (groupId) await this.reconcileGroupWithBrackets(groupId, match.id_tournament, goldCategoryId, requestedBy);
+    }
 
     return ok({ undone: true, tournamentId: match.id_tournament, categoryId: match.id_category });
   }

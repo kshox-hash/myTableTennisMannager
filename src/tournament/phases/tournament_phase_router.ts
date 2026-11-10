@@ -87,7 +87,8 @@ router.post(
     const r = await phaseService.buildSilverNow(
       String(req.params.id_category),
       String(req.params.id_tournament),
-      req.body?.rebuild === true
+      req.body?.rebuild === true,
+      req.user!.id_user
     );
     if (!r.ok) return res.status(409).json({ ok: false, message: r.message });
     return res.json({ ok: true, data: { players: r.players } });
