@@ -46,8 +46,8 @@ export type Position = {
 export type ClubSuggestion = {
   /** "group" = ya jugaron en el mismo grupo (lo más grave); "club" = mismo club. */
   kind: "group" | "club";
-  a: { ref: string; name: string };
-  b: { ref: string; name: string };
+  a: { ref: string; name: string; club: string | null };
+  b: { ref: string; name: string; club: string | null };
   clubName: string;
   /** Grupo en que ya jugaron (solo kind = "group"). */
   groupName: string | null;
@@ -58,8 +58,8 @@ export type ClubSuggestion = {
 };
 
 export type SwapOption = {
-  move: { ref: string; name: string; to: Destination };
-  with: { ref: string; name: string; to: Destination };
+  move: { ref: string; name: string; club: string | null; to: Destination };
+  with: { ref: string; name: string; club: string | null; to: Destination };
   /** Por qué se recomienda, en una frase. */
   reason: string;
 };
@@ -72,6 +72,8 @@ export type Destination = {
   match: string;
   /** Nombre del rival, o "el ganador de la pre-llave 1". */
   opponent: string;
+  /** Club del rival (si se conoce). */
+  opponentClub: string | null;
 };
 
 /** Partido de un puesto y, una vez hecho el cambio, quién queda enfrente. */
@@ -81,12 +83,16 @@ function destination(positions: Position[], at: number, arriving: Occupant): Des
   const otherSlot = p.slot === 1 ? 2 : 1;
   const other = positions.find((x) => x.round === p.round && x.match_number === p.match_number && x.slot === otherSlot);
   if (other?.occupant) {
-    return { match, opponent: other.occupant.ref === arriving.ref ? "—" : other.occupant.name };
+    return {
+      match,
+      opponent: other.occupant.ref === arriving.ref ? "—" : other.occupant.name,
+      opponentClub: other.occupant.clubName,
+    };
   }
   const feeder = positions.find(
     (x) => x.round === 0 && x.next_match_number === p.match_number && x.next_match_slot === otherSlot
   );
-  return { match, opponent: feeder ? `el ganador de la pre-llave ${feeder.match_number}` : "por definir" };
+  return { match, opponent: feeder ? `el ganador del partido previo ${feeder.match_number}` : "por definir", opponentClub: null };
 }
 
 /** Pares de rivales del primer partido de cada uno (índices de `positions`). */
@@ -240,18 +246,20 @@ export function clubSuggestions(positions: Position[]): ClubSuggestion[] {
         move: {
           ref: positions[pick.move].occupant!.ref,
           name: positions[pick.move].occupant!.name,
+          club: positions[pick.move].occupant!.clubName,
           to: destination(positions, pick.with, positions[pick.move].occupant!),
         },
         with: {
           ref: positions[pick.with].occupant!.ref,
           name: positions[pick.with].occupant!.name,
+          club: positions[pick.with].occupant!.clubName,
           to: destination(positions, pick.move, positions[pick.with].occupant!),
         },
       }));
     out.push({
       kind,
-      a: { ref: A.ref, name: A.name },
-      b: { ref: B.ref, name: B.name },
+      a: { ref: A.ref, name: A.name, club: A.clubName },
+      b: { ref: B.ref, name: B.name, club: B.clubName },
       clubName: A.clubName ?? "mismo club",
       groupName: sameGroup ? A.groupName ?? null : null,
       swap: options[0] ?? null,

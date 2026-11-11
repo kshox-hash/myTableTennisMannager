@@ -256,6 +256,28 @@ router.post(
 
 const BRACKET_POSITION_REF = /^(slot:)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(:\d+)?$/i;
 
+// Llave adelantada: la mesa acepta cómo entraron a la llave los clasificados
+// de un grupo que terminó (sus partidos recién ahí quedan listos para mesa).
+// POST /api/v1/bracket/tournaments/:id_tournament/categories/:id_category/confirm-entry
+const confirmEntrySchema = z.object({ group_id: z.string().uuid() }).strict();
+router.post(
+  "/tournaments/:id_tournament/categories/:id_category/confirm-entry",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(),
+  validateBody(confirmEntrySchema),
+  asyncHandler(async (req, res) => {
+    const tournamentId = String(req.params.id_tournament);
+    const { group_id } = req.body as z.infer<typeof confirmEntrySchema>;
+    const n = await repo.confirmGroupEntry(tournamentId, String(req.params.id_category), group_id);
+    if (n > 0) {
+      const g = await repo.groupNames([group_id]);
+      await repo.activityLog.record(tournamentId, req.user!.id_user, "bracket_entry_confirmed", g.get(group_id) ?? null);
+    }
+    return res.json({ ok: true, data: { confirmed: n } });
+  })
+);
+
 // Recomendaciones para la mesa de control: cruces del mismo club que todavía
 // se pueden cambiar, con el cambio que no rompe reglas. No cambia nada.
 // GET /api/v1/bracket/tournaments/:id_tournament/categories/:id_category/suggestions

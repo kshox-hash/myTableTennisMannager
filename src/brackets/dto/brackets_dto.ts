@@ -240,6 +240,15 @@ export type BracketMatchRow = {
   player2_slot_label?: string | null;
   /** "slot:<grupo>:<puesto>" mientras el cupo no se llena (para moverlo con cambiar jugadores). */
   player1_slot_ref?: string | null;
+  /** "2° GR-7": de qué grupo y puesto salió (llave adelantada, también ya lleno). */
+  player1_source_label?: string | null;
+  player2_source_label?: string | null;
+  /** Cuándo entró al llenarse su cupo (para marcarlo como nuevo). */
+  player1_filled_at?: string | null;
+  player2_filled_at?: string | null;
+  /** Entró al terminar su grupo y la mesa todavía no lo confirma (el partido no queda listo). */
+  player1_unconfirmed?: boolean;
+  player2_unconfirmed?: boolean;
   player2_slot_ref?: string | null;
   seed1: number | null;
   seed2: number | null;

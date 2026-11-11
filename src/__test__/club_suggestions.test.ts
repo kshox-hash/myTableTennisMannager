@@ -30,8 +30,8 @@ describe("Recomendaciones de club para la mesa de control", () => {
     expect(s[0].swap!.move.ref).toBe("C2");
     expect(s[0].swap!.with.ref).toBe("D2");
     // Dice adónde va cada uno y contra quién.
-    expect(s[0].swap!.move.to).toEqual({ match: "Partido 2", opponent: "B1" });
-    expect(s[0].swap!.with.to).toEqual({ match: "Partido 1", opponent: "A1" });
+    expect(s[0].swap!.move.to).toEqual({ match: "Partido 2", opponent: "B1", opponentClub: "Z" });
+    expect(s[0].swap!.with.to).toEqual({ match: "Partido 1", opponent: "A1", opponentClub: "X" });
   });
 
   it("recomienda primero el cambio que además arregla una revancha de grupo", () => {

@@ -193,6 +193,31 @@ const check = (label: string, cond: boolean, extra = "") => {
   );
   check("la Plata se armó sola con los 10 terceros", silverPlayers.size === 10, `${silverPlayers.size}`);
 
+  // ── Confirmación de la mesa: los recién clasificados entran "por confirmar" ──
+  {
+    const waiting = (await bm()).filter((m: any) => m.player1_unconfirmed || m.player2_unconfirmed);
+    check(
+      "al terminar un grupo, sus clasificados quedan por confirmar y su partido no queda listo",
+      waiting.length > 0 && waiting.every((m: any) => m.status === "pending"),
+      `${waiting.length} partidos en espera`
+    );
+    const groupsToConfirm = new Set<string>(
+      waiting.flatMap((m: any) => [m.player1_unconfirmed ? m.player1_source_group : null, m.player2_unconfirmed ? m.player2_source_group : null]).filter(Boolean)
+    );
+    for (const g of groupsToConfirm) {
+      await call("POST", `/bracket/tournaments/${t}/categories/${gold}/confirm-entry`, { group_id: g });
+    }
+    const after = await bm();
+    const stillWaiting = after.filter((m: any) => m.player1_unconfirmed || m.player2_unconfirmed).length;
+    const readyNow = after.filter((m: any) => waiting.some((w: any) => w.id_match === m.id_match) && m.player1_id && m.player2_id);
+    check(
+      "al confirmar cada grupo, sus partidos con los dos jugadores quedan listos para mesa",
+      stillWaiting === 0 && readyNow.every((m: any) => m.status === "ready"),
+      `${groupsToConfirm.size} grupos confirmados`
+    );
+    matches = after;
+  }
+
   // ── Un cruce de club que aparece después (como al llenarse un cupo): la app lo detecta y propone ──
   {
     const clubOf = new Map(

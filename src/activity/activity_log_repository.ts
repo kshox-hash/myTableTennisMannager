@@ -14,7 +14,8 @@ export type ActivityAction =
   | "bracket_adjusted"
   | "bracket_players_swapped"
   | "player_replaced"
-  | "silver_rebuilt";
+  | "silver_rebuilt"
+  | "bracket_entry_confirmed";
 
 export type ActivityLogRow = {
   id_activity: string;

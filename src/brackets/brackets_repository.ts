@@ -72,6 +72,8 @@ type SwapPosition = {
   player: string | null;
   sourceGroup: string | null;
   sourceRank: number | null;
+  filledAt: string | null;
+  unconfirmed: boolean;
   rival: string | null;
   rivalSourceGroup: string | null;
   live: boolean;
@@ -714,16 +716,17 @@ export class BracketsRepository {
       const put = (s: SwapPosition, from: SwapPosition) =>
         client.query(
           s.slot === 1
-            ? `UPDATE bracket_matches SET player1_id = $2, player1_source_group = $3, player1_source_rank = $4 WHERE id_match = $1`
-            : `UPDATE bracket_matches SET player2_id = $2, player2_source_group = $3, player2_source_rank = $4 WHERE id_match = $1`,
-          [s.id_match, from.player, from.sourceGroup, from.sourceRank]
+            ? `UPDATE bracket_matches SET player1_id = $2, player1_source_group = $3, player1_source_rank = $4, player1_filled_at = $5, player1_unconfirmed = $6 WHERE id_match = $1`
+            : `UPDATE bracket_matches SET player2_id = $2, player2_source_group = $3, player2_source_rank = $4, player2_filled_at = $5, player2_unconfirmed = $6 WHERE id_match = $1`,
+          [s.id_match, from.player, from.sourceGroup, from.sourceRank, from.filledAt, from.unconfirmed]
         );
       await put(a, b);
       await put(b, a);
       // Estado: con los dos jugadores el partido queda listo; con un cupo vacío, pendiente.
       await client.query(
         `UPDATE bracket_matches
-            SET status = CASE WHEN player1_id IS NOT NULL AND player2_id IS NOT NULL THEN 'ready' ELSE 'pending' END
+            SET status = CASE WHEN player1_id IS NOT NULL AND player2_id IS NOT NULL
+                                AND NOT player1_unconfirmed AND NOT player2_unconfirmed THEN 'ready' ELSE 'pending' END
           WHERE id_match = ANY($1::uuid[]) AND status IN ('pending', 'ready')`,
         [[a.id_match, b.id_match]]
       );
@@ -791,10 +794,15 @@ export class BracketsRepository {
       player1_source_rank: number | null;
       player2_source_group: string | null;
       player2_source_rank: number | null;
+      player1_filled_at: string | null;
+      player2_filled_at: string | null;
+      player1_unconfirmed: boolean;
+      player2_unconfirmed: boolean;
       live: boolean;
     }>(
       `SELECT id_match, round, match_number, player1_id, player2_id,
               player1_source_group, player1_source_rank, player2_source_group, player2_source_rank,
+              player1_filled_at, player2_filled_at, player1_unconfirmed, player2_unconfirmed,
               (set_scores IS NOT NULL OR table_number IS NOT NULL) AS live
          FROM bracket_matches
         WHERE id_tournament = $1 AND id_category = $2
@@ -824,6 +832,8 @@ export class BracketsRepository {
       player: slot === 1 ? m.player1_id : m.player2_id,
       sourceGroup: slot === 1 ? m.player1_source_group : m.player2_source_group,
       sourceRank: slot === 1 ? m.player1_source_rank : m.player2_source_rank,
+      filledAt: slot === 1 ? m.player1_filled_at : m.player2_filled_at,
+      unconfirmed: slot === 1 ? m.player1_unconfirmed : m.player2_unconfirmed,
       rival: slot === 1 ? m.player2_id : m.player1_id,
       rivalSourceGroup: slot === 1 ? m.player2_source_group : m.player1_source_group,
       live: m.live,
@@ -979,6 +989,65 @@ export class BracketsRepository {
       [ids]
     );
     return new Map(r.rows.map((x) => [x.id_group, x.group_name]));
+  }
+
+  /**
+   * Llave adelantada: la mesa de control acepta cómo entraron los
+   * clasificados de un grupo. Sus partidos quedan listos (si ya tienen a los
+   * dos jugadores y nadie más está por confirmar). Devuelve cuántos confirmó.
+   */
+  async confirmGroupEntry(tournamentId: string, categoryId: string, groupId: string): Promise<number> {
+    return this.withTransaction(async (client) => {
+      let n = 0;
+      for (const slot of ["player1", "player2"]) {
+        const r = await client.query(
+          `UPDATE bracket_matches SET ${slot}_unconfirmed = FALSE
+            WHERE id_tournament = $1 AND id_category = $2 AND ${slot}_source_group = $3 AND ${slot}_unconfirmed`,
+          [tournamentId, categoryId, groupId]
+        );
+        n += r.rowCount ?? 0;
+      }
+      await client.query(
+        `UPDATE bracket_matches SET status = 'ready'
+          WHERE id_tournament = $1 AND id_category = $2 AND status = 'pending' AND NOT is_bye
+            AND player1_id IS NOT NULL AND player2_id IS NOT NULL
+            AND NOT player1_unconfirmed AND NOT player2_unconfirmed`,
+        [tournamentId, categoryId]
+      );
+      return n;
+    });
+  }
+
+  /**
+   * Llave adelantada: para cada grupo sin terminar, el club de quien hoy va en
+   * cada puesto (por resultados; sin resultados, por sembrado). Se usa como
+   * estimación del club de sus cupos al sortear: casi siempre clasifican los
+   * favoritos, así el sorteo puede separar clubes también ahí.
+   */
+  async estimatedGroupClubs(groupIds: string[]): Promise<Map<string, Map<number, string | null>>> {
+    const out = new Map<string, Map<number, string | null>>();
+    if (groupIds.length === 0) return out;
+    const r = await this.pool.query<{ id_group: string; pos: number; id_club: string | null }>(
+      `SELECT gm.id_group, u.id_club,
+              ROW_NUMBER() OVER (
+                PARTITION BY gm.id_group
+                ORDER BY COALESCE(gs.won, 0) DESC,
+                         COALESCE(gs.sets_for - gs.sets_against, 0) DESC,
+                         COALESCE(gs.points_for - gs.points_against, 0) DESC,
+                         gm.group_position ASC NULLS LAST, gm.id_user ASC
+              ) AS pos
+         FROM group_members gm
+         JOIN users u ON u.id_user = gm.id_user
+         LEFT JOIN group_standings gs ON gs.id_group = gm.id_group AND gs.id_user = gm.id_user
+        WHERE gm.id_group = ANY($1::uuid[])`,
+      [groupIds]
+    );
+    for (const row of r.rows) {
+      const m = out.get(row.id_group) ?? new Map<number, string | null>();
+      m.set(Number(row.pos), row.id_club);
+      out.set(row.id_group, m);
+    }
+    return out;
   }
 
   /** Cupos de un grupo en la llave adelantada: quién los ocupa y de qué puesto son. */
@@ -2053,7 +2122,8 @@ export class BracketsRepository {
       for (const q of qualifiers) {
         for (const slot of ["player1", "player2"]) {
           await client.query(
-            `UPDATE bracket_matches SET ${slot}_id = $1 WHERE ${slot}_source_group = $2 AND ${slot}_source_rank = $3`,
+            `UPDATE bracket_matches SET ${slot}_id = $1, ${slot}_filled_at = now(), ${slot}_unconfirmed = TRUE
+             WHERE ${slot}_source_group = $2 AND ${slot}_source_rank = $3 AND ${slot}_id IS DISTINCT FROM $1`,
             [q.id_user, groupId, q.rank_in_group]
           );
         }
@@ -2066,7 +2136,8 @@ export class BracketsRepository {
       await client.query(
         `UPDATE bracket_matches SET status = 'ready'
          WHERE (player1_source_group = $1 OR player2_source_group = $1)
-           AND status = 'pending' AND player1_id IS NOT NULL AND player2_id IS NOT NULL`,
+           AND status = 'pending' AND player1_id IS NOT NULL AND player2_id IS NOT NULL
+           AND NOT player1_unconfirmed AND NOT player2_unconfirmed`,
         [groupId]
       );
     });
@@ -2077,7 +2148,10 @@ export class BracketsRepository {
   async clearGroupSlots(groupId: string): Promise<void> {
     await this.withTransaction(async (client) => {
       for (const slot of ["player1", "player2"]) {
-        await client.query(`UPDATE bracket_matches SET ${slot}_id = NULL WHERE ${slot}_source_group = $1`, [groupId]);
+        await client.query(
+          `UPDATE bracket_matches SET ${slot}_id = NULL, ${slot}_filled_at = NULL, ${slot}_unconfirmed = FALSE WHERE ${slot}_source_group = $1`,
+          [groupId]
+        );
       }
       await client.query(
         `UPDATE bracket_matches SET winner_id = NULL
@@ -2231,6 +2305,13 @@ export class BracketsRepository {
                 WHERE cg.id_group = player1_source_group) AS player1_slot_label,
               (SELECT player2_source_rank::text || '° ' || cg.group_name FROM category_groups cg
                 WHERE cg.id_group = player2_source_group) AS player2_slot_label,
+              (SELECT player1_source_rank::text || '° ' || cg.group_name FROM category_groups cg
+                WHERE cg.id_group = player1_source_group) AS player1_source_label,
+              (SELECT player2_source_rank::text || '° ' || cg.group_name FROM category_groups cg
+                WHERE cg.id_group = player2_source_group) AS player2_source_label,
+              to_char(player1_filled_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS player1_filled_at,
+              to_char(player2_filled_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS player2_filled_at,
+              player1_unconfirmed, player2_unconfirmed, player1_source_group, player2_source_group,
               CASE WHEN player1_id IS NULL AND player1_source_group IS NOT NULL
                    THEN 'slot:' || player1_source_group || ':' || player1_source_rank END AS player1_slot_ref,
               CASE WHEN player2_id IS NULL AND player2_source_group IS NOT NULL
@@ -2295,9 +2376,11 @@ export class BracketsRepository {
         next_round: number | null;
         next_match_number: number | null;
         next_match_slot: 1 | 2 | null;
+        unconfirmed: boolean;
       }>(
         `SELECT id_match, player1_id, player2_id, dead_slot, status,
-                next_round, next_match_number, next_match_slot
+                next_round, next_match_number, next_match_slot,
+                (player1_unconfirmed OR player2_unconfirmed) AS unconfirmed
          FROM bracket_matches
          WHERE id_tournament = $1 AND id_category = $2 AND round = $3 AND match_number = $4`,
         [tournamentId, categoryId, round, matchNumber]
@@ -2305,7 +2388,7 @@ export class BracketsRepository {
       const match = rows[0];
       if (!match || match.status !== "pending") return;
 
-      if (match.player1_id !== null && match.player2_id !== null) {
+      if (match.player1_id !== null && match.player2_id !== null && !match.unconfirmed) {
         await client.query(`UPDATE bracket_matches SET status = 'ready' WHERE id_match = $1`, [match.id_match]);
         await this.notifyWaitingOpponent(client, {
           tournamentId,

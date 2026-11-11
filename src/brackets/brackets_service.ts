@@ -899,6 +899,12 @@ export class BracketsService {
   > {
     const groupQualifiers = await this.repo.loadGroupQualifiers(tournamentId, categoryId);
     const directEntries = await this.repo.loadDirectEntryPlayers(tournamentId, categoryId);
+    // Llave adelantada: club estimado de cada cupo (el favorito de ese puesto).
+    const estimated = early
+      ? await this.repo.estimatedGroupClubs([
+          ...new Set(groupQualifiers.filter((q) => !q.group_finished).map((q) => q.id_group)),
+        ])
+      : new Map<string, Map<number, string | null>>();
     return [
       ...groupQualifiers.map((q) => {
         const pending = early && !q.group_finished;
@@ -909,7 +915,7 @@ export class BracketsService {
           | "first"
           | "second"
           | null,
-        id_club: pending ? null : q.id_club,
+        id_club: pending ? estimated.get(q.id_group)?.get(q.rank_in_group) ?? null : q.id_club,
         };
       }),
       ...directEntries.map((e) => ({
@@ -958,6 +964,12 @@ export class BracketsService {
 
     const allIds = [...new Set([...seededIds, ...drawn.map((d) => d.player)].filter((id): id is string => id !== null))];
     const names = await this.repo.getUserNames(allIds.filter((id) => !isGroupSlotId(id)));
+    // Club de cada uno: la previsualización revisa los cruces de club antes de confirmar.
+    const clubInfo = await this.repo.bracketPlayerInfo(tournamentId, categoryId, allIds.filter((id) => !isGroupSlotId(id)));
+    const clubFields = (idUser: string | null) => {
+      const c = idUser ? clubInfo.get(idUser) : undefined;
+      return { club_id: c?.club ?? null, club_name: c?.clubName ?? null };
+    };
     const originOf = new Map(seededPlayers.map((p, i) => [p.id_user, i]));
     const nameFields = (idUser: string | null) => {
       if (isGroupSlotId(idUser)) {
@@ -1031,6 +1043,9 @@ export class BracketsService {
               {
                 position: i * 2 + 1,
                 match_number: m.match_number,
+                next_match_number: m.next_match_number,
+                next_match_slot: m.next_match_slot,
+                ...clubFields(m.player1_id),
                 id_user: m.player1_id,
                 seed: m.seed1!,
                 group_name: origin1?.group_name ?? null,
@@ -1040,6 +1055,9 @@ export class BracketsService {
               {
                 position: i * 2 + 2,
                 match_number: m.match_number,
+                next_match_number: m.next_match_number,
+                next_match_slot: m.next_match_slot,
+                ...clubFields(m.player2_id),
                 id_user: m.player2_id,
                 seed: m.seed2!,
                 group_name: origin2?.group_name ?? null,
@@ -1067,6 +1085,7 @@ export class BracketsService {
         return {
           position: i + 1,
           match_number: Math.floor(i / 2) + 1,
+          ...clubFields(d.player),
           id_user: d.player,
           seed: d.seed,
           group_name: origin?.group_name ?? null,
