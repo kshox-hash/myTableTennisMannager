@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import DB from "../db/db_configuration";
+import { captureUndoPoint } from "../activity/undo_history";
 
 // Falta de esto en casi todas las rutas de admin fue el hallazgo más grave
 // de la auditoría de seguridad: requireRole("admin") solo confirma "es
@@ -54,15 +55,21 @@ export function requireTournamentOwnership(
       return res.status(409).json({ ok: false, message: "Este campeonato está cancelado: ya no se puede modificar." });
     }
 
-    if (tournament.created_by === req.user.id_user) return next();
+    // Con permiso: antes de la acción, la foto para poder deshacerla en Actividad.
+    const allow = async () => {
+      await captureUndoPoint(req, res, idTournament);
+      next();
+    };
+
+    if (tournament.created_by === req.user.id_user) return allow();
 
     const orgRes = await pool.query<{ role: string }>(
       `SELECT role FROM tournament_organizers WHERE id_tournament = $1 AND id_user = $2`,
       [idTournament, req.user.id_user]
     );
     const organizerRole = orgRes.rows[0]?.role;
-    if (organizerRole === "organizer") return next();
-    if (organizerRole === "viewer" && options.allowViewer) return next();
+    if (organizerRole === "organizer") return allow();
+    if (organizerRole === "viewer" && options.allowViewer) return allow();
     if (organizerRole === "viewer") {
       return res.status(403).json({ ok: false, message: "Tu invitación a este campeonato es de solo lectura" });
     }

@@ -14,6 +14,7 @@ import { z } from "zod";
 import { RANKED_PLAYERS_CTE, RankingRepository } from "../../ranking/ranking_repository";
 import { requireTournamentOwnership } from "../../middlewares/require_tournament_ownership_middleware";
 import { closeAbsentMatchesAfterAttendance } from "../../brackets/absent_close";
+import { listUndoPoints, undoToPoint } from "../../activity/undo_history";
 
 import {
   createTournamentSchema,
@@ -248,6 +249,32 @@ router.get(
   requireRole("admin"),
   requireTournamentOwnership(undefined, { allowViewer: true }),
   asyncHandler(controller.adminGetActivity)
+);
+
+// HISTORIAL PARA DESHACER (Actividad, como un Ctrl+Z)
+router.get(
+  "/admin/tournaments/:id_tournament/history",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(undefined, { allowViewer: true }),
+  asyncHandler(async (req, res) => {
+    const rows = await listUndoPoints(req.params.id_tournament as string);
+    res.json({ ok: true, data: rows });
+  })
+);
+
+router.post(
+  "/admin/tournaments/:id_tournament/history/:id_point/undo",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(),
+  asyncHandler(async (req, res) => {
+    const result = await undoToPoint(req.params.id_tournament as string, req.params.id_point as string, req.user!.id_user);
+    if (!result.ok) {
+      return res.status(404).json({ ok: false, message: "Ese cambio ya no se puede deshacer (quizás ya se deshizo)." });
+    }
+    res.json({ ok: true, data: result });
+  })
 );
 
 // ENROLLMENTS BY TOURNAMENT
