@@ -19,22 +19,14 @@ const schema = z.object({
   email: z.string().trim().email().max(200),
   phone: z.string().trim().max(40).optional().default(""),
   organization: z.string().trim().min(2).max(150),
-  orgType: z.enum(ORG_TYPES),
+  // El formulario ya no pregunta tipo ni cantidad de jugadores (quedan por compatibilidad).
+  orgType: z.enum(ORG_TYPES).optional().default("other"),
   players: z.string().trim().max(40).optional().default(""),
-  message: z.string().trim().max(2000).optional().default(""),
+  message: z.string().trim().min(5).max(2000),
   lang: z.string().trim().max(5).optional().default(""),
   // Trampa para bots: campo oculto en el formulario, una persona lo deja vacío.
   website: z.string().optional().default(""),
 });
-
-const ORG_LABEL: Record<(typeof ORG_TYPES)[number], string> = {
-  club: "Club",
-  tournaments: "Organizador de torneos",
-  league: "Liga",
-  federation: "Federación / asociación",
-  school: "Colegio / universidad",
-  other: "Otro",
-};
 
 const esc = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -57,11 +49,9 @@ router.post(
     const rows: [string, string][] = [
       ["Nombre", d.name],
       ["Email", d.email],
-      ["Teléfono", d.phone || "—"],
+      ["WhatsApp", d.phone || "—"],
       ["Organización", d.organization],
-      ["Tipo", ORG_LABEL[d.orgType]],
-      ["Jugadores aprox.", d.players || "—"],
-      ["Mensaje", d.message || "—"],
+      ["Mensaje", d.message],
     ];
     const text = rows.map(([k, v]) => `${k}: ${v}`).join("\n");
     const html =
