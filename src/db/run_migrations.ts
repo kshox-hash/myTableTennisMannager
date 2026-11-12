@@ -97,6 +97,7 @@ const INCREMENTAL = [
   "089_bracket_slot_filled_at.sql",
   "090_bracket_slot_confirm.sql",
   "091_undo_points.sql",
+  "092_undo_points_redo.sql",
 ];
 
 export async function runMigrations(): Promise<void> {

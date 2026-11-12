@@ -14,7 +14,7 @@ import { z } from "zod";
 import { RANKED_PLAYERS_CTE, RankingRepository } from "../../ranking/ranking_repository";
 import { requireTournamentOwnership } from "../../middlewares/require_tournament_ownership_middleware";
 import { closeAbsentMatchesAfterAttendance } from "../../brackets/absent_close";
-import { listUndoPoints, undoToPoint } from "../../activity/undo_history";
+import { listUndoPoints, previewUndo, undoToPoint } from "../../activity/undo_history";
 
 import {
   createTournamentSchema,
@@ -263,6 +263,19 @@ router.get(
   })
 );
 
+// Antes de confirmar: cuántos resultados se perderían (también los de árbitros).
+router.get(
+  "/admin/tournaments/:id_tournament/history/:id_point/preview",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(),
+  asyncHandler(async (req, res) => {
+    const result = await previewUndo(req.params.id_tournament as string, req.params.id_point as string);
+    if (!result.ok) return res.status(404).json({ ok: false, message: "Ese cambio ya no está en el historial." });
+    res.json({ ok: true, data: { lostResults: result.lostResults, gainedResults: result.gainedResults } });
+  })
+);
+
 router.post(
   "/admin/tournaments/:id_tournament/history/:id_point/undo",
   authRequired,
@@ -271,7 +284,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const result = await undoToPoint(req.params.id_tournament as string, req.params.id_point as string, req.user!.id_user);
     if (!result.ok) {
-      return res.status(404).json({ ok: false, message: "Ese cambio ya no se puede deshacer (quizás ya se deshizo)." });
+      return res.status(404).json({ ok: false, message: "Ese cambio ya no está en el historial (quizás ya se deshizo)." });
     }
     res.json({ ok: true, data: result });
   })
