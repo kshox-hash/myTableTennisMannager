@@ -29,3 +29,13 @@ export const passwordResetRateLimit = rateLimit({
   legacyHeaders: false,
   message: { ok: false, message: "Demasiados intentos. Inténtalo de nuevo en unos minutos." },
 });
+
+// Formulario público "Solicitar demo": nadie real manda más de un par de
+// solicitudes por hora — frena bots llenando la tabla y la casilla.
+export const demoRequestRateLimit = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, message: "Demasiadas solicitudes. Inténtalo de nuevo más tarde." },
+});

@@ -322,4 +322,35 @@ router.delete(
   })
 );
 
+// ── Solicitudes de demo (formulario público /demo) ───────────
+
+// GET /api/v1/superadmin/demo-requests
+router.get(
+  "/demo-requests",
+  asyncHandler(async (_req, res) => {
+    const r = await DB.getPool().query(
+      `SELECT id_demo_request, name, email, phone, organization, org_type, players, message, lang, created_at, contacted_at
+         FROM demo_requests ORDER BY created_at DESC LIMIT 300`
+    );
+    return res.json({ ok: true, data: r.rows });
+  })
+);
+
+// PATCH /api/v1/superadmin/demo-requests/:id — marcar/desmarcar "contactado"
+router.patch(
+  "/demo-requests/:id",
+  asyncHandler(async (req, res) => {
+    const p = z.object({ contacted: z.boolean() }).safeParse(req.body);
+    const id = Number(req.params.id);
+    if (!p.success || !Number.isInteger(id)) return res.status(400).json({ ok: false, message: "Datos inválidos" });
+    const r = await DB.getPool().query(
+      `UPDATE demo_requests SET contacted_at = CASE WHEN $2 THEN NOW() ELSE NULL END
+        WHERE id_demo_request = $1 RETURNING contacted_at`,
+      [id, p.data.contacted]
+    );
+    if (!r.rowCount) return res.status(404).json({ ok: false, message: "No existe" });
+    return res.json({ ok: true, data: r.rows[0] });
+  })
+);
+
 export default router;

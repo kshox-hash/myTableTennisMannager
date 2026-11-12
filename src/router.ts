@@ -22,6 +22,7 @@ import leaguesRouter         from "./leagues/leagues_router";
 import appVersionRouter      from "./routes/app_version_router";
 import clubsRouter           from "./clubs/clubs_router";
 import superadminRouter      from "./superadmin/superadmin_router";
+import demoRouter            from "./demo/demo_router";
 
 import { errorMiddleware } from "./middlewares/error_middleware";
 import { startPhaseScheduler } from "./tournament/phases/phase_scheduler";
@@ -59,6 +60,7 @@ export default function registerRoutes(app: Express) {
   app.use(`/${path}/${version}/clubs`,       clubsRouter);
   app.use(`/${path}/${version}/superadmin`,  superadminRouter);
   app.use(`/${path}/${version}/app`,         appVersionRouter);
+  app.use(`/${path}/${version}/demo-requests`, demoRouter);
 
   // Scheduler: revisa cada 30s si hay torneos programados para iniciar
   startPhaseScheduler();
