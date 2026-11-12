@@ -559,6 +559,8 @@ export class PublicTournamentRepository {
       player2_id: string; player2_first: string | null; player2_last: string | null; player2_country: string | null;
       winner_id: string | null; sets_player1: number; sets_player2: number; status: string;
       set_scores: unknown; result_reason: string | null; played_at: string | Date | null;
+      player1_club: string | null; player1_crest: string | null; player2_club: string | null; player2_crest: string | null;
+      event_date: string | null;
     }>
   > {
     const values: unknown[] = [];
@@ -572,6 +574,13 @@ export class PublicTournamentRepository {
       tConds.push(`EXISTS (SELECT 1 FROM enrollments e WHERE e.id_tournament = t.id_tournament AND e.id_user = $${values.length} AND e.status = 'active')`);
     }
     const tWhere = tConds.join(" AND ");
+    // El club de cada jugador en ESA categoría: el que puso el organizador en
+    // la inscripción o, si no, el de su perfil (igual que la llave del admin).
+    const clubJoins = (a: string) => `
+         LEFT JOIN enrollments e1 ON e1.id_user = ${a}.player1_id AND e1.id_category = ${a}.id_category AND e1.status = 'active'
+         LEFT JOIN enrollments e2 ON e2.id_user = ${a}.player2_id AND e2.id_category = ${a}.id_category AND e2.status = 'active'
+         LEFT JOIN clubs c1 ON c1.id_club = COALESCE(e1.club_override, u1.id_club)
+         LEFT JOIN clubs c2 ON c2.id_club = COALESCE(e2.club_override, u2.id_club)`;
     // Dos pasadas: hasta 3 EN VIVO (mesa asignada, sin resultado) y después
     // los jugados en los últimos 30 días. En una sola consulta ordenada por
     // "en vivo primero", un torneo con muchas mesas ocupadas llenaba todo el
@@ -588,13 +597,16 @@ export class PublicTournamentRepository {
                 (gm.table_number IS NOT NULL AND gm.status NOT IN ('played','walkover')) AS is_live,
                 gm.player1_id, u1.first_name AS player1_first, u1.last_name AS player1_last, u1.country AS player1_country,
                 gm.player2_id, u2.first_name AS player2_first, u2.last_name AS player2_last, u2.country AS player2_country,
-                gm.winner_id, gm.sets_player1, gm.sets_player2, gm.status, gm.set_scores, gm.result_reason, gm.played_at
+                gm.winner_id, gm.sets_player1, gm.sets_player2, gm.status, gm.set_scores, gm.result_reason, gm.played_at,
+                c1.name AS player1_club, c1.crest_image_url AS player1_crest,
+                c2.name AS player2_club, c2.crest_image_url AS player2_crest, t.event_date::text AS event_date
          FROM group_matches gm
          JOIN tournaments t ON t.id_tournament = gm.id_tournament
          JOIN tournament_categories tc ON tc.id_category = gm.id_category
          JOIN category_groups cg ON cg.id_group = gm.id_group
          JOIN users u1 ON u1.id_user = gm.player1_id
          JOIN users u2 ON u2.id_user = gm.player2_id
+         ${clubJoins("gm")}
          WHERE ${tWhere} AND ${recent("gm")}
          UNION ALL
          SELECT bm.id_match, 'bracket' AS stage, t.id_tournament, t.tournament_name,
@@ -604,12 +616,14 @@ export class PublicTournamentRepository {
                 (bm.table_number IS NOT NULL AND bm.status NOT IN ('played','walkover')) AS is_live,
                 bm.player1_id, u1.first_name, u1.last_name, u1.country,
                 bm.player2_id, u2.first_name, u2.last_name, u2.country,
-                bm.winner_id, bm.sets_player1, bm.sets_player2, bm.status, bm.set_scores, bm.result_reason, bm.played_at
+                bm.winner_id, bm.sets_player1, bm.sets_player2, bm.status, bm.set_scores, bm.result_reason, bm.played_at,
+                c1.name, c1.crest_image_url, c2.name, c2.crest_image_url, t.event_date::text
          FROM bracket_matches bm
          JOIN tournaments t ON t.id_tournament = bm.id_tournament
          JOIN tournament_categories tc ON tc.id_category = bm.id_category
          JOIN users u1 ON u1.id_user = bm.player1_id
          JOIN users u2 ON u2.id_user = bm.player2_id
+         ${clubJoins("bm")}
          WHERE ${tWhere} AND bm.is_bye = FALSE AND ${recent("bm")}
        ) sub
        ORDER BY is_live DESC, played_at DESC NULLS LAST

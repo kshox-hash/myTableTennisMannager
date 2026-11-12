@@ -429,6 +429,11 @@ router.get(
         set_scores: m.set_scores ?? null,
         result_reason: m.result_reason ?? null,
         played_at: formatTimestamp(m.played_at),
+        player1_club: m.player1_club ?? null,
+        player1_crest: m.player1_crest ?? null,
+        player2_club: m.player2_club ?? null,
+        player2_crest: m.player2_crest ?? null,
+        event_date: m.event_date ?? null,
       })),
     });
   })
