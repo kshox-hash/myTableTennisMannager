@@ -477,6 +477,7 @@ router.get(
           first_name: p.first_name,
           last_name: p.last_name,
           club_name: p.club_name,
+          club_crest_url: p.club_crest_url ?? null,
           avatar_url: p.avatar_url,
         })),
         groups: detail.groups,

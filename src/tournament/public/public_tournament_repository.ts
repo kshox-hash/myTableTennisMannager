@@ -624,7 +624,7 @@ export class PublicTournamentRepository {
 
   async getCategoryDetail(id_category: string): Promise<{
     category: { id_category: string; id_tournament: string; category_type: string; category_range: string; gender: string; phase: string; competition_format: string } | null;
-    players: Array<{ id_user: string; first_name: string | null; last_name: string | null; club_name: string | null; avatar_url: string | null }>;
+    players: Array<{ id_user: string; first_name: string | null; last_name: string | null; club_name: string | null; club_crest_url: string | null; avatar_url: string | null }>;
     groups: Array<{
       id_group: string;
       group_name: string;
@@ -659,10 +659,13 @@ export class PublicTournamentRepository {
     }
 
     const playersRes = await this.pool.query(
-      `SELECT DISTINCT u.id_user, u.first_name, u.last_name, u.avatar_url, c.name AS club_name
+      // Mismo club que muestra el admin: el que fijó el organizador en la
+      // inscripción (club_override) o, si no, el del perfil del jugador.
+      `SELECT DISTINCT u.id_user, u.first_name, u.last_name, u.avatar_url, c.name AS club_name,
+              c.crest_image_url AS club_crest_url
        FROM enrollments e
        JOIN users u ON u.id_user = e.id_user
-       LEFT JOIN clubs c ON c.id_club = u.id_club
+       LEFT JOIN clubs c ON c.id_club = COALESCE(e.club_override, u.id_club)
        WHERE e.id_category = $1 AND e.status = 'active'
        ORDER BY u.first_name ASC, u.last_name ASC`,
       [id_category]
