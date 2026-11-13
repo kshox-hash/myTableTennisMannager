@@ -168,6 +168,9 @@ export class SuperadminRepository {
     return { ...t.rows[0], daily: d.rows };
   }
 
+  // Solo cuentas reales: los jugadores que un organizador agrega a un torneo
+  // sin que tengan cuenta (email sin-registro+…@myttm.local, nadie puede
+  // entrar con ellos) no son registros y no aparecen ni cuentan acá.
   async listPlayers(params: {
     q: string;
     enrolledOnly: boolean;
@@ -193,6 +196,7 @@ export class SuperadminRepository {
        ) en ON TRUE
        WHERE u.is_team = false
          AND u.deleted_at IS NULL
+         AND u.email NOT LIKE 'sin-registro+%@myttm.local'
          AND ($1 = '%%'
            OR u.email ILIKE $1
            OR TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) ILIKE $1)
@@ -223,21 +227,23 @@ export class SuperadminRepository {
     const superadminEmails = getSuperadminEmails();
     const res = await this.pool.query<PlatformStatsRow>(
       `SELECT
-         (SELECT COUNT(*) FROM users WHERE is_team = false)::int AS total_users,
+         (SELECT COUNT(*) FROM users WHERE is_team = false AND email NOT LIKE 'sin-registro+%@myttm.local')::int AS total_users,
          (SELECT COUNT(*) FROM users u JOIN roles r ON r.id_role = u.id_role
-            WHERE r.name = 'player' AND u.is_team = false)::int AS total_players,
+            WHERE r.name = 'player' AND u.is_team = false AND u.email NOT LIKE 'sin-registro+%@myttm.local')::int AS total_players,
          (SELECT COUNT(*) FROM users u JOIN roles r ON r.id_role = u.id_role
             WHERE r.name = 'admin' AND u.is_team = false AND NOT (LOWER(u.email) = ANY($1::text[])))::int AS total_admins,
-         (SELECT COUNT(*) FROM player_stats WHERE matches_played > 0)::int AS active_users,
+         (SELECT COUNT(*) FROM player_stats ps JOIN users u ON u.id_user = ps.id_user
+            WHERE ps.matches_played > 0 AND u.email NOT LIKE 'sin-registro+%@myttm.local')::int AS active_users,
          (SELECT COUNT(DISTINCT e.id_user) FROM enrollments e
             JOIN tournaments t ON t.id_tournament = e.id_tournament
-            WHERE e.status = 'active' AND t.status = 'active')::int AS currently_enrolled_users,
+            JOIN users u ON u.id_user = e.id_user
+            WHERE e.status = 'active' AND t.status = 'active' AND u.email NOT LIKE 'sin-registro+%@myttm.local')::int AS currently_enrolled_users,
          (SELECT COUNT(*) FROM clubs WHERE created_by IS NOT NULL)::int AS total_clubs,
          (SELECT COUNT(*) FROM tournaments)::int AS total_tournaments,
          (SELECT COUNT(*) FROM tournaments WHERE status = 'active')::int AS active_tournaments,
-         (SELECT COUNT(*) FROM users WHERE is_team = false AND created_at >= CURRENT_DATE)::int AS new_users_today,
-         (SELECT COUNT(*) FROM users WHERE is_team = false AND created_at >= CURRENT_DATE - INTERVAL '7 days')::int AS new_users_week,
-         (SELECT COUNT(*) FROM users WHERE is_team = false AND created_at >= CURRENT_DATE - INTERVAL '30 days')::int AS new_users_month`,
+         (SELECT COUNT(*) FROM users WHERE is_team = false AND email NOT LIKE 'sin-registro+%@myttm.local' AND created_at >= CURRENT_DATE)::int AS new_users_today,
+         (SELECT COUNT(*) FROM users WHERE is_team = false AND email NOT LIKE 'sin-registro+%@myttm.local' AND created_at >= CURRENT_DATE - INTERVAL '7 days')::int AS new_users_week,
+         (SELECT COUNT(*) FROM users WHERE is_team = false AND email NOT LIKE 'sin-registro+%@myttm.local' AND created_at >= CURRENT_DATE - INTERVAL '30 days')::int AS new_users_month`,
       [superadminEmails]
     );
     return res.rows[0];
@@ -258,7 +264,7 @@ export class SuperadminRepository {
        )
        SELECT to_char(b.day, 'YYYY-MM-DD') AS day, COUNT(u.id_user)::int AS count
        FROM bounds b
-       LEFT JOIN users u ON DATE(u.created_at) = b.day AND u.is_team = false
+       LEFT JOIN users u ON DATE(u.created_at) = b.day AND u.is_team = false AND u.email NOT LIKE 'sin-registro+%@myttm.local'
        GROUP BY b.day
        ORDER BY b.day ASC`,
       [days]
@@ -269,7 +275,7 @@ export class SuperadminRepository {
   async getGenderBreakdown(): Promise<GenderBreakdownRow[]> {
     const res = await this.pool.query<GenderBreakdownRow>(
       `SELECT COALESCE(NULLIF(gender, ''), 'unknown') AS gender, COUNT(*)::int AS count
-       FROM users WHERE is_team = false
+       FROM users WHERE is_team = false AND email NOT LIKE 'sin-registro+%@myttm.local'
        GROUP BY 1
        ORDER BY count DESC`
     );
@@ -280,7 +286,7 @@ export class SuperadminRepository {
     const res = await this.pool.query<CountryBreakdownRow>(
       `SELECT country, COUNT(*)::int AS count
        FROM users
-       WHERE is_team = false AND country IS NOT NULL AND country <> ''
+       WHERE is_team = false AND email NOT LIKE 'sin-registro+%@myttm.local' AND country IS NOT NULL AND country <> ''
        GROUP BY country
        ORDER BY count DESC
        LIMIT $1`,
@@ -309,7 +315,7 @@ export class SuperadminRepository {
                 WHERE r.name = 'admin' AND NOT (LOWER(u.email) = ANY($2::text[]))
               )::int AS admins
        FROM bounds b
-       LEFT JOIN users u ON date_trunc('month', u.created_at) = b.month AND u.is_team = false
+       LEFT JOIN users u ON date_trunc('month', u.created_at) = b.month AND u.is_team = false AND u.email NOT LIKE 'sin-registro+%@myttm.local'
        LEFT JOIN roles r ON r.id_role = u.id_role
        GROUP BY b.month
        ORDER BY b.month ASC`,
@@ -326,7 +332,7 @@ export class SuperadminRepository {
     const res = await this.pool.query<TopClubRow>(
       `SELECT c.id_club, c.name, COUNT(u.id_user)::int AS member_count
        FROM clubs c
-       LEFT JOIN users u ON u.id_club = c.id_club
+       LEFT JOIN users u ON u.id_club = c.id_club AND u.email NOT LIKE 'sin-registro+%@myttm.local'
        WHERE c.created_by IS NOT NULL
        GROUP BY c.id_club, c.name
        ORDER BY member_count DESC, c.name ASC
