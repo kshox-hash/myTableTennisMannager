@@ -1,4 +1,6 @@
 import { Router } from "express";
+import DB from "../db/db_configuration";
+import { ITTF_POINTS, SILVER_GENERAL_DIVISOR, type RankingLevel } from "../ranking/ittf_points";
 import { asyncHandler } from "../middlewares/wrap_async_middleware";
 import { authRequired } from "../middlewares/auth_required_middleware";
 import { requireRole } from "../middlewares/require_role_middleware";
@@ -83,7 +85,25 @@ router.get(
   requireRole(["admin", "player"]),
   asyncHandler(async (req, res) => {
     const data = await repo.getCategoryStandings(req.params.id_tournament, req.params.id_category);
-    return res.json({ ok: true, data });
+    // Puntos de ranking de cada puesto, igual que la pestaña Ranking del admin:
+    // tabla ITTF del nivel del campeonato; la Plata vale un cuarto; no puntuable = 0.
+    const info = await DB.getPool().query<{ ranking_level: RankingLevel; is_ranked: boolean; is_silver: boolean }>(
+      `SELECT t.ranking_level, t.is_ranked,
+              EXISTS (SELECT 1 FROM tournament_categories g WHERE g.silver_category_id = tc.id_category) AS is_silver
+         FROM tournament_categories tc JOIN tournaments t ON t.id_tournament = tc.id_tournament
+        WHERE tc.id_category = $1`,
+      [req.params.id_category]
+    );
+    const meta = info.rows[0];
+    const table = meta ? ITTF_POINTS[meta.ranking_level] ?? ITTF_POINTS.local : ITTF_POINTS.local;
+    const pointsFor = (position: number) => {
+      if (!meta?.is_ranked) return 0;
+      const size = position <= 2 ? position : Math.pow(2, Math.ceil(Math.log2(position)));
+      const pts = (table as Record<number, number>)[size] ?? 0;
+      return meta.is_silver ? Math.round(pts / SILVER_GENERAL_DIVISOR) : pts;
+    };
+    const standings = data.standings.map((r: any) => ({ ...r, points: pointsFor(Number(r.position)) }));
+    return res.json({ ok: true, data: { ...data, standings } });
   })
 );
 
