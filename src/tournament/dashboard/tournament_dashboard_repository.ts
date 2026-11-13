@@ -139,8 +139,9 @@ export class TournamentDashboardRepository {
   // muestra puntos que en realidad no se sumaron al ranking público.
   // Con id_category: solo esa categoría (partidos y puntos de esa categoría;
   // la pestaña Puntos vive dentro de cada categoría).
-  // view (solo Copa de Oro con Plata): "general" = las dos juntas con Plata a
-  // un cuarto; "oro" / "plata" = cada copa sola, con sus puntos completos.
+  // view (solo Copa de Oro con Plata): "general" = las dos juntas; "oro" /
+  // "plata" = cada copa sola. La Plata vale siempre un cuarto de los puntos
+  // de su ronda (no da lo mismo ser campeón de Plata que de Oro).
   async getPointsSummary(
     id_tournament: string,
     id_category?: string | null,
@@ -180,7 +181,7 @@ export class TournamentDashboardRepository {
     }>(
       `WITH pts AS (${
          id_category
-           ? `SELECT id_user, MAX(points) AS points FROM (${ittfPointsByCategorySql("t.id_tournament = $1", false, mixed ? "general" : "all")}) pc WHERE pc.id_category = ANY($2::uuid[]) GROUP BY id_user`
+           ? `SELECT id_user, MAX(points) AS points FROM (${ittfPointsByCategorySql("t.id_tournament = $1", false, silverId ? "general" : "all")}) pc WHERE pc.id_category = ANY($2::uuid[]) GROUP BY id_user`
            : ittfPointsByTournamentSql("t.id_tournament = $1", false)
        }),
        tm AS (
