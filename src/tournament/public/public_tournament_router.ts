@@ -179,6 +179,7 @@ router.get(
           is_finished: c.is_finished,
           phase: c.phase,
           competition_format: c.competition_format,
+          is_gold: !!c.is_gold,
           play_date: c.play_date ?? null,
           start_time: c.start_time ?? null,
         })),
