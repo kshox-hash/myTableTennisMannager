@@ -881,7 +881,9 @@ export class BracketsRepository {
       return r.rows[0]?.id_group ?? null;
     };
     for (const { occupant, into } of moves) {
-      const other = moves.find((m) => m.into !== into)!.into; // el puesto que deja
+      const otherMove = moves.find((m) => m.into !== into)!;
+      const other = otherMove.into; // el puesto que deja
+      const otherOccupant = otherMove.occupant; // quien llega al puesto que deja
       // Rivales en el puesto nuevo: { jugador | null, grupo }.
       type Rival = { player: string | null; group: string | null };
       let rivals: Rival[] = [];
@@ -899,8 +901,12 @@ export class BracketsRepository {
         for (const f of feeder.rows) {
           for (const p of [f.player1_id, f.player2_id]) {
             if (!p) continue;
-            const who = p === occupant.player ? other.player : p;
-            if (who) rivals.push({ player: who, group: await groupOf(who) });
+            // Después del cambio: donde estaba el que se mueve queda el otro, y
+            // viceversa (antes se tomaba al mismo jugador como su propio rival).
+            let who: string | null = p;
+            if (p === occupant.player) who = otherOccupant.player;
+            else if (p === otherOccupant.player) who = occupant.player;
+            if (who && who !== occupant.player) rivals.push({ player: who, group: await groupOf(who) });
           }
         }
       }
