@@ -33,7 +33,8 @@ router.get(
   requireTournamentOwnership(undefined, { allowViewer: true }),
   asyncHandler(async (req, res) => {
     const category = typeof req.query.category === "string" && req.query.category ? req.query.category : null;
-    const data = await repo.getPointsSummary(req.params.id_tournament, category);
+    const view = req.query.view === "oro" || req.query.view === "plata" ? req.query.view : "general";
+    const data = await repo.getPointsSummary(req.params.id_tournament, category, view);
     if (!data) return res.status(404).json({ ok: false, message: "Torneo no encontrado" });
     return res.json({ ok: true, data });
   })

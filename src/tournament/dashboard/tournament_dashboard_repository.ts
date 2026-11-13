@@ -139,7 +139,13 @@ export class TournamentDashboardRepository {
   // muestra puntos que en realidad no se sumaron al ranking público.
   // Con id_category: solo esa categoría (partidos y puntos de esa categoría;
   // la pestaña Puntos vive dentro de cada categoría).
-  async getPointsSummary(id_tournament: string, id_category?: string | null): Promise<PointsSummary | null> {
+  // view (solo Copa de Oro con Plata): "general" = las dos juntas con Plata a
+  // un cuarto; "oro" / "plata" = cada copa sola, con sus puntos completos.
+  async getPointsSummary(
+    id_tournament: string,
+    id_category?: string | null,
+    view: "general" | "oro" | "plata" = "general"
+  ): Promise<PointsSummary | null> {
     const tRes = await this.pool.query<{ is_ranked: boolean }>(
       `SELECT is_ranked FROM tournaments WHERE id_tournament = $1`,
       [id_tournament]
@@ -155,7 +161,14 @@ export class TournamentDashboardRepository {
           [id_category]
         )).rows[0]?.silver_category_id ?? null
       : null;
-    const categoryIds = id_category ? [id_category, ...(silverId ? [silverId] : [])] : null;
+    const categoryIds = id_category
+      ? silverId && view === "oro"
+        ? [id_category]
+        : silverId && view === "plata"
+          ? [silverId]
+          : [id_category, ...(silverId ? [silverId] : [])]
+      : null;
+    const mixed = !!silverId && view === "general";
 
     const res = await this.pool.query<{
       id_user: string;
@@ -167,7 +180,7 @@ export class TournamentDashboardRepository {
     }>(
       `WITH pts AS (${
          id_category
-           ? `SELECT id_user, MAX(points) AS points FROM (${ittfPointsByCategorySql("t.id_tournament = $1", false, silverId ? "general" : "all")}) pc WHERE pc.id_category = ANY($2::uuid[]) GROUP BY id_user`
+           ? `SELECT id_user, MAX(points) AS points FROM (${ittfPointsByCategorySql("t.id_tournament = $1", false, mixed ? "general" : "all")}) pc WHERE pc.id_category = ANY($2::uuid[]) GROUP BY id_user`
            : ittfPointsByTournamentSql("t.id_tournament = $1", false)
        }),
        tm AS (
@@ -193,12 +206,12 @@ export class TournamentDashboardRepository {
          (SELECT COUNT(*) FROM tm WHERE tm.p1 = p.id_user OR tm.p2 = p.id_user) AS matches_played,
          (SELECT COUNT(*) FROM tm WHERE tm.winner_id = p.id_user) AS matches_won,
          COALESCE((SELECT pts.points FROM pts WHERE pts.id_user = p.id_user), 0) AS points,
-         EXISTS (SELECT 1 FROM enrollments e WHERE e.id_user = p.id_user AND e.status = 'active' AND e.id_category = ${silverId ? "$3" : "NULL"}::uuid) AS in_silver
+         EXISTS (SELECT 1 FROM enrollments e WHERE e.id_user = p.id_user AND e.status = 'active' AND e.id_category = ${mixed ? "$3" : "NULL"}::uuid) AS in_silver
        FROM players p
        JOIN users u ON u.id_user = p.id_user
        WHERE u.is_team = false
        ORDER BY points DESC, matches_won DESC, matches_played DESC, name ASC`,
-      categoryIds ? [id_tournament, categoryIds, ...(silverId ? [silverId] : [])] : [id_tournament]
+      categoryIds ? [id_tournament, categoryIds, ...(mixed ? [silverId] : [])] : [id_tournament]
     );
 
     const players: PlayerPointsRow[] = res.rows.map((r) => {
@@ -209,7 +222,7 @@ export class TournamentDashboardRepository {
         matches_played: Number(r.matches_played),
         matches_won: matchesWon,
         points: isRanked ? Number(r.points) : 0,
-        ...(silverId ? { copa: r.in_silver ? ("plata" as const) : ("oro" as const) } : {}),
+        ...(mixed ? { copa: r.in_silver ? ("plata" as const) : ("oro" as const) } : {}),
       };
     });
 
