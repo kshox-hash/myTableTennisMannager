@@ -180,6 +180,7 @@ router.get(
           phase: c.phase,
           competition_format: c.competition_format,
           is_gold: !!c.is_gold,
+          is_silver: !!c.is_silver,
           play_date: c.play_date ?? null,
           start_time: c.start_time ?? null,
         })),

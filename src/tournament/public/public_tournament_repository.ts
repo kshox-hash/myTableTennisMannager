@@ -59,6 +59,8 @@ export interface PublicCategoryRow {
   competition_format: "groups_bracket" | "round_robin";
   /** Copa de Oro (tiene una Plata asociada). */
   is_gold?: boolean;
+  /** Copa de Plata (se arma con el 3° de cada grupo del Oro). */
+  is_silver?: boolean;
   // Fase real de la categoría (enrollment/groups/bracket/finished) — el
   // frontend público la usaba solo indirecto (has_bracket/is_finished),
   // así que "enrollment" (todavía no se generaron grupos) y "groups" (ya
@@ -884,6 +886,7 @@ export class PublicTournamentRepository {
          c.id_category, c.category_type, c.category_range, c.gender, c.status, c.phase, c.competition_format, c.quotas,
          c.play_date::text AS play_date, to_char(c.start_time, 'HH24:MI') AS start_time,
          (c.silver_category_id IS NOT NULL) AS is_gold,
+         EXISTS (SELECT 1 FROM tournament_categories gold WHERE gold.silver_category_id = c.id_category) AS is_silver,
          COUNT(e.id_enrollment) FILTER (WHERE e.status = 'active')::int AS enrolled_count,
          EXISTS(SELECT 1 FROM bracket_matches bm WHERE bm.id_category = c.id_category) AS has_bracket,
          EXISTS(
