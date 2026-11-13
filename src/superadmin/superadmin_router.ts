@@ -9,7 +9,8 @@ import { confirmHandler, crestKey, headerKey, uploadUrlHandler } from "../clubs/
 import { deleteObject } from "../media/r2_client";
 import { NotificationsRepository } from "../notifications/notifications_repository";
 import DB from "../db/db_configuration";
-import { getSuperadminEmails, isEnvSuperadmin, loadSuperadmins } from "../core/constants/roles";
+import { hashPassword } from "../bcrypt/bcrypt";
+import { ROLE_IDS, getSuperadminEmails, isEnvSuperadmin, loadSuperadmins } from "../core/constants/roles";
 import { UserRepository } from "../users/user_repository";
 import { UserService } from "../users/user_service";
 
@@ -357,20 +358,61 @@ router.get(
   })
 );
 
-// POST /api/v1/superadmin/superadmins — body { email }: no hace falta que ya
-// exista la cuenta; si se registra después con ese email, entra como súper usuario.
+// Crea la cuenta (organizador) para un súper usuario que todavía no tiene, o
+// le cambia la contraseña si ya existe.
+async function ensureAccount(email: string, password: string, firstName?: string, lastName?: string) {
+  const hash = await hashPassword(password);
+  const found = await DB.getPool().query<{ id_user: string }>(`SELECT id_user FROM users WHERE LOWER(email) = $1`, [email]);
+  if (found.rows[0]) {
+    await DB.getPool().query(`UPDATE users SET password_hash = $2 WHERE id_user = $1`, [found.rows[0].id_user, hash]);
+    return "updated" as const;
+  }
+  await DB.getPool().query(
+    `INSERT INTO users (email, password_hash, id_role, first_name, last_name) VALUES ($1, $2, $3, $4, $5)`,
+    [email, hash, ROLE_IDS.admin, firstName || null, lastName || null]
+  );
+  return "created" as const;
+}
+
+const passwordSchema = z.string().min(8, "La contraseña debe tener al menos 8 caracteres").max(100);
+
+// POST /api/v1/superadmin/superadmins — body { email, password?, first_name?, last_name? }.
+// Con contraseña: si la cuenta no existe se crea (organizador) y queda lista para entrar.
+// Sin contraseña: se activa cuando esa persona se registre con ese correo.
 router.post(
   "/superadmins",
   asyncHandler(async (req, res) => {
-    const p = z.object({ email: z.string().trim().email() }).safeParse(req.body);
-    if (!p.success) return res.status(400).json({ ok: false, message: "Email inválido" });
+    const p = z
+      .object({
+        email: z.string().trim().email(),
+        password: passwordSchema.optional(),
+        first_name: z.string().trim().max(100).optional(),
+        last_name: z.string().trim().max(100).optional(),
+      })
+      .safeParse(req.body);
+    if (!p.success) return res.status(400).json({ ok: false, message: p.error.issues[0]?.message ?? "Datos inválidos" });
     const email = p.data.email.toLowerCase();
+    if (p.data.password) await ensureAccount(email, p.data.password, p.data.first_name, p.data.last_name);
     await DB.getPool().query(
       `INSERT INTO superadmins (email, added_by) VALUES ($1, $2) ON CONFLICT (email) DO NOTHING`,
       [email, req.user!.id_user]
     );
     await loadSuperadmins(DB.getPool());
     return res.status(201).json({ ok: true });
+  })
+);
+
+// PATCH /api/v1/superadmin/superadmins/:email/password — body { password }: fija o
+// cambia la contraseña de ese súper usuario (crea la cuenta si todavía no existe).
+router.patch(
+  "/superadmins/:email/password",
+  asyncHandler(async (req, res) => {
+    const email = String(req.params.email).trim().toLowerCase();
+    const p = z.object({ password: passwordSchema }).safeParse(req.body);
+    if (!p.success) return res.status(400).json({ ok: false, message: p.error.issues[0]?.message ?? "Contraseña inválida" });
+    if (!getSuperadminEmails().includes(email)) return res.status(404).json({ ok: false, message: "Ese correo no es súper usuario" });
+    const result = await ensureAccount(email, p.data.password);
+    return res.json({ ok: true, data: { result } });
   })
 );
 
