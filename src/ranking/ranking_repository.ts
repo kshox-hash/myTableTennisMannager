@@ -1,7 +1,7 @@
 import type { Pool } from "pg";
 import DB from "../db/db_configuration";
 
-import { ittfTotalsSql, ittfPointsByTournamentSql, ittfPointsByCategorySql, ITTF_POINTS, SILVER_GENERAL_DIVISOR, type RankingCopa, type RankingLevel } from "./ittf_points";
+import { ittfTotalsSql, ittfPointsByTournamentSql, ittfPointsByCategorySql, ITTF_POINTS, SILVER_GENERAL_DIVISOR, RANKING_WINDOW, type RankingCopa, type RankingLevel } from "./ittf_points";
 
 // Puntaje viejo (3 por victoria, acumulado en player_stats.ranking_points).
 // Ya no se usa: el ranking se calcula con la tabla ITTF por ronda alcanzada
@@ -287,6 +287,85 @@ export class RankingRepository {
     `;
     const res = await this.pool.query(q, rankingId ? [rankingId] : []);
     return res.rows;
+  }
+
+  /**
+   * Historial de un ranking del organizador: los movimientos (campeonatos
+   * sumados o sacados, cuándo y quién) y, por cada campeonato que hoy suma,
+   * cuántos puntos le dio a cada jugador (su mejor categoría, con la ronda).
+   * Mismo cálculo que el ranking; in_window = dentro de los últimos 12 meses
+   * (los más antiguos ya no cuentan en el total).
+   */
+  async getRankingHistory(idRanking: string, copa: RankingCopa = "general") {
+    const log = await this.pool.query(
+      `SELECT l.id_log, l.action, l.backfilled, l.created_at, t.id_tournament, t.tournament_name,
+              NULLIF(TRIM(CONCAT(u.first_name, ' ', u.last_name)), '') AS user_name
+         FROM ranking_log l
+         JOIN tournaments t ON t.id_tournament = l.id_tournament
+         LEFT JOIN users u ON u.id_user = l.id_user
+        WHERE l.id_ranking = $1
+        ORDER BY l.created_at DESC, l.id_log DESC`,
+      [idRanking]
+    );
+    const tournaments = await this.pool.query(
+      `SELECT t.id_tournament, t.tournament_name, t.event_date::text AS event_date, t.ranking_level, t.is_ranked,
+              (COALESCE(t.event_date, t.created_at::date) >= CURRENT_DATE - INTERVAL '${RANKING_WINDOW}') AS in_window,
+              (SELECT MAX(l.created_at) FROM ranking_log l
+                WHERE l.id_tournament = t.id_tournament AND l.id_ranking = $1 AND l.action = 'added') AS added_at
+         FROM tournaments t
+        WHERE t.id_ranking = $1
+        ORDER BY COALESCE(t.event_date, t.created_at::date) DESC`,
+      [idRanking]
+    );
+    const pts = await this.pool.query(
+      `SELECT pc.id_user, pc.id_tournament, pc.points, t.ranking_level, tc.category_type, tc.category_range,
+              EXISTS (SELECT 1 FROM tournament_categories gold WHERE gold.silver_category_id = pc.id_category) AS is_silver,
+              TRIM(CONCAT(u.first_name, ' ', u.last_name)) AS name
+         FROM (${ittfPointsByCategorySql("t.id_ranking = $1", false, copa)}) pc
+         JOIN tournaments t ON t.id_tournament = pc.id_tournament
+         JOIN tournament_categories tc ON tc.id_category = pc.id_category
+         JOIN users u ON u.id_user = pc.id_user
+        ORDER BY pc.points DESC`,
+      [idRanking]
+    );
+    // Un resultado por jugador y campeonato (el mejor), como en el total.
+    const byTournament = new Map<string, Map<string, any>>();
+    for (const r of pts.rows) {
+      const m = byTournament.get(r.id_tournament) ?? new Map();
+      if (!m.has(r.id_user)) m.set(r.id_user, r);
+      byTournament.set(r.id_tournament, m);
+    }
+    return {
+      log: log.rows.map((r: any) => ({
+        id: String(r.id_log),
+        action: r.action,
+        backfilled: r.backfilled,
+        created_at: r.created_at,
+        id_tournament: r.id_tournament,
+        tournament_name: r.tournament_name,
+        user_name: r.user_name,
+      })),
+      tournaments: tournaments.rows.map((t: any) => {
+        const players = [...(byTournament.get(t.id_tournament)?.values() ?? [])].map((r: any) => ({
+          id_user: r.id_user,
+          name: r.name,
+          category: [r.category_type, r.category_range].filter((x: string) => x && x !== "General").join(" "),
+          points: Number(r.points),
+          round: roundLabel(r.ranking_level, Number(r.points), copa === "general" && r.is_silver),
+        }));
+        return {
+          id_tournament: t.id_tournament,
+          tournament_name: t.tournament_name,
+          event_date: t.event_date,
+          ranking_level: t.ranking_level,
+          is_ranked: t.is_ranked,
+          in_window: t.in_window,
+          added_at: t.added_at,
+          total_points: players.reduce((n, p) => n + p.points, 0),
+          players,
+        };
+      }),
+    };
   }
 
   /** De dónde salen los puntos de un jugador: su mejor categoría en cada

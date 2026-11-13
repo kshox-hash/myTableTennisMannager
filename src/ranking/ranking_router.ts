@@ -136,6 +136,20 @@ router.get(
   })
 );
 
+// GET /api/v1/ranking/mine/rankings/:id/history — de dónde sale el resultado
+// de uno de SUS rankings: campeonatos sumados/sacados y puntos de cada uno.
+router.get(
+  "/mine/rankings/:id/history",
+  authRequired,
+  requireRole("admin"),
+  asyncHandler(async (req, res) => {
+    const r = await repo.getRanking(String(req.params.id));
+    if (!r || r.id_owner !== req.user!.id_user) return res.status(404).json({ ok: false, message: "Ranking no encontrado" });
+    const data = await repo.getRankingHistory(r.id_ranking, copaParam(req.query.copa));
+    return res.json({ ok: true, data });
+  })
+);
+
 // GET /api/v1/ranking/public — mismo ranking, sin login. Vitrina pública,
 // igual que /tournament/public/*: reusa el mismo repositorio/criterio de
 // orden que la versión autenticada, no duplica la lógica. Desactivado igual

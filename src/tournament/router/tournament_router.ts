@@ -165,8 +165,9 @@ router.post(
   asyncHandler(async (req, res) => {
     const { mode, name, id_ranking } = req.body as z.infer<typeof rankingChoiceSchema>;
     const id = String(req.params.id_tournament);
-    const owner = await DB.getPool().query(`SELECT created_by FROM tournaments WHERE id_tournament = $1`, [id]);
+    const owner = await DB.getPool().query(`SELECT created_by, id_ranking FROM tournaments WHERE id_tournament = $1`, [id]);
     const createdBy: string | undefined = owner.rows[0]?.created_by;
+    const previousRanking: string | null = owner.rows[0]?.id_ranking ?? null;
     if (!createdBy) return res.status(404).json({ ok: false, message: "Campeonato no encontrado" });
 
     let rankingId: string | null = null;
@@ -191,6 +192,21 @@ router.post(
       rankingId,
       mode !== "none",
     ]);
+    // Historial del ranking (ver migración 094): se saca del anterior y se suma al nuevo.
+    if (previousRanking !== rankingId) {
+      if (previousRanking) {
+        await DB.getPool().query(
+          `INSERT INTO ranking_log (id_ranking, id_tournament, action, id_user) VALUES ($1, $2, 'removed', $3)`,
+          [previousRanking, id, req.user!.id_user]
+        );
+      }
+      if (rankingId) {
+        await DB.getPool().query(
+          `INSERT INTO ranking_log (id_ranking, id_tournament, action, id_user) VALUES ($1, $2, 'added', $3)`,
+          [rankingId, id, req.user!.id_user]
+        );
+      }
+    }
     return res.json({ ok: true, data: { id_ranking: rankingId, is_ranked: mode !== "none" } });
   })
 );
