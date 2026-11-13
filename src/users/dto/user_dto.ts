@@ -26,6 +26,8 @@ export type UserProfileDB = {
   id_document: string | null;
   category: string | null;
   dominant_hand: string | null;
+  /** Cuenta demo de prospecto: cuándo se borra (null = cuenta normal). */
+  demo_expires_at?: string | null;
   forehand_rubber: string | null;
   backhand_rubber: string | null;
   created_at: string;

@@ -101,6 +101,7 @@ const INCREMENTAL = [
   "093_demo_requests.sql",
   "094_ranking_log.sql",
   "095_superadmins.sql",
+  "096_demo_accounts.sql",
 ];
 
 export async function runMigrations(): Promise<void> {

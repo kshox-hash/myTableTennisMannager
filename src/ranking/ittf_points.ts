@@ -110,6 +110,7 @@ export function ittfPointsByCategorySql(scope = "TRUE", windowed = true, copa: R
       JOIN tournament_categories tc ON tc.id_category = r.id_category
       JOIN users u ON u.id_user = r.id_user
       WHERE t.is_ranked AND t.status <> 'cancelled'
+        ${scope === "TRUE" ? "AND NOT t.is_demo" : ""}
         AND tc.phase = 'finished' AND NOT COALESCE(tc.finished_early, false)
         AND NOT u.is_team
         ${copaSql(copa)}

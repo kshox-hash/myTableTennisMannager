@@ -12,6 +12,7 @@ import router from "./router";
 import { runMigrations } from "./db/run_migrations";
 import DB from "./db/db_configuration";
 import { loadSuperadmins } from "./core/constants/roles";
+import { cleanupExpiredDemos } from "./demo/demo_seeder";
 
 class Server {
     private app : express.Express;
@@ -27,6 +28,10 @@ class Server {
         // Súper usuarios agregados desde el panel (se refresca cada minuto).
         await loadSuperadmins(DB.getPool());
         setInterval(() => void loadSuperadmins(DB.getPool()), 60_000).unref();
+        // Cuentas demo vencidas: se borran con todo lo que crearon (cada hora).
+        const sweepDemos = () => void cleanupExpiredDemos().catch((e) => console.error("[demo] limpieza", e));
+        setTimeout(sweepDemos, 30_000).unref();
+        setInterval(sweepDemos, 60 * 60_000).unref();
 
         config(this.app);
         router(this.app);
