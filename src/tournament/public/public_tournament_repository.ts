@@ -489,11 +489,13 @@ export class PublicTournamentRepository {
       player1_first: string | null;
       player1_last: string | null;
       player1_club: string | null;
+      player1_crest?: string | null;
       player1_avatar_url: string | null;
       player2_id: string | null;
       player2_first: string | null;
       player2_last: string | null;
       player2_club: string | null;
+      player2_crest?: string | null;
       player2_avatar_url: string | null;
       winner_id: string | null;
       sets_player1: number;
@@ -508,8 +510,8 @@ export class PublicTournamentRepository {
     const union = `
       SELECT gm.id_match, 'group' AS stage, tc.category_type, tc.category_range, tc.gender,
              NULL::int AS round,
-             gm.player1_id, u1.first_name AS player1_first, u1.last_name AS player1_last, c1.name AS player1_club, u1.avatar_url AS player1_avatar_url,
-             gm.player2_id, u2.first_name AS player2_first, u2.last_name AS player2_last, c2.name AS player2_club, u2.avatar_url AS player2_avatar_url,
+             gm.player1_id, u1.first_name AS player1_first, u1.last_name AS player1_last, c1.name AS player1_club, c1.crest_image_url AS player1_crest, u1.avatar_url AS player1_avatar_url,
+             gm.player2_id, u2.first_name AS player2_first, u2.last_name AS player2_last, c2.name AS player2_club, c2.crest_image_url AS player2_crest, u2.avatar_url AS player2_avatar_url,
              gm.winner_id, gm.sets_player1, gm.sets_player2, gm.status, gm.best_of_sets, gm.played_at, gm.set_scores, gm.result_reason
       FROM group_matches gm
       JOIN tournament_categories tc ON tc.id_category = gm.id_category
@@ -523,8 +525,8 @@ export class PublicTournamentRepository {
 
       SELECT bm.id_match, 'bracket' AS stage, tc.category_type, tc.category_range, tc.gender,
              bm.round,
-             bm.player1_id, u1.first_name AS player1_first, u1.last_name AS player1_last, c1.name AS player1_club, u1.avatar_url AS player1_avatar_url,
-             bm.player2_id, u2.first_name AS player2_first, u2.last_name AS player2_last, c2.name AS player2_club, u2.avatar_url AS player2_avatar_url,
+             bm.player1_id, u1.first_name AS player1_first, u1.last_name AS player1_last, c1.name AS player1_club, c1.crest_image_url AS player1_crest, u1.avatar_url AS player1_avatar_url,
+             bm.player2_id, u2.first_name AS player2_first, u2.last_name AS player2_last, c2.name AS player2_club, c2.crest_image_url AS player2_crest, u2.avatar_url AS player2_avatar_url,
              bm.winner_id, bm.sets_player1, bm.sets_player2, bm.status, bm.best_of_sets, bm.played_at, bm.set_scores, bm.result_reason
       FROM bracket_matches bm
       JOIN tournament_categories tc ON tc.id_category = bm.id_category
@@ -643,7 +645,7 @@ export class PublicTournamentRepository {
   }
 
   async getCategoryDetail(id_category: string): Promise<{
-    category: { id_category: string; id_tournament: string; category_type: string; category_range: string; gender: string; phase: string; competition_format: string; ranking_level?: string } | null;
+    category: { id_category: string; id_tournament: string; category_type: string; category_range: string; gender: string; phase: string; competition_format: string; ranking_level?: string; is_gold?: boolean; qualifiers_per_group?: number | null } | null;
     players: Array<{ id_user: string; first_name: string | null; last_name: string | null; club_name: string | null; club_crest_url: string | null; avatar_url: string | null }>;
     groups: Array<{
       id_group: string;
@@ -670,7 +672,7 @@ export class PublicTournamentRepository {
   }> {
     const categoryRes = await this.pool.query(
       `SELECT tc.id_category, tc.id_tournament, tc.category_type, tc.category_range, tc.gender, tc.phase, tc.competition_format,
-              t.ranking_level
+              t.ranking_level, (tc.silver_category_id IS NOT NULL) AS is_gold, tc.qualifiers_per_group
        FROM tournament_categories tc JOIN tournaments t ON t.id_tournament = tc.id_tournament
        WHERE tc.id_category = $1`,
       [id_category]
