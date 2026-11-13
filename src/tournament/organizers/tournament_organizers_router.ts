@@ -12,6 +12,9 @@ function errorResponse(res: import("express").Response, error: string) {
   if (error === "NOT_TOURNAMENT_OWNER") {
     return res.status(403).json({ ok: false, message: "Solo el organizador dueño del torneo puede hacer esto" });
   }
+  if (error === "ONLY_OWNER_ORGANIZERS") {
+    return res.status(403).json({ ok: false, message: "Solo el dueño del campeonato puede sumar, cambiar o sacar coorganizadores" });
+  }
   if (error === "USER_NOT_FOUND") {
     return res.status(404).json({ ok: false, message: "No hay ninguna cuenta con ese email" });
   }
@@ -22,7 +25,7 @@ function errorResponse(res: import("express").Response, error: string) {
     });
   }
   if (error === "IS_OWNER") {
-    return res.status(400).json({ ok: false, message: "Ese email es el tuyo: ya eres el dueño de este campeonato" });
+    return res.status(400).json({ ok: false, message: "Ese email es el del dueño del campeonato (o el tuyo)" });
   }
   return res.status(400).json({ ok: false, message: error });
 }

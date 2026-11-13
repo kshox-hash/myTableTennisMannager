@@ -41,8 +41,17 @@ export class TournamentOrganizersRepository {
     this.notifications = new NotificationsRepository(this.pool);
   }
 
-  // Solo el dueño del torneo (no un coorganizador) puede invitar/sacar gente
-  // — mismo criterio que editar/cancelar el torneo.
+  // Quién invita/saca: el dueño maneja todo el equipo; un coorganizador solo
+  // puede sumar o sacar invitados de solo lectura (no coorganizadores).
+  private async myTeamRole(idTournament: string, userId: string): Promise<"owner" | OrganizerRole | null> {
+    if (await this.isOwner(idTournament, userId)) return "owner";
+    const r = await this.pool.query<{ role: OrganizerRole }>(
+      `SELECT role FROM tournament_organizers WHERE id_tournament = $1 AND id_user = $2`,
+      [idTournament, userId]
+    );
+    return r.rows[0]?.role ?? null;
+  }
+
   private async isOwner(idTournament: string, userId: string): Promise<boolean> {
     const res = await this.pool.query<{ created_by: string }>(
       `SELECT created_by FROM tournaments WHERE id_tournament = $1`,
@@ -109,11 +118,11 @@ export class TournamentOrganizersRepository {
     role: OrganizerRole = "organizer"
   ): Promise<
     | { ok: true; data: OrganizerRow }
-    | { ok: false; error: "NOT_TOURNAMENT_OWNER" | "USER_NOT_FOUND" | "USER_NOT_ADMIN" | "IS_OWNER" }
+    | { ok: false; error: "NOT_TOURNAMENT_OWNER" | "ONLY_OWNER_ORGANIZERS" | "USER_NOT_FOUND" | "USER_NOT_ADMIN" | "IS_OWNER" }
   > {
-    if (!(await this.isOwner(idTournament, invitedBy))) {
-      return { ok: false, error: "NOT_TOURNAMENT_OWNER" };
-    }
+    const me = await this.myTeamRole(idTournament, invitedBy);
+    if (me !== "owner" && me !== "organizer") return { ok: false, error: "NOT_TOURNAMENT_OWNER" };
+    if (me === "organizer" && role !== "viewer") return { ok: false, error: "ONLY_OWNER_ORGANIZERS" };
 
     const userRes = await this.pool.query<{ id_user: string; role: string }>(
       `SELECT u.id_user, r.name AS role FROM users u
@@ -123,7 +132,7 @@ export class TournamentOrganizersRepository {
     );
     const user = userRes.rows[0];
     if (!user) return { ok: false, error: "USER_NOT_FOUND" };
-    if (user.id_user === invitedBy) return { ok: false, error: "IS_OWNER" };
+    if (user.id_user === invitedBy || (await this.isOwner(idTournament, user.id_user))) return { ok: false, error: "IS_OWNER" };
     if (user.role !== "admin") return { ok: false, error: "USER_NOT_ADMIN" };
 
     const prevRes = await this.pool.query<{ role: OrganizerRole }>(
@@ -131,6 +140,8 @@ export class TournamentOrganizersRepository {
       [idTournament, user.id_user]
     );
     const previousRole = prevRes.rows[0]?.role ?? null;
+    // Un coorganizador no puede bajar a otro coorganizador a invitado.
+    if (me === "organizer" && previousRole === "organizer") return { ok: false, error: "ONLY_OWNER_ORGANIZERS" };
 
     // Si ya estaba invitado con otro rol, se actualiza al nuevo -- re-invitar
     // es la forma de cambiarle el rol a alguien sin sacarlo y volver a
@@ -173,9 +184,15 @@ export class TournamentOrganizersRepository {
     idTournament: string,
     requestedBy: string,
     idUser: string
-  ): Promise<{ ok: true } | { ok: false; error: "NOT_TOURNAMENT_OWNER" }> {
-    if (!(await this.isOwner(idTournament, requestedBy))) {
-      return { ok: false, error: "NOT_TOURNAMENT_OWNER" };
+  ): Promise<{ ok: true } | { ok: false; error: "NOT_TOURNAMENT_OWNER" | "ONLY_OWNER_ORGANIZERS" }> {
+    const me = await this.myTeamRole(idTournament, requestedBy);
+    if (me !== "owner" && me !== "organizer") return { ok: false, error: "NOT_TOURNAMENT_OWNER" };
+    if (me === "organizer") {
+      const target = await this.pool.query<{ role: OrganizerRole }>(
+        `SELECT role FROM tournament_organizers WHERE id_tournament = $1 AND id_user = $2`,
+        [idTournament, idUser]
+      );
+      if (target.rows[0]?.role !== "viewer") return { ok: false, error: "ONLY_OWNER_ORGANIZERS" };
     }
 
     const del = await this.pool.query(
