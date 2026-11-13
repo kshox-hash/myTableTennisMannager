@@ -96,7 +96,9 @@ export async function createDemoAccount(opts: { organization?: string | null; co
   const tag = randomBytes(3).toString("hex");
   const email = `demo-${tag}@myttm.cl`;
   const password = demoPassword();
-  const [first, ...rest] = (opts.contactName ?? "").trim().split(/\s+/).filter(Boolean);
+  // Nombre del organizador: la etiqueta que puso el súper usuario (ej. "Club Ñuñoa"), o "Organizador Demo".
+  const label = (opts.contactName ?? "").trim();
+  const [first, rest] = label ? [label, []] : ["", [] as string[]];
   const u = await q(
     `INSERT INTO users (email, password_hash, id_role, first_name, last_name, organizer_first_name, organizer_last_name, demo_expires_at)
      VALUES ($1, $2, $3, $4::text, $5::text, $4::text, $5::text, now() + ($6::text || ' days')::interval)

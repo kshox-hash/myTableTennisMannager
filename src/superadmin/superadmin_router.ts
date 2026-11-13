@@ -13,8 +13,7 @@ import { hashPassword } from "../bcrypt/bcrypt";
 import { ROLE_IDS, getSuperadminEmails, isEnvSuperadmin, loadSuperadmins } from "../core/constants/roles";
 import { UserRepository } from "../users/user_repository";
 import { UserService } from "../users/user_service";
-import { createDemoAccount, deleteDemoAccount, DEMO_DAYS } from "../demo/demo_seeder";
-import { sendMail } from "../core/mailer";
+import { createDemoAccount, deleteDemoAccount } from "../demo/demo_seeder";
 
 const router = Router();
 const repo = new SuperadminRepository();
@@ -440,10 +439,8 @@ router.get(
   "/demo-requests",
   asyncHandler(async (_req, res) => {
     const r = await DB.getPool().query(
-      `SELECT d.id_demo_request, d.name, d.email, d.phone, d.organization, d.org_type, d.players, d.message, d.lang,
-              d.created_at, d.contacted_at, d.demo_email, d.demo_sent_at, u.demo_expires_at
-         FROM demo_requests d LEFT JOIN users u ON u.id_user = d.demo_user_id
-        ORDER BY d.created_at DESC LIMIT 300`
+      `SELECT id_demo_request, name, email, phone, organization, org_type, players, message, lang, created_at, contacted_at
+         FROM demo_requests ORDER BY created_at DESC LIMIT 300`
     );
     return res.json({ ok: true, data: r.rows });
   })
@@ -466,76 +463,41 @@ router.patch(
   })
 );
 
-const escHtml = (s: string) =>
-  s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+// ── Cuentas demo (organizador temporal con un campeonato de ejemplo) ──
 
-// POST /api/v1/superadmin/demo-requests/:id/demo — crea la cuenta demo (organizador
-// temporal con un campeonato de ejemplo), le manda el acceso por email a quien
-// la pidió y devuelve las credenciales (por si el correo no llega). Si ya tenía
-// una demo, se reemplaza por una nueva.
+// GET /api/v1/superadmin/demos — cuentas demo activas
+router.get(
+  "/demos",
+  asyncHandler(async (_req, res) => {
+    const r = await DB.getPool().query(
+      `SELECT u.id_user, u.email, u.organizer_first_name AS label, u.created_at, u.demo_expires_at
+         FROM users u WHERE u.demo_expires_at IS NOT NULL ORDER BY u.created_at DESC`
+    );
+    return res.json({ ok: true, data: r.rows });
+  })
+);
+
+// POST /api/v1/superadmin/demos — body { label? }: crea la cuenta y devuelve el
+// acceso (la contraseña solo se ve acá; para dársela a quien la pidió).
 router.post(
-  "/demo-requests/:id/demo",
+  "/demos",
   asyncHandler(async (req, res) => {
-    const id = Number(req.params.id);
-    if (!Number.isInteger(id)) return res.status(400).json({ ok: false, message: "Datos inválidos" });
-    const pool = DB.getPool();
-    const r = await pool.query(
-      `SELECT name, email, organization, demo_user_id FROM demo_requests WHERE id_demo_request = $1`,
-      [id]
-    );
-    const d = r.rows[0];
-    if (!d) return res.status(404).json({ ok: false, message: "No existe" });
-    if (d.demo_user_id) await deleteDemoAccount(d.demo_user_id);
-
-    const demo = await createDemoAccount({ organization: d.organization, contactName: d.name });
-    await pool.query(
-      `UPDATE demo_requests SET demo_user_id = $2, demo_email = $3, demo_sent_at = now(),
-              contacted_at = COALESCE(contacted_at, now())
-        WHERE id_demo_request = $1`,
-      [id, demo.idUser, demo.email]
-    );
-
-    const web = (process.env.WEB_URL ?? "https://www.myttm.cl").replace(/\/$/, "");
-    const until = new Date(demo.expiresAt).toLocaleDateString("es-CL", { day: "numeric", month: "long" });
-    const first = String(d.name ?? "").trim().split(/\s+/)[0] || "Hola";
-    const text = [
-      `${first}, tu demo de MyTTM está lista.`,
-      "",
-      `Entra en ${web}/login con:`,
-      `  Correo: ${demo.email}`,
-      `  Contraseña: ${demo.password}`,
-      "",
-      "Tiene un campeonato de ejemplo con grupos jugados, una llave en curso, mesas y ranking. Al entrar verás un recorrido guiado; puedes volver a verlo con el botón \"Ver recorrido\".",
-      `La demo está disponible por ${DEMO_DAYS} días (hasta el ${until}). Los jugadores son ficticios: cambia lo que quieras.`,
-    ].join("\n");
-    const html = `<div style="font-family:system-ui,sans-serif;font-size:15px;color:#111;line-height:1.5">
-<p>${escHtml(first)}, tu demo de <b>MyTTM</b> está lista.</p>
-<p style="background:#f2f4f0;border-radius:12px;padding:14px 16px">
-Correo: <b>${escHtml(demo.email)}</b><br>Contraseña: <b>${escHtml(demo.password)}</b></p>
-<p><a href="${web}/login" style="display:inline-block;background:#c6f432;color:#111;font-weight:700;padding:10px 18px;border-radius:999px;text-decoration:none">Entrar a la demo</a></p>
-<p>Tiene un campeonato de ejemplo con grupos jugados, una llave en curso, mesas y ranking. Al entrar verás un recorrido guiado; puedes volver a verlo con el botón <b>Ver recorrido</b>.</p>
-<p style="color:#666;font-size:13px">Disponible por ${DEMO_DAYS} días (hasta el ${escHtml(until)}). Los jugadores son ficticios: cambia lo que quieras.</p></div>`;
-    const mailed = await sendMail(d.email, "Tu demo de MyTTM", html, text);
-
+    const p = z.object({ label: z.string().trim().max(100).optional() }).safeParse(req.body ?? {});
+    if (!p.success) return res.status(400).json({ ok: false, message: "Datos inválidos" });
+    const label = p.data.label || null;
+    const demo = await createDemoAccount({ organization: label, contactName: label });
     return res.status(201).json({
       ok: true,
-      data: { email: demo.email, password: demo.password, expires_at: demo.expiresAt, mailed },
+      data: { id_user: demo.idUser, email: demo.email, password: demo.password, expires_at: demo.expiresAt },
     });
   })
 );
 
-// DELETE /api/v1/superadmin/demo-requests/:id/demo — borra la demo antes de que venza.
+// DELETE /api/v1/superadmin/demos/:id — borra la demo antes de que venza.
 router.delete(
-  "/demo-requests/:id/demo",
+  "/demos/:id",
   asyncHandler(async (req, res) => {
-    const id = Number(req.params.id);
-    if (!Number.isInteger(id)) return res.status(400).json({ ok: false, message: "Datos inválidos" });
-    const r = await DB.getPool().query(`SELECT demo_user_id FROM demo_requests WHERE id_demo_request = $1`, [id]);
-    if (r.rows[0]?.demo_user_id) await deleteDemoAccount(r.rows[0].demo_user_id);
-    await DB.getPool().query(
-      `UPDATE demo_requests SET demo_user_id = NULL, demo_email = NULL, demo_sent_at = NULL WHERE id_demo_request = $1`,
-      [id]
-    );
+    await deleteDemoAccount(String(req.params.id));
     return res.json({ ok: true });
   })
 );
