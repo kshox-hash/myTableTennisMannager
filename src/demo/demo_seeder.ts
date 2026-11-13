@@ -1,9 +1,11 @@
 // Cuentas demo para prospectos (ver migración 096).
 //
 // createDemoAccount() crea un organizador temporal con un campeonato de
-// ejemplo ya armado: una categoría Oro/Plata con los grupos jugados y la llave
-// a medias (un partido en vivo en la mesa 1), una categoría terminada (con
-// campeona y ranking) y una categoría todavía en inscripciones.
+// ejemplo con un formato distinto en cada categoría:
+//   - Todo Competidor: grupos + llave, a medias (un partido en vivo en la mesa 1).
+//   - Damas: todos contra todos, terminada.
+//   - Senior +40: grupos con Copa de Oro y Plata, terminada (campeón de cada copa).
+//   - Sub-15: todavía en inscripciones, con pagos pendientes.
 //
 // Todo pasa por la API real del propio servidor (mismas reglas, mismos
 // cálculos), firmada como el organizador demo. El campeonato es privado,
@@ -133,8 +135,9 @@ async function seedTournament(owner: string, organization: string | null): Promi
     visibility: "private",
     ranking_level: "local",
     categories: [
-      { category_type: "Todo Competidor", category_range: "General", gender: "mixed", competition_format: "groups_bracket", inscription_price: 5000, quotas: null, qualifiers_per_group: 2, createSilverPair: true },
-      { category_type: "Damas", category_range: "Todo Competidor", gender: "female", competition_format: "groups_bracket", inscription_price: 5000, quotas: null, qualifiers_per_group: 2 },
+      { category_type: "Todo Competidor", category_range: "General", gender: "mixed", competition_format: "groups_bracket", inscription_price: 5000, quotas: null, qualifiers_per_group: 2 },
+      { category_type: "Damas", category_range: "Todo Competidor", gender: "female", competition_format: "round_robin", inscription_price: 5000, quotas: null },
+      { category_type: "Senior", category_range: "+40", gender: "mixed", competition_format: "groups_bracket", inscription_price: 5000, quotas: null, qualifiers_per_group: 2, createSilverPair: true },
       { category_type: "Sub-15", category_range: "Juvenil", gender: "mixed", competition_format: "groups_bracket", inscription_price: 3000, quotas: 16, qualifiers_per_group: 2 },
     ],
   });
@@ -149,8 +152,9 @@ async function seedTournament(owner: string, organization: string | null): Promi
       [t]
     )
   ).rows as { id_category: string; category_type: string; silver_category_id: string | null }[];
-  const gold = cats.find((c) => c.silver_category_id)!;
-  const silverId = gold.silver_category_id!;
+  const main = cats.find((c) => c.category_type === "Todo Competidor")!;
+  const senior = cats.find((c) => c.silver_category_id)!;
+  const silverId = senior.silver_category_id!;
   const damas = cats.find((c) => c.category_type === "Damas")!;
   const sub15 = cats.find((c) => c.category_type === "Sub-15")!;
 
@@ -201,14 +205,17 @@ async function seedTournament(owner: string, organization: string | null): Promi
     if (opts.closed) await q(`UPDATE tournament_categories SET status = 'closed' WHERE id_category = $1`, [cat]);
   };
 
-  const goldPlayers = await makePlayers(24, (i) => i % 6 === 0, adultBirth);
-  const damasPlayers = await makePlayers(8, () => true, adultBirth);
+  const seniorBirth = () => `${rnd(1960, 1985)}-0${rnd(1, 9)}-1${rnd(0, 9)}`;
+  const mainPlayers = await makePlayers(24, (i) => i % 6 === 0, adultBirth);
+  const damasPlayers = await makePlayers(6, () => true, adultBirth);
+  const seniorPlayers = await makePlayers(16, (i) => i % 5 === 0, seniorBirth);
   const subPlayers = await makePlayers(11, (i) => i % 3 === 0, kidBirth);
-  await enroll(goldPlayers, gold.id_category, { closed: true });
+  await enroll(mainPlayers, main.id_category, { closed: true });
   await enroll(damasPlayers, damas.id_category, { closed: true, offset: 3 });
+  await enroll(seniorPlayers, senior.id_category, { closed: true, offset: 2 });
   await enroll(subPlayers, sub15.id_category, { paidRatio: 0.6, offset: 5 });
 
-  const level = new Map<string, number>([...goldPlayers, ...damasPlayers].map((p) => [p, 20 + Math.random() * 70]));
+  const level = new Map<string, number>([...mainPlayers, ...damasPlayers, ...seniorPlayers].map((p) => [p, 20 + Math.random() * 70]));
   const result = makeResult(level);
 
   const pendingGroup = async (cat: string) =>
@@ -229,30 +236,45 @@ async function seedTournament(owner: string, organization: string | null): Promi
         [cat]
       )
     ).rows;
-  const playGroups = async (cat: string) => {
+  const playAllGroups = async (cat: string) => {
     await call("POST", `/tournament/${t}/categories/${cat}/start-groups`, { best_of_sets: 3, group_size_mode: "fours" });
     for (const m of await pendingGroup(cat)) await call("POST", `/bracket/matches/${m.id_match}/result`, result(m.player1_id, m.player2_id, 3));
+  };
+  const playGroups = async (cat: string) => {
+    await playAllGroups(cat);
     await call("POST", `/tournament/${t}/categories/${cat}/start-bracket`, { best_of_sets: 5 });
   };
+  const playBracketToEnd = async (cat: string) => {
+    for (let guard = 0; guard < 12; guard++) {
+      const pend = await pendingBracket(cat);
+      if (!pend.length) break;
+      for (const m of pend) await call("POST", `/bracket/bracket-matches/${m.id_match}/result`, result(m.player1_id, m.player2_id, 5));
+    }
+  };
+  const finish = async (cat: string) => {
+    const phase = (await q(`SELECT phase FROM tournament_categories WHERE id_category = $1`, [cat])).rows[0]?.phase;
+    if (phase !== "finished") await call("POST", `/tournament/categories/${cat}/finish`, {}).catch(() => undefined);
+  };
 
-  // Damas: completa, con campeona.
-  await playGroups(damas.id_category);
-  for (let guard = 0; guard < 10; guard++) {
-    const pend = await pendingBracket(damas.id_category);
-    if (!pend.length) break;
-    for (const m of pend) await call("POST", `/bracket/bracket-matches/${m.id_match}/result`, result(m.player1_id, m.player2_id, 5));
-  }
-  const phase = (await q(`SELECT phase FROM tournament_categories WHERE id_category = $1`, [damas.id_category])).rows[0]?.phase;
-  if (phase !== "finished") await call("POST", `/tournament/categories/${damas.id_category}/finish`, {}).catch(() => undefined);
+  // Damas: todos contra todos, terminada (podio por tabla).
+  await playAllGroups(damas.id_category);
+  await finish(damas.id_category);
 
-  // Todo Competidor (Oro): grupos jugados, llave a medias.
-  await playGroups(gold.id_category);
-  const firstRound = await pendingBracket(gold.id_category);
+  // Senior +40: Copa de Oro y Plata, las dos llaves terminadas.
+  await playGroups(senior.id_category);
+  await playBracketToEnd(senior.id_category);
+  await playBracketToEnd(silverId);
+  await finish(senior.id_category);
+  await finish(silverId);
+
+  // Todo Competidor: grupos jugados, llave a medias.
+  await playGroups(main.id_category);
+  const firstRound = await pendingBracket(main.id_category);
   const minRound = Math.min(...firstRound.map((m: any) => m.round));
   for (const m of firstRound.filter((m: any) => m.round === minRound)) {
     await call("POST", `/bracket/bracket-matches/${m.id_match}/result`, result(m.player1_id, m.player2_id, 5));
   }
-  const next = await pendingBracket(gold.id_category);
+  const next = await pendingBracket(main.id_category);
   // La mitad de la ronda siguiente jugada; uno en vivo en la mesa 1 y otro esperando en la mesa 2.
   const half = Math.max(0, Math.floor(next.length / 2) - 1);
   for (const m of next.slice(0, half)) await call("POST", `/bracket/bracket-matches/${m.id_match}/result`, result(m.player1_id, m.player2_id, 5));
@@ -266,15 +288,6 @@ async function seedTournament(owner: string, organization: string | null): Promi
   }
   if (waiting) {
     await call("PATCH", `/tournament/tables/assign`, { id_match: waiting.id_match, match_type: "bracket", table_number: 2 }).catch(() => undefined);
-  }
-
-  // Plata: primera ronda jugada.
-  const silverPend = await pendingBracket(silverId);
-  if (silverPend.length) {
-    const r0 = Math.min(...silverPend.map((m: any) => m.round));
-    for (const m of silverPend.filter((m: any) => m.round === r0)) {
-      await call("POST", `/bracket/bracket-matches/${m.id_match}/result`, result(m.player1_id, m.player2_id, 5));
-    }
   }
 
   // La siembra deja puntos de "deshacer"; para la demo se parte de cero.
