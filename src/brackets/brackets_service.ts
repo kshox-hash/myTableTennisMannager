@@ -1243,8 +1243,10 @@ export class BracketsService {
     }));
 
     const preRoundMatches = matches.filter((m) => m.round === 0);
+    const rankingLevel = await this.repo.tournamentRankingLevel(tournamentId);
 
     return ok({
+      ranking_level: rankingLevel,
       bracket_size: bracketSize,
       total_rounds: totalRounds,
       rounds,

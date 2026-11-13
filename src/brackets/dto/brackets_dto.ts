@@ -255,6 +255,8 @@ export type BracketMatchRow = {
 };
 
 export type BracketView = {
+  /** Nivel del campeonato: elige la copa que se dibuja al lado de la final. */
+  ranking_level?: string;
   bracket_size: number;
   total_rounds: number;
   rounds: Array<{

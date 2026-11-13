@@ -812,7 +812,7 @@ export class PlayerRepository {
     const query = `
       WITH my_categories AS (
         SELECT DISTINCT tc.id_category, tc.id_tournament, tc.category_type, tc.category_range,
-               t.tournament_name, t.event_date
+               t.tournament_name, t.event_date, t.ranking_level
         FROM enrollments e
         JOIN tournament_categories tc ON tc.id_category = e.id_category
         JOIN tournaments t ON t.id_tournament = tc.id_tournament
@@ -846,7 +846,7 @@ export class PlayerRepository {
       )
       SELECT
         mc.id_tournament, mc.tournament_name, mc.event_date::text,
-        mc.id_category, mc.category_type, mc.category_range,
+        mc.id_category, mc.category_type, mc.category_range, mc.ranking_level,
         p.position
       FROM my_categories mc
       JOIN placed p ON p.id_category = mc.id_category AND p.id_user = ANY($1::uuid[])

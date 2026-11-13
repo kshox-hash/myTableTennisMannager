@@ -166,6 +166,7 @@ router.get(
         organizer_club_name: tournament.organizer_club_name ?? tournament.organizer_user_name,
         organizer_id: tournament.organizer_id,
         organizer_avatar_url: tournament.organizer_avatar_url,
+        ranking_level: tournament.ranking_level ?? "local",
         categories: categories.map((c) => ({
           id_category: c.id_category,
           category_type: c.category_type,
@@ -477,6 +478,7 @@ router.get(
         gender: detail.category.gender,
         phase: detail.category.phase,
         competition_format: detail.category.competition_format,
+        ranking_level: detail.category.ranking_level ?? "local",
         players: detail.players.map((p) => ({
           id_user: p.id_user,
           first_name: p.first_name,

@@ -840,6 +840,15 @@ export class BracketsRepository {
     };
   }
 
+  /** Nivel del campeonato (local / regional / nacional). */
+  async tournamentRankingLevel(tournamentId: string): Promise<string> {
+    const r = await this.pool.query<{ ranking_level: string }>(
+      `SELECT ranking_level FROM tournaments WHERE id_tournament = $1`,
+      [tournamentId]
+    );
+    return r.rows[0]?.ranking_level ?? "local";
+  }
+
   /** "Juan Pérez" o "cupo 2° GR-12" (para el historial y los avisos). */
   private async positionName(client: PoolClient, p: SwapPosition): Promise<string> {
     if (p.player) {

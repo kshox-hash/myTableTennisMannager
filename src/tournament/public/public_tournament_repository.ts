@@ -69,6 +69,7 @@ export interface PublicCategoryRow {
 
 export interface PublicTournamentDetailRow {
   end_date?: string | null;
+  ranking_level?: string;
   id_tournament: string;
   tournament_name: string;
   description: string | null;
@@ -284,6 +285,7 @@ export class PublicTournamentRepository {
               COALESCE(real_club.name, legacy_club.name) AS organizer_club_name,
               ${ORGANIZER_NAME_SQL} AS organizer_user_name,
               t.created_by AS organizer_id,
+              t.ranking_level,
               ${organizerAvatarSql("u")} AS organizer_avatar_url
        FROM tournaments t
        LEFT JOIN users u ON u.id_user = t.created_by
@@ -637,7 +639,7 @@ export class PublicTournamentRepository {
   }
 
   async getCategoryDetail(id_category: string): Promise<{
-    category: { id_category: string; id_tournament: string; category_type: string; category_range: string; gender: string; phase: string; competition_format: string } | null;
+    category: { id_category: string; id_tournament: string; category_type: string; category_range: string; gender: string; phase: string; competition_format: string; ranking_level?: string } | null;
     players: Array<{ id_user: string; first_name: string | null; last_name: string | null; club_name: string | null; club_crest_url: string | null; avatar_url: string | null }>;
     groups: Array<{
       id_group: string;
@@ -663,8 +665,10 @@ export class PublicTournamentRepository {
     }>;
   }> {
     const categoryRes = await this.pool.query(
-      `SELECT id_category, id_tournament, category_type, category_range, gender, phase, competition_format
-       FROM tournament_categories WHERE id_category = $1`,
+      `SELECT tc.id_category, tc.id_tournament, tc.category_type, tc.category_range, tc.gender, tc.phase, tc.competition_format,
+              t.ranking_level
+       FROM tournament_categories tc JOIN tournaments t ON t.id_tournament = tc.id_tournament
+       WHERE tc.id_category = $1`,
       [id_category]
     );
     const category = categoryRes.rows[0] ?? null;
