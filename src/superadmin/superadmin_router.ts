@@ -357,15 +357,14 @@ router.get(
   })
 );
 
-// POST /api/v1/superadmin/superadmins — body { email }: tiene que existir una cuenta con ese email.
+// POST /api/v1/superadmin/superadmins — body { email }: no hace falta que ya
+// exista la cuenta; si se registra después con ese email, entra como súper usuario.
 router.post(
   "/superadmins",
   asyncHandler(async (req, res) => {
     const p = z.object({ email: z.string().trim().email() }).safeParse(req.body);
     if (!p.success) return res.status(400).json({ ok: false, message: "Email inválido" });
     const email = p.data.email.toLowerCase();
-    const u = await DB.getPool().query(`SELECT 1 FROM users WHERE LOWER(email) = $1`, [email]);
-    if (!u.rowCount) return res.status(404).json({ ok: false, message: "No hay ninguna cuenta con ese email" });
     await DB.getPool().query(
       `INSERT INTO superadmins (email, added_by) VALUES ($1, $2) ON CONFLICT (email) DO NOTHING`,
       [email, req.user!.id_user]
