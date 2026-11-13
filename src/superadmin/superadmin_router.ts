@@ -9,6 +9,7 @@ import { confirmHandler, crestKey, headerKey, uploadUrlHandler } from "../clubs/
 import { deleteObject } from "../media/r2_client";
 import { NotificationsRepository } from "../notifications/notifications_repository";
 import DB from "../db/db_configuration";
+import { getSuperadminEmails, isEnvSuperadmin, loadSuperadmins } from "../core/constants/roles";
 import { UserRepository } from "../users/user_repository";
 import { UserService } from "../users/user_service";
 
@@ -318,6 +319,73 @@ router.delete(
     }
     const result = await users.deleteAccount(req.params.id_user);
     if (!result.ok) return res.status(404).json({ ok: false, message: "Jugador no encontrado" });
+    return res.json({ ok: true });
+  })
+);
+
+// ── Súper usuarios ───────────────────────────────────────────
+// Los de la variable SUPERADMIN_EMAILS (fijos) + los agregados desde acá.
+
+// GET /api/v1/superadmin/superadmins
+router.get(
+  "/superadmins",
+  asyncHandler(async (_req, res) => {
+    const emails = getSuperadminEmails();
+    const added = await DB.getPool().query(
+      `SELECT LOWER(s.email) AS email, s.created_at,
+              NULLIF(TRIM(CONCAT(a.first_name, ' ', a.last_name)), '') AS added_by_name
+         FROM superadmins s LEFT JOIN users a ON a.id_user = s.added_by`
+    );
+    const meta = new Map(added.rows.map((r: any) => [r.email, r]));
+    const users = await DB.getPool().query(
+      `SELECT LOWER(email) AS email, NULLIF(TRIM(CONCAT(first_name, ' ', last_name)), '') AS name
+         FROM users WHERE LOWER(email) = ANY($1::text[])`,
+      [emails]
+    );
+    const names = new Map(users.rows.map((r: any) => [r.email, r.name]));
+    const data = emails
+      .map((email) => ({
+        email,
+        name: names.get(email) ?? null,
+        has_account: names.has(email),
+        fixed: isEnvSuperadmin(email),
+        added_at: (meta.get(email) as any)?.created_at ?? null,
+        added_by_name: (meta.get(email) as any)?.added_by_name ?? null,
+      }))
+      .sort((a, b) => Number(b.fixed) - Number(a.fixed) || a.email.localeCompare(b.email));
+    return res.json({ ok: true, data });
+  })
+);
+
+// POST /api/v1/superadmin/superadmins — body { email }: tiene que existir una cuenta con ese email.
+router.post(
+  "/superadmins",
+  asyncHandler(async (req, res) => {
+    const p = z.object({ email: z.string().trim().email() }).safeParse(req.body);
+    if (!p.success) return res.status(400).json({ ok: false, message: "Email inválido" });
+    const email = p.data.email.toLowerCase();
+    const u = await DB.getPool().query(`SELECT 1 FROM users WHERE LOWER(email) = $1`, [email]);
+    if (!u.rowCount) return res.status(404).json({ ok: false, message: "No hay ninguna cuenta con ese email" });
+    await DB.getPool().query(
+      `INSERT INTO superadmins (email, added_by) VALUES ($1, $2) ON CONFLICT (email) DO NOTHING`,
+      [email, req.user!.id_user]
+    );
+    await loadSuperadmins(DB.getPool());
+    return res.status(201).json({ ok: true });
+  })
+);
+
+// DELETE /api/v1/superadmin/superadmins/:email — los fijos (variable de entorno) no se quitan;
+// tampoco uno mismo (para no quedarse fuera).
+router.delete(
+  "/superadmins/:email",
+  asyncHandler(async (req, res) => {
+    const email = String(req.params.email).trim().toLowerCase();
+    if (isEnvSuperadmin(email)) return res.status(400).json({ ok: false, message: "Este súper usuario es fijo: se quita en la configuración del servidor" });
+    const me = await DB.getPool().query(`SELECT LOWER(email) AS email FROM users WHERE id_user = $1`, [req.user!.id_user]);
+    if (me.rows[0]?.email === email) return res.status(400).json({ ok: false, message: "No puedes quitarte a ti mismo" });
+    await DB.getPool().query(`DELETE FROM superadmins WHERE LOWER(email) = $1`, [email]);
+    await loadSuperadmins(DB.getPool());
     return res.json({ ok: true });
   })
 );

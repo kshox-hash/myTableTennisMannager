@@ -10,6 +10,8 @@ import http from "http";
 import config from "./config";
 import router from "./router";
 import { runMigrations } from "./db/run_migrations";
+import DB from "./db/db_configuration";
+import { loadSuperadmins } from "./core/constants/roles";
 
 class Server {
     private app : express.Express;
@@ -22,6 +24,9 @@ class Server {
 
     async start(){
         await runMigrations();
+        // Súper usuarios agregados desde el panel (se refresca cada minuto).
+        await loadSuperadmins(DB.getPool());
+        setInterval(() => void loadSuperadmins(DB.getPool()), 60_000).unref();
 
         config(this.app);
         router(this.app);

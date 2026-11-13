@@ -12,12 +12,33 @@ export type EffectiveRole = DbRole | "superadmin";
 // var: cualquier cuenta con ese email (jugador o admin como quedó guardada
 // en la base) entra con rol efectivo "superadmin", superset de todo (ver
 // require_role_middleware.ts).
-const SUPERADMIN_EMAILS = new Set(
+const ENV_SUPERADMINS = new Set(
   (process.env.SUPERADMIN_EMAILS ?? "")
     .split(",")
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean)
 );
+// Además, los agregados desde el panel (tabla superadmins, migración 095):
+// se cargan al arrancar y se refrescan cada minuto y al agregar/quitar uno.
+let dbSuperadmins = new Set<string>();
+const SUPERADMIN_EMAILS = {
+  has: (email: string) => ENV_SUPERADMINS.has(email) || dbSuperadmins.has(email),
+  all: () => [...new Set([...ENV_SUPERADMINS, ...dbSuperadmins])],
+};
+
+export async function loadSuperadmins(pool: { query: (q: string) => Promise<{ rows: { email: string }[] }> }): Promise<void> {
+  try {
+    const r = await pool.query(`SELECT LOWER(email) AS email FROM superadmins`);
+    dbSuperadmins = new Set(r.rows.map((x) => x.email));
+  } catch (err) {
+    console.error("[superadmins] no se pudo cargar la lista:", err);
+  }
+}
+
+/** Los de la variable de entorno no se pueden quitar desde la web. */
+export function isEnvSuperadmin(email: string): boolean {
+  return ENV_SUPERADMINS.has(email.trim().toLowerCase());
+}
 
 export function resolveEffectiveRole(email: string, dbRole: DbRole): EffectiveRole {
   return SUPERADMIN_EMAILS.has(email.trim().toLowerCase()) ? "superadmin" : dbRole;
@@ -31,5 +52,5 @@ export function isSuperadminEmail(email: string): boolean {
 // Súper usuario) — su rol efectivo es "superadmin", no deberían aparecer
 // mezcladas con los admins comunes ni sumar al conteo de admins.
 export function getSuperadminEmails(): string[] {
-  return [...SUPERADMIN_EMAILS];
+  return SUPERADMIN_EMAILS.all();
 }
