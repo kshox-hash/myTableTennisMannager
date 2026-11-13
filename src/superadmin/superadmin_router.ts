@@ -482,14 +482,34 @@ router.get(
 router.post(
   "/demos",
   asyncHandler(async (req, res) => {
-    const p = z.object({ label: z.string().trim().max(100).optional() }).safeParse(req.body ?? {});
-    if (!p.success) return res.status(400).json({ ok: false, message: "Datos inválidos" });
+    const p = z
+      .object({
+        label: z.string().trim().max(100).optional(),
+        password: z.string().min(6, "La contraseña debe tener al menos 6 caracteres").max(100).optional().or(z.literal("")),
+      })
+      .safeParse(req.body ?? {});
+    if (!p.success) return res.status(400).json({ ok: false, message: p.error.issues[0]?.message ?? "Datos inválidos" });
     const label = p.data.label || null;
-    const demo = await createDemoAccount({ organization: label, contactName: label });
+    const demo = await createDemoAccount({ organization: label, contactName: label, password: p.data.password || null });
     return res.status(201).json({
       ok: true,
       data: { id_user: demo.idUser, email: demo.email, password: demo.password, expires_at: demo.expiresAt },
     });
+  })
+);
+
+// PATCH /api/v1/superadmin/demos/:id/password — body { password }: cambia la contraseña de la demo.
+router.patch(
+  "/demos/:id/password",
+  asyncHandler(async (req, res) => {
+    const p = z.object({ password: z.string().min(6, "La contraseña debe tener al menos 6 caracteres").max(100) }).safeParse(req.body);
+    if (!p.success) return res.status(400).json({ ok: false, message: p.error.issues[0]?.message ?? "Contraseña inválida" });
+    const r = await DB.getPool().query(
+      `UPDATE users SET password_hash = $2 WHERE id_user = $1 AND demo_expires_at IS NOT NULL`,
+      [String(req.params.id), await hashPassword(p.data.password)]
+    );
+    if (!r.rowCount) return res.status(404).json({ ok: false, message: "Esa demo ya no existe" });
+    return res.json({ ok: true });
   })
 );
 

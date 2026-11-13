@@ -88,14 +88,32 @@ function demoPassword() {
 
 export type DemoAccount = { idUser: string; email: string; password: string; expiresAt: string; idTournament: string };
 
-export async function createDemoAccount(opts: { organization?: string | null; contactName?: string | null }): Promise<DemoAccount> {
+// "Club Ñuñoa" → "clubnunoa" (para el correo de la cuenta demo).
+function slugOf(label: string) {
+  return label
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "")
+    .slice(0, 30);
+}
+
+export async function createDemoAccount(opts: {
+  organization?: string | null;
+  contactName?: string | null;
+  password?: string | null;
+}): Promise<DemoAccount> {
   const pool = DB.getPool();
   const q = (sql: string, p: unknown[] = []) => pool.query(sql, p);
 
-  // 1) Cuenta del organizador demo
-  const tag = randomBytes(3).toString("hex");
-  const email = `demo-${tag}@myttm.cl`;
-  const password = demoPassword();
+  // 1) Cuenta del organizador demo. Correo a partir del nombre (demo-clubnunoa@…),
+  //    con un número si ya existe; sin nombre, uno al azar.
+  const slug = slugOf(opts.contactName ?? "");
+  let email = `demo-${slug || randomBytes(3).toString("hex")}@myttm.cl`;
+  for (let n = 2; (await q(`SELECT 1 FROM users WHERE LOWER(email) = $1`, [email])).rowCount; n++) {
+    email = slug ? `demo-${slug}${n}@myttm.cl` : `demo-${randomBytes(3).toString("hex")}@myttm.cl`;
+  }
+  const password = opts.password || demoPassword();
   // Nombre del organizador: la etiqueta que puso el súper usuario (ej. "Club Ñuñoa"), o "Organizador Demo".
   const label = (opts.contactName ?? "").trim();
   const [first, rest] = label ? [label, []] : ["", [] as string[]];
