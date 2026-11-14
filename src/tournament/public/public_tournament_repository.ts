@@ -296,7 +296,7 @@ export class PublicTournamentRepository {
        LEFT JOIN users u ON u.id_user = t.created_by
        LEFT JOIN clubs real_club ON real_club.created_by = u.id_user
        LEFT JOIN clubs legacy_club ON legacy_club.id_club = u.id_club
-       WHERE t.id_tournament = $1 AND t.kind = 'tournament'`,
+       WHERE t.id_tournament = $1 AND t.kind = 'tournament' AND NOT t.is_demo`,
       [id_tournament]
     );
     return res.rows[0] ?? null;

@@ -148,7 +148,7 @@ followersRouter.post(
   asyncHandler(async (req, res) => {
     const id = String(req.params.id);
     if (!UUID.test(id)) return res.status(400).json({ ok: false, message: "Campeonato inválido" });
-    const t = await pool().query<{ status: string }>(`SELECT status FROM tournaments WHERE id_tournament = $1`, [id]);
+    const t = await pool().query<{ status: string }>(`SELECT status FROM tournaments WHERE id_tournament = $1 AND NOT is_demo`, [id]);
     if (!t.rows[0]) return res.status(404).json({ ok: false, message: "Campeonato no encontrado" });
     await pool().query(
       `INSERT INTO tournament_followers (id_tournament, id_user) VALUES ($1, $2) ON CONFLICT DO NOTHING`,

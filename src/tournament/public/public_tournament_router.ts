@@ -65,6 +65,19 @@ function displayStatus(status: string, eventDate: string | Date | null, category
   return "finished";
 }
 
+// Campeonatos demo (cuentas de prueba): no existen para el público, ni por
+// link directo. Cualquier ruta de este router con :id_tournament responde 404.
+async function isDemoTournament(id: string): Promise<boolean> {
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return false;
+  const r = await DB.getPool().query(`SELECT 1 FROM tournaments WHERE id_tournament = $1 AND is_demo`, [id]);
+  return (r.rowCount ?? 0) > 0;
+}
+router.param("id_tournament", (req, res, next, id) => {
+  isDemoTournament(String(id))
+    .then((demo) => (demo ? res.status(404).json({ ok: false, message: "Campeonato no encontrado" }) : next()))
+    .catch(next);
+});
+
 // GET /api/v1/tournament/public/tournaments?page=&limit=&q=&region=
 // Listado público, sin autenticación — vitrina para el landing y una
 // página propia de "Torneos" que cualquier visitante puede navegar.
@@ -456,7 +469,7 @@ router.get(
       return res.status(400).json({ ok: false, message: "match_type inválido" });
     }
     const data = await repo.getMatchDetail(matchType, req.params.id_match);
-    if (!data) {
+    if (!data || (data.id_tournament && (await isDemoTournament(String(data.id_tournament))))) {
       return res.status(404).json({ ok: false, message: "Partido no encontrado" });
     }
     return res.json({ ok: true, data });

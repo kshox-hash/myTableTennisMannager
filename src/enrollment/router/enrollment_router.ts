@@ -22,6 +22,12 @@ enrollmentsRouter.post(
   "/subscribe",
   authRequired,
   validateBody(enrollmentSchema),
+  // Un campeonato demo (cuenta de prueba) no acepta inscripciones de jugadores reales.
+  asyncHandler(async (req, res, next) => {
+    const r = await DB.getPool().query(`SELECT 1 FROM tournaments WHERE id_tournament = $1 AND is_demo`, [req.body.id_tournament]);
+    if (r.rowCount) return res.status(404).json({ ok: false, message: "Campeonato no encontrado" });
+    return next();
+  }),
   asyncHandler(controller.subscribe)
 );
 
