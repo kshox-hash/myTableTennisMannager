@@ -187,6 +187,22 @@ router.get(
   })
 );
 
+// PATCH /api/v1/superadmin/admins/:id/community — body { hidden }: saca o vuelve
+// a mostrar a ese organizador en "Comunidad".
+router.patch(
+  "/admins/:id/community",
+  asyncHandler(async (req, res) => {
+    const p = z.object({ hidden: z.boolean() }).safeParse(req.body);
+    if (!p.success) return res.status(400).json({ ok: false, message: "Datos inválidos" });
+    const r = await DB.getPool().query(`UPDATE users SET community_hidden = $2 WHERE id_user = $1 RETURNING community_hidden`, [
+      String(req.params.id),
+      p.data.hidden,
+    ]);
+    if (!r.rowCount) return res.status(404).json({ ok: false, message: "No existe" });
+    return res.json({ ok: true, data: r.rows[0] });
+  })
+);
+
 // GET /api/v1/superadmin/stats — KPIs generales de la plataforma
 router.get(
   "/stats",

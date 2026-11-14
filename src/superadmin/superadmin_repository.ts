@@ -7,6 +7,7 @@ export type AdminSummaryRow = {
   email: string;
   first_name: string | null;
   last_name: string | null;
+  community_hidden?: boolean;
   created_at: string;
   tournament_count: number;
   player_count: number;
@@ -74,7 +75,7 @@ export class SuperadminRepository {
     const superadminEmails = getSuperadminEmails();
     const res = await this.pool.query<AdminSummaryRow>(
       `SELECT
-         u.id_user, u.email, u.first_name, u.last_name, u.created_at,
+         u.id_user, u.email, u.first_name, u.last_name, u.created_at, u.community_hidden,
          (SELECT COUNT(*) FROM tournaments t WHERE t.created_by = u.id_user)::int AS tournament_count,
          (SELECT COUNT(DISTINCT e.id_user) FROM enrollments e
             JOIN tournaments t ON t.id_tournament = e.id_tournament
@@ -84,6 +85,7 @@ export class SuperadminRepository {
             WHERE t.created_by = u.id_user) AS last_activity_at
        FROM users u
        WHERE u.id_role = $1 AND NOT (LOWER(u.email) = ANY($2::text[]))
+         AND u.demo_expires_at IS NULL
        ORDER BY u.created_at DESC`,
       [ROLE_IDS.admin, superadminEmails]
     );

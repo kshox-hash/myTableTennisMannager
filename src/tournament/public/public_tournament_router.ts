@@ -202,6 +202,7 @@ router.get(
         id_user: o.id_user,
         organizer_name: o.organizer_name,
         club_name: o.club_name,
+        club_crest_url: o.club_crest_url ?? null,
         avatar_url: o.avatar_url,
         public_tournament_count: o.public_tournament_count,
       })),

@@ -102,6 +102,7 @@ export interface PublicOrganizerRow {
   id_user: string;
   organizer_name: string | null;
   club_name: string | null;
+  club_crest_url?: string | null;
   avatar_url: string | null;
   public_tournament_count: number;
 }
@@ -316,6 +317,7 @@ export class PublicTournamentRepository {
          u.id_user,
          ${ORGANIZER_NAME_SQL} AS organizer_name,
          cl.name AS club_name,
+         cl.crest_image_url AS club_crest_url,
          ${organizerAvatarSql("u")} AS avatar_url,
          COUNT(t.id_tournament) FILTER (
            WHERE t.visibility = 'public' AND t.status <> 'cancelled' AND t.kind = 'tournament'
@@ -324,7 +326,8 @@ export class PublicTournamentRepository {
        LEFT JOIN clubs cl ON cl.created_by = u.id_user
        LEFT JOIN tournaments t ON t.created_by = u.id_user
        WHERE u.id_role = $1
-       GROUP BY u.id_user, organizer_name, cl.name, u.avatar_url, u.organizer_avatar_url
+         AND u.demo_expires_at IS NULL AND NOT u.community_hidden
+       GROUP BY u.id_user, organizer_name, cl.name, cl.crest_image_url, u.avatar_url, u.organizer_avatar_url
        ORDER BY public_tournament_count DESC, organizer_name ASC NULLS LAST`,
       [ROLE_IDS.admin]
     );
@@ -355,7 +358,8 @@ export class PublicTournamentRepository {
          COALESCE((SELECT COUNT(*) FROM users m WHERE m.id_club = cl.id_club), 0)::int AS club_member_count
        FROM users u
        LEFT JOIN clubs cl ON cl.created_by = u.id_user
-       WHERE u.id_user = $1 AND u.id_role = $2`,
+       WHERE u.id_user = $1 AND u.id_role = $2
+         AND u.demo_expires_at IS NULL AND NOT u.community_hidden`,
       [id_user, ROLE_IDS.admin]
     );
     return res.rows[0] ?? null;
