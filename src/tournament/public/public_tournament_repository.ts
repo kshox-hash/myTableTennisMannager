@@ -327,6 +327,8 @@ export class PublicTournamentRepository {
        LEFT JOIN tournaments t ON t.created_by = u.id_user
        WHERE u.id_role = $1
          AND u.demo_expires_at IS NULL AND NOT u.community_hidden
+         -- Comunidad es un directorio de CLUBES: solo organizadores con club creado.
+         AND cl.id_club IS NOT NULL
        GROUP BY u.id_user, organizer_name, cl.name, cl.crest_image_url, u.avatar_url, u.organizer_avatar_url
        ORDER BY public_tournament_count DESC, organizer_name ASC NULLS LAST`,
       [ROLE_IDS.admin]
