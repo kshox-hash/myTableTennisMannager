@@ -1,35 +1,69 @@
-// Envío de emails transaccionales (por ahora solo el código para recuperar
-// la contraseña) vía la API HTTP de Resend — sin dependencia nueva, con el
-// fetch nativo de Node.
+// Envío de emails transaccionales (código para recuperar la contraseña,
+// acceso a la prueba gratis, aviso de solicitudes de demo).
 //
-// Variables de entorno:
-//   RESEND_API_KEY  — clave de https://resend.com (obligatoria para enviar)
-//   MAIL_FROM       — remitente, con dominio verificado en Resend.
-//                     Default: "MyTTM <no-reply@myttm.cl>"
+// Dos formas de enviar; se usa la primera que esté configurada:
 //
-// Sin RESEND_API_KEY el server igual levanta (mismo criterio que R2 y
-// Google): sendMail devuelve false. En desarrollo además se imprime el
-// email en consola para poder probar el flujo sin proveedor.
+//  1) Gmail propio (SMTP con contraseña de aplicación):
+//       GMAIL_USER          — la cuenta, ej. myttmadmin@gmail.com
+//       GMAIL_APP_PASSWORD  — contraseña de aplicación de 16 letras
+//                             (Cuenta de Google → Seguridad → Verificación en
+//                             2 pasos → Contraseñas de aplicaciones). NO es la
+//                             contraseña normal de la cuenta.
+//     Límite de Gmail: ~500 destinatarios por día.
+//
+//  2) Resend (API HTTP):
+//       RESEND_API_KEY  — clave de https://resend.com
+//
+//  MAIL_FROM (opcional) — remitente. Con Gmail, por defecto "MyTTM <GMAIL_USER>"
+//  (Gmail siempre manda desde la cuenta autenticada; acá solo cambia el nombre).
+//  Con Resend, por defecto "MyTTM <no-reply@myttm.cl>" (dominio verificado).
+//
+// Sin ninguna configurada el server igual levanta: sendMail devuelve false y
+// en desarrollo se imprime el email en consola para probar sin proveedor.
+import nodemailer, { type Transporter } from "nodemailer";
 
-const apiKey = process.env.RESEND_API_KEY;
-const from = process.env.MAIL_FROM ?? "MyTTM <no-reply@myttm.cl>";
+const gmailUser = process.env.GMAIL_USER?.trim();
+const gmailPass = process.env.GMAIL_APP_PASSWORD?.replace(/\s+/g, ""); // Google la muestra en bloques con espacios
+const resendKey = process.env.RESEND_API_KEY;
 
-export const mailConfigured = Boolean(apiKey);
+const provider: "gmail" | "resend" | null = gmailUser && gmailPass ? "gmail" : resendKey ? "resend" : null;
+const from =
+  process.env.MAIL_FROM ?? (provider === "gmail" ? `MyTTM <${gmailUser}>` : "MyTTM <no-reply@myttm.cl>");
+
+export const mailConfigured = provider !== null;
+export const mailProvider = provider;
+
+let gmail: Transporter | null = null;
+function gmailTransport(): Transporter {
+  gmail ??= nodemailer.createTransport({
+    service: "gmail",
+    auth: { user: gmailUser, pass: gmailPass },
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 15_000,
+  });
+  return gmail;
+}
 
 export async function sendMail(to: string, subject: string, html: string, text: string): Promise<boolean> {
-  if (!apiKey) {
+  if (!provider) {
     if (process.env.NODE_ENV !== "production") {
-      console.log(`[mailer] (sin RESEND_API_KEY) a ${to}: ${subject}\n${text}`);
+      console.log(`[mailer] (sin proveedor de correo) a ${to}: ${subject}\n${text}`);
     } else {
-      console.error("[mailer] RESEND_API_KEY no configurada: no se envió el email");
+      console.error("[mailer] sin GMAIL_USER/GMAIL_APP_PASSWORD ni RESEND_API_KEY: no se envió el email");
     }
     return false;
   }
 
   try {
+    if (provider === "gmail") {
+      await gmailTransport().sendMail({ from, to, subject, html, text });
+      return true;
+    }
+
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({ from, to: [to], subject, html, text }),
       signal: AbortSignal.timeout(10_000),
     });
@@ -39,7 +73,7 @@ export async function sendMail(to: string, subject: string, html: string, text: 
     }
     return true;
   } catch (e) {
-    console.error("[mailer] error enviando email", e);
+    console.error(`[mailer] error enviando email (${provider})`, e);
     return false;
   }
 }
