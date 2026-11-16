@@ -394,3 +394,30 @@ export async function deletePracticeTournament(idUser: string): Promise<void> {
   for (const r of ts) await repo.deleteTournament(r.id_tournament, idUser);
   await pool.query(`DELETE FROM users WHERE demo_owner = $1`, [idUser]);
 }
+
+// Borra una cuenta de prueba gratis (súper usuario → Pruebas → eliminar):
+// sus campeonatos (también el de práctica), rankings y jugadores ficticios, y
+// la cuenta. Si algo de otra persona la sigue referenciando y la base no deja
+// borrarla, se da de baja como cualquier cuenta (deleted_at, sin datos).
+export async function deleteTrialAccount(idUser: string): Promise<boolean> {
+  const pool = DB.getPool();
+  const q = (sql: string, p: unknown[] = []) => pool.query(sql, p);
+  const isTrial = (await q(`SELECT 1 FROM users WHERE id_user = $1 AND trial_expires_at IS NOT NULL`, [idUser])).rowCount;
+  if (!isTrial) return false;
+
+  const { AdminTournamentRepository } = await import("../tournament/admin/admin_tournament_repository");
+  const repo = new AdminTournamentRepository();
+  const ts = (await q(`SELECT id_tournament FROM tournaments WHERE created_by = $1`, [idUser])).rows;
+  for (const r of ts) await repo.deleteTournament(r.id_tournament, idUser);
+  await q(`DELETE FROM rankings WHERE id_owner = $1`, [idUser]).catch(() => undefined);
+  await q(`DELETE FROM users WHERE demo_owner = $1`, [idUser]);
+  try {
+    await q(`DELETE FROM users WHERE id_user = $1`, [idUser]);
+  } catch {
+    const { UserRepository } = await import("../users/user_repository");
+    const { UserService } = await import("../users/user_service");
+    await new UserService(new UserRepository()).deleteAccount(idUser);
+    await q(`UPDATE users SET trial_expires_at = NULL, trial_sent_to = NULL WHERE id_user = $1`, [idUser]);
+  }
+  return true;
+}

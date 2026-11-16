@@ -13,7 +13,7 @@ import { hashPassword } from "../bcrypt/bcrypt";
 import { ROLE_IDS, getSuperadminEmails, isEnvSuperadmin, loadSuperadmins } from "../core/constants/roles";
 import { UserRepository } from "../users/user_repository";
 import { UserService } from "../users/user_service";
-import { createDemoAccount, deleteDemoAccount, demoPassword, slugOf } from "../demo/demo_seeder";
+import { createDemoAccount, deleteDemoAccount, deleteTrialAccount, demoPassword, slugOf } from "../demo/demo_seeder";
 import { mailConfigured, sendMail } from "../core/mailer";
 import { trialAccessEmail } from "../emails/trial_access";
 
@@ -630,6 +630,17 @@ router.post(
     const sendTo = row.trial_sent_to ?? row.email;
     const sent = await sendTrialAccess(sendTo, row.email, row.name, password, row.trial_expires_at);
     return res.json({ ok: true, data: { email: row.email, sent_to: sendTo, password, sent } });
+  })
+);
+
+// DELETE /api/v1/superadmin/trials/:id — elimina la cuenta demo con sus
+// campeonatos y jugadores ficticios (ver deleteTrialAccount).
+router.delete(
+  "/trials/:id",
+  asyncHandler(async (req, res) => {
+    const ok = await deleteTrialAccount(String(req.params.id));
+    if (!ok) return res.status(404).json({ ok: false, message: "Esa demo ya no existe" });
+    return res.json({ ok: true });
   })
 );
 
