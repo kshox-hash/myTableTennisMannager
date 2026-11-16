@@ -14,6 +14,8 @@ import { ROLE_IDS, getSuperadminEmails, isEnvSuperadmin, loadSuperadmins } from 
 import { UserRepository } from "../users/user_repository";
 import { UserService } from "../users/user_service";
 import { createDemoAccount, deleteDemoAccount, demoPassword } from "../demo/demo_seeder";
+import { mailConfigured, sendMail } from "../core/mailer";
+import { trialAccessEmail } from "../emails/trial_access";
 
 const router = Router();
 const repo = new SuperadminRepository();
@@ -562,26 +564,36 @@ router.get(
   })
 );
 
-// POST /api/v1/superadmin/trials — body { name, email, password? }: crea el
-// organizador con 14 días y devuelve el acceso (la contraseña solo se ve acá).
+// Manda el correo con el acceso (plantilla en src/emails/trial_access.ts).
+// Devuelve si salió; si no, el panel muestra el acceso para pasarlo a mano.
+async function sendTrialAccess(email: string, name: string | null, password: string, expiresAt: Date | string) {
+  const m = trialAccessEmail({ name, email, password, expiresAt });
+  return sendMail(email, m.subject, m.html, m.text);
+}
+
+// POST /api/v1/superadmin/trials — body { email, name?, password? }: crea el
+// organizador con 14 días y le manda el acceso por correo. La contraseña
+// vuelve igual en la respuesta por si el correo no sale.
 router.post(
   "/trials",
   asyncHandler(async (req, res) => {
     const p = z
       .object({
-        name: z.string().trim().min(2, "Escribe el nombre").max(100),
         email: z.string().trim().toLowerCase().email("Correo inválido").max(200),
+        name: z.string().trim().max(100).optional().or(z.literal("")),
         password: z.string().min(6, "La contraseña debe tener al menos 6 caracteres").max(100).optional().or(z.literal("")),
       })
       .safeParse(req.body ?? {});
     if (!p.success) return res.status(400).json({ ok: false, message: p.error.issues[0]?.message ?? "Datos inválidos" });
-    const { name, email } = p.data;
+    const { email } = p.data;
+    const name = p.data.name || null;
     const pool = DB.getPool();
     if ((await pool.query(`SELECT 1 FROM users WHERE LOWER(email) = $1`, [email])).rowCount) {
       return res.status(409).json({ ok: false, message: "Ya existe una cuenta con ese correo" });
     }
     const password = p.data.password || demoPassword();
-    const [first, ...rest] = name.split(/\s+/);
+    // Sin nombre: "Organizador" (lo cambia en su perfil).
+    const [first, ...rest] = (name ?? "Organizador").split(/\s+/);
     const last = rest.join(" ");
     const u = await pool.query(
       `INSERT INTO users (email, password_hash, id_role, first_name, last_name, organizer_first_name, organizer_last_name, trial_expires_at)
@@ -589,10 +601,45 @@ router.post(
        RETURNING id_user, trial_expires_at`,
       [email, await hashPassword(password), ROLE_IDS.admin, first, last, String(TRIAL_DAYS)]
     );
+    const expiresAt = u.rows[0].trial_expires_at;
+    const sent = await sendTrialAccess(email, name, password, expiresAt);
     return res.status(201).json({
       ok: true,
-      data: { id_user: u.rows[0].id_user, email, password, expires_at: u.rows[0].trial_expires_at },
+      data: { id_user: u.rows[0].id_user, email, password, expires_at: expiresAt, sent },
     });
+  })
+);
+
+// POST /api/v1/superadmin/trials/:id/resend — contraseña nueva y se vuelve a
+// mandar el correo (la anterior no se guarda en claro, no se puede reenviar).
+router.post(
+  "/trials/:id/resend",
+  asyncHandler(async (req, res) => {
+    const password = demoPassword();
+    const r = await DB.getPool().query(
+      `UPDATE users SET password_hash = $2 WHERE id_user = $1 AND trial_expires_at IS NOT NULL
+       RETURNING email, trial_expires_at, NULLIF(TRIM(CONCAT(organizer_first_name, ' ', organizer_last_name)), 'Organizador') AS name`,
+      [String(req.params.id), await hashPassword(password)]
+    );
+    if (!r.rowCount) return res.status(404).json({ ok: false, message: "Esa prueba ya no existe" });
+    const row = r.rows[0];
+    const sent = await sendTrialAccess(row.email, row.name, password, row.trial_expires_at);
+    return res.json({ ok: true, data: { email: row.email, password, sent } });
+  })
+);
+
+// GET /api/v1/superadmin/trials/email-preview — el correo de acceso con datos
+// de ejemplo, para verlo en el panel antes de mandarlo.
+router.get(
+  "/trials/email-preview",
+  asyncHandler(async (_req, res) => {
+    const m = trialAccessEmail({
+      name: "Club Ñuñoa",
+      email: "organizador@club.cl",
+      password: "abcd-efgh-jkmn",
+      expiresAt: new Date(Date.now() + TRIAL_DAYS * 86_400_000),
+    });
+    return res.json({ ok: true, data: { subject: m.subject, html: m.html, mailConfigured } });
   })
 );
 
