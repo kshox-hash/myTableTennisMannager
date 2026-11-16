@@ -135,18 +135,22 @@ export async function createDemoAccount(opts: {
   }
 }
 
-async function seedTournament(owner: string, organization: string | null): Promise<string> {
+async function seedTournament(
+  owner: string,
+  organization: string | null,
+  opts: { name?: string; description?: string; withRanking?: boolean } = {}
+): Promise<string> {
   const pool = DB.getPool();
   const q = (sql: string, p: unknown[] = []) => pool.query(sql, p);
   const call = makeCaller(owner);
 
   const today = new Date();
   const ymd = today.toISOString().slice(0, 10);
-  const name = organization ? `Copa ${organization.slice(0, 120)} (demo)` : "Copa de Primavera (demo)";
+  const name = opts.name ?? (organization ? `Copa ${organization.slice(0, 120)} (demo)` : "Copa de Primavera (demo)");
 
   const created = await call("POST", `/tournament/admin/create/tournament`, {
     tournament_name: name,
-    description: "Campeonato de ejemplo para recorrer MyTTM. Los jugadores son ficticios.",
+    description: opts.description ?? "Campeonato de ejemplo para recorrer MyTTM. Los jugadores son ficticios.",
     region: "Metropolitana de Santiago",
     address: "Gimnasio Municipal",
     event_date: ymd,
@@ -164,7 +168,9 @@ async function seedTournament(owner: string, organization: string | null): Promi
   const t: string = created.data.id_tournament;
   await q(`UPDATE tournaments SET is_demo = TRUE WHERE id_tournament = $1`, [t]);
   // Ranking propio del organizador demo (para el paso "Ranking e historial").
-  await call("POST", `/tournament/admin/tournaments/${t}/ranking`, { mode: "new", name: "Ranking Demo" });
+  if (opts.withRanking !== false) {
+    await call("POST", `/tournament/admin/tournaments/${t}/ranking`, { mode: "new", name: "Ranking Demo" });
+  }
 
   const cats = (
     await q(
@@ -344,4 +350,47 @@ export async function cleanupExpiredDemos(): Promise<number> {
     }
   }
   return n;
+}
+
+// ── Campeonato de práctica (prueba gratis) ───────────────────
+// El recorrido guiado de una cuenta de prueba ofrece armar el mismo
+// campeonato de ejemplo en su cuenta (privado, is_demo, jugadores ficticios
+// con demo_owner = el organizador, sin ranking). Se borra cuando quiera.
+
+const practiceInProgress = new Set<string>();
+
+export async function findPracticeTournament(idUser: string): Promise<string | null> {
+  const r = await DB.getPool().query(
+    `SELECT id_tournament FROM tournaments WHERE created_by = $1 AND is_demo ORDER BY created_at DESC LIMIT 1`,
+    [idUser]
+  );
+  return r.rows[0]?.id_tournament ?? null;
+}
+
+export async function createPracticeTournament(idUser: string): Promise<string> {
+  const existing = await findPracticeTournament(idUser);
+  if (existing) return existing;
+  if (practiceInProgress.has(idUser)) throw new Error("Ya se está armando el campeonato de práctica");
+  practiceInProgress.add(idUser);
+  try {
+    return await seedTournament(idUser, null, {
+      name: "Campeonato de práctica",
+      description: "Para recorrer MyTTM: es privado, los jugadores son ficticios y no suma al ranking. Bórralo cuando quieras.",
+      withRanking: false,
+    });
+  } catch (e) {
+    await deletePracticeTournament(idUser).catch(() => undefined);
+    throw e;
+  } finally {
+    practiceInProgress.delete(idUser);
+  }
+}
+
+export async function deletePracticeTournament(idUser: string): Promise<void> {
+  const pool = DB.getPool();
+  const { AdminTournamentRepository } = await import("../tournament/admin/admin_tournament_repository");
+  const repo = new AdminTournamentRepository();
+  const ts = (await pool.query(`SELECT id_tournament FROM tournaments WHERE created_by = $1 AND is_demo`, [idUser])).rows;
+  for (const r of ts) await repo.deleteTournament(r.id_tournament, idUser);
+  await pool.query(`DELETE FROM users WHERE demo_owner = $1`, [idUser]);
 }
