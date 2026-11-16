@@ -13,7 +13,7 @@ import { hashPassword } from "../bcrypt/bcrypt";
 import { ROLE_IDS, getSuperadminEmails, isEnvSuperadmin, loadSuperadmins } from "../core/constants/roles";
 import { UserRepository } from "../users/user_repository";
 import { UserService } from "../users/user_service";
-import { createDemoAccount, deleteDemoAccount, demoPassword } from "../demo/demo_seeder";
+import { createDemoAccount, deleteDemoAccount, demoPassword, slugOf } from "../demo/demo_seeder";
 import { mailConfigured, sendMail } from "../core/mailer";
 import { trialAccessEmail } from "../emails/trial_access";
 
@@ -554,7 +554,7 @@ router.get(
     const r = await DB.getPool().query(
       `SELECT u.id_user, u.email,
               TRIM(CONCAT(u.organizer_first_name, ' ', u.organizer_last_name)) AS name,
-              u.created_at, u.trial_expires_at,
+              u.created_at, u.trial_expires_at, u.trial_sent_to AS sent_to,
               (SELECT COUNT(*)::int FROM tournaments t WHERE t.created_by = u.id_user) AS tournaments
          FROM users u
         WHERE u.trial_expires_at IS NOT NULL AND u.deleted_at IS NULL
@@ -564,16 +564,18 @@ router.get(
   })
 );
 
-// Manda el correo con el acceso (plantilla en src/emails/trial_access.ts).
+// Manda el correo con el acceso (plantilla en src/emails/trial_access.ts) a
+// `to`; `login` es el correo de la cuenta demo con que entra.
 // Devuelve si salió; si no, el panel muestra el acceso para pasarlo a mano.
-async function sendTrialAccess(email: string, name: string | null, password: string, expiresAt: Date | string) {
-  const m = trialAccessEmail({ name, email, password, expiresAt });
-  return sendMail(email, m.subject, m.html, m.text);
+async function sendTrialAccess(to: string, login: string, name: string | null, password: string, expiresAt: Date | string) {
+  const m = trialAccessEmail({ name, email: login, password, expiresAt });
+  return sendMail(to, m.subject, m.html, m.text);
 }
 
-// POST /api/v1/superadmin/trials — body { email, name?, password? }: crea el
-// organizador con 14 días y le manda el acceso por correo. La contraseña
-// vuelve igual en la respuesta por si el correo no sale.
+// POST /api/v1/superadmin/trials — body { email, name? }: crea una cuenta demo
+// NUEVA (demo-<nombre>@myttm.cl, organizador por 14 días) y le manda el acceso
+// a `email` (puede ser de alguien que ya tiene cuenta). La contraseña vuelve
+// en la respuesta por si el correo no sale.
 router.post(
   "/trials",
   asyncHandler(async (req, res) => {
@@ -581,31 +583,33 @@ router.post(
       .object({
         email: z.string().trim().toLowerCase().email("Correo inválido").max(200),
         name: z.string().trim().max(100).optional().or(z.literal("")),
-        password: z.string().min(6, "La contraseña debe tener al menos 6 caracteres").max(100).optional().or(z.literal("")),
       })
       .safeParse(req.body ?? {});
     if (!p.success) return res.status(400).json({ ok: false, message: p.error.issues[0]?.message ?? "Datos inválidos" });
-    const { email } = p.data;
+    const sendTo = p.data.email;
     const name = p.data.name || null;
     const pool = DB.getPool();
-    if ((await pool.query(`SELECT 1 FROM users WHERE LOWER(email) = $1`, [email])).rowCount) {
-      return res.status(409).json({ ok: false, message: "Ya existe una cuenta con ese correo" });
+    // Correo de la cuenta demo: a partir del nombre (o del correo de destino).
+    const slug = slugOf(name ?? sendTo.split("@")[0]) || "organizador";
+    let login = `demo-${slug}@myttm.cl`;
+    for (let n = 2; (await pool.query(`SELECT 1 FROM users WHERE LOWER(email) = $1`, [login])).rowCount; n++) {
+      login = `demo-${slug}${n}@myttm.cl`;
     }
-    const password = p.data.password || demoPassword();
+    const password = demoPassword();
     // Sin nombre: "Organizador" (lo cambia en su perfil).
     const [first, ...rest] = (name ?? "Organizador").split(/\s+/);
     const last = rest.join(" ");
     const u = await pool.query(
-      `INSERT INTO users (email, password_hash, id_role, first_name, last_name, organizer_first_name, organizer_last_name, trial_expires_at)
-       VALUES ($1, $2, $3, $4::text, $5::text, $4::text, $5::text, now() + ($6::text || ' days')::interval)
+      `INSERT INTO users (email, password_hash, id_role, first_name, last_name, organizer_first_name, organizer_last_name, trial_expires_at, trial_sent_to)
+       VALUES ($1, $2, $3, $4::text, $5::text, $4::text, $5::text, now() + ($6::text || ' days')::interval, $7)
        RETURNING id_user, trial_expires_at`,
-      [email, await hashPassword(password), ROLE_IDS.admin, first, last, String(TRIAL_DAYS)]
+      [login, await hashPassword(password), ROLE_IDS.admin, first, last, String(TRIAL_DAYS), sendTo]
     );
     const expiresAt = u.rows[0].trial_expires_at;
-    const sent = await sendTrialAccess(email, name, password, expiresAt);
+    const sent = await sendTrialAccess(sendTo, login, name, password, expiresAt);
     return res.status(201).json({
       ok: true,
-      data: { id_user: u.rows[0].id_user, email, password, expires_at: expiresAt, sent },
+      data: { id_user: u.rows[0].id_user, email: login, sent_to: sendTo, password, expires_at: expiresAt, sent },
     });
   })
 );
@@ -618,13 +622,14 @@ router.post(
     const password = demoPassword();
     const r = await DB.getPool().query(
       `UPDATE users SET password_hash = $2 WHERE id_user = $1 AND trial_expires_at IS NOT NULL
-       RETURNING email, trial_expires_at, NULLIF(TRIM(CONCAT(organizer_first_name, ' ', organizer_last_name)), 'Organizador') AS name`,
+       RETURNING email, trial_sent_to, trial_expires_at, NULLIF(TRIM(CONCAT(organizer_first_name, ' ', organizer_last_name)), 'Organizador') AS name`,
       [String(req.params.id), await hashPassword(password)]
     );
     if (!r.rowCount) return res.status(404).json({ ok: false, message: "Esa prueba ya no existe" });
     const row = r.rows[0];
-    const sent = await sendTrialAccess(row.email, row.name, password, row.trial_expires_at);
-    return res.json({ ok: true, data: { email: row.email, password, sent } });
+    const sendTo = row.trial_sent_to ?? row.email;
+    const sent = await sendTrialAccess(sendTo, row.email, row.name, password, row.trial_expires_at);
+    return res.json({ ok: true, data: { email: row.email, sent_to: sendTo, password, sent } });
   })
 );
 
@@ -635,7 +640,7 @@ router.get(
   asyncHandler(async (_req, res) => {
     const m = trialAccessEmail({
       name: "Club Ñuñoa",
-      email: "organizador@club.cl",
+      email: "demo-clubnunoa@myttm.cl",
       password: "abcd-efgh-jkmn",
       expiresAt: new Date(Date.now() + TRIAL_DAYS * 86_400_000),
     });

@@ -89,7 +89,7 @@ export function demoPassword() {
 export type DemoAccount = { idUser: string; email: string; password: string; expiresAt: string; idTournament: string };
 
 // "Club Ñuñoa" → "clubnunoa" (para el correo de la cuenta demo).
-function slugOf(label: string) {
+export function slugOf(label: string) {
   return label
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
