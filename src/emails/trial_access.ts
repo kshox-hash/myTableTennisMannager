@@ -33,6 +33,10 @@ export function trialAccessEmail(opts: { name?: string | null; email: string; pa
     cta: { label: "Entrar a MyTTM", url: loginUrl },
     after:
       p("Al entrar te mostramos un recorrido corto por lo principal: crear el campeonato, inscripciones, grupos, llaves y mesas en vivo.") +
+      p(
+        `<strong>Recuerda que esta es una demo.</strong> Puedes solicitar el programa completo, que es gratis: ` +
+          `responde este correo o escríbenos a <a href="mailto:${esc(BRAND.contactEmail)}" style="color:${BRAND.ink}">${esc(BRAND.contactEmail)}</a>.`
+      ) +
       p("Te recomendamos cambiar la contraseña desde tu perfil."),
   });
 
@@ -46,6 +50,8 @@ export function trialAccessEmail(opts: { name?: string | null; email: string; pa
     `Contraseña: ${opts.password}`,
     "",
     "Al entrar te mostramos un recorrido corto por lo principal.",
+    "",
+    "Recuerda que esta es una demo. Puedes solicitar el programa completo, que es gratis: responde este correo.",
     "",
     `¿Dudas? Escríbenos a ${BRAND.contactEmail}`,
   ].join("\n");
