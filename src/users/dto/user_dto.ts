@@ -28,6 +28,8 @@ export type UserProfileDB = {
   dominant_hand: string | null;
   /** Cuenta demo de prospecto: cuándo se borra (null = cuenta normal). */
   demo_expires_at?: string | null;
+  /** Prueba gratis de organizador: cuándo vence (null = cuenta normal). Vencida = solo lectura. */
+  trial_expires_at?: string | null;
   forehand_rubber: string | null;
   backhand_rubber: string | null;
   created_at: string;

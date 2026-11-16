@@ -13,7 +13,7 @@ import { hashPassword } from "../bcrypt/bcrypt";
 import { ROLE_IDS, getSuperadminEmails, isEnvSuperadmin, loadSuperadmins } from "../core/constants/roles";
 import { UserRepository } from "../users/user_repository";
 import { UserService } from "../users/user_service";
-import { createDemoAccount, deleteDemoAccount } from "../demo/demo_seeder";
+import { createDemoAccount, deleteDemoAccount, demoPassword } from "../demo/demo_seeder";
 
 const router = Router();
 const repo = new SuperadminRepository();
@@ -534,6 +534,107 @@ router.delete(
   "/demos/:id",
   asyncHandler(async (req, res) => {
     await deleteDemoAccount(String(req.params.id));
+    return res.json({ ok: true });
+  })
+);
+
+// ── Pruebas gratis (organizador real por 14 días) ─────────────
+// Cuenta de organizador de verdad: crea campeonatos públicos y recibe
+// inscripciones reales. Al vencer queda en solo lectura (no se borra) hasta
+// que se active (trial_expires_at = NULL) o se le den más días.
+
+export const TRIAL_DAYS = 14;
+
+// GET /api/v1/superadmin/trials — cuentas en prueba (vigentes y vencidas)
+router.get(
+  "/trials",
+  asyncHandler(async (_req, res) => {
+    const r = await DB.getPool().query(
+      `SELECT u.id_user, u.email,
+              TRIM(CONCAT(u.organizer_first_name, ' ', u.organizer_last_name)) AS name,
+              u.created_at, u.trial_expires_at,
+              (SELECT COUNT(*)::int FROM tournaments t WHERE t.created_by = u.id_user) AS tournaments
+         FROM users u
+        WHERE u.trial_expires_at IS NOT NULL AND u.deleted_at IS NULL
+        ORDER BY u.trial_expires_at ASC`
+    );
+    return res.json({ ok: true, data: r.rows });
+  })
+);
+
+// POST /api/v1/superadmin/trials — body { name, email, password? }: crea el
+// organizador con 14 días y devuelve el acceso (la contraseña solo se ve acá).
+router.post(
+  "/trials",
+  asyncHandler(async (req, res) => {
+    const p = z
+      .object({
+        name: z.string().trim().min(2, "Escribe el nombre").max(100),
+        email: z.string().trim().toLowerCase().email("Correo inválido").max(200),
+        password: z.string().min(6, "La contraseña debe tener al menos 6 caracteres").max(100).optional().or(z.literal("")),
+      })
+      .safeParse(req.body ?? {});
+    if (!p.success) return res.status(400).json({ ok: false, message: p.error.issues[0]?.message ?? "Datos inválidos" });
+    const { name, email } = p.data;
+    const pool = DB.getPool();
+    if ((await pool.query(`SELECT 1 FROM users WHERE LOWER(email) = $1`, [email])).rowCount) {
+      return res.status(409).json({ ok: false, message: "Ya existe una cuenta con ese correo" });
+    }
+    const password = p.data.password || demoPassword();
+    const [first, ...rest] = name.split(/\s+/);
+    const last = rest.join(" ");
+    const u = await pool.query(
+      `INSERT INTO users (email, password_hash, id_role, first_name, last_name, organizer_first_name, organizer_last_name, trial_expires_at)
+       VALUES ($1, $2, $3, $4::text, $5::text, $4::text, $5::text, now() + ($6::text || ' days')::interval)
+       RETURNING id_user, trial_expires_at`,
+      [email, await hashPassword(password), ROLE_IDS.admin, first, last, String(TRIAL_DAYS)]
+    );
+    return res.status(201).json({
+      ok: true,
+      data: { id_user: u.rows[0].id_user, email, password, expires_at: u.rows[0].trial_expires_at },
+    });
+  })
+);
+
+// POST /api/v1/superadmin/trials/:id/extend — 14 días más (desde hoy si ya venció).
+router.post(
+  "/trials/:id/extend",
+  asyncHandler(async (req, res) => {
+    const r = await DB.getPool().query(
+      `UPDATE users SET trial_expires_at = GREATEST(trial_expires_at, now()) + ($2::text || ' days')::interval
+        WHERE id_user = $1 AND trial_expires_at IS NOT NULL
+        RETURNING trial_expires_at`,
+      [String(req.params.id), String(TRIAL_DAYS)]
+    );
+    if (!r.rowCount) return res.status(404).json({ ok: false, message: "Esa prueba ya no existe" });
+    return res.json({ ok: true, data: { expires_at: r.rows[0].trial_expires_at } });
+  })
+);
+
+// POST /api/v1/superadmin/trials/:id/activate — pasa a cuenta normal, sin vencimiento.
+router.post(
+  "/trials/:id/activate",
+  asyncHandler(async (req, res) => {
+    const r = await DB.getPool().query(
+      `UPDATE users SET trial_expires_at = NULL WHERE id_user = $1 AND trial_expires_at IS NOT NULL`,
+      [String(req.params.id)]
+    );
+    if (!r.rowCount) return res.status(404).json({ ok: false, message: "Esa prueba ya no existe" });
+    return res.json({ ok: true });
+  })
+);
+
+// PATCH /api/v1/superadmin/trials/:id/password — body { password }
+router.patch(
+  "/trials/:id/password",
+  asyncHandler(async (req, res) => {
+    const p = z.object({ password: z.string().min(6, "La contraseña debe tener al menos 6 caracteres").max(100) }).safeParse(req.body);
+    if (!p.success) return res.status(400).json({ ok: false, message: p.error.issues[0]?.message ?? "Contraseña inválida" });
+    const r = await DB.getPool().query(
+      `UPDATE users SET password_hash = $2 WHERE id_user = $1 AND trial_expires_at IS NOT NULL`,
+      [String(req.params.id), await hashPassword(p.data.password)]
+    );
+    if (!r.rowCount) return res.status(404).json({ ok: false, message: "Esa prueba ya no existe" });
     return res.json({ ok: true });
   })
 );

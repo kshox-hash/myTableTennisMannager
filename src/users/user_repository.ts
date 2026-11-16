@@ -157,6 +157,7 @@ export class UserRepository {
         u.category,
         u.dominant_hand,
         u.demo_expires_at,
+        u.trial_expires_at,
         u.forehand_rubber,
         u.backhand_rubber,
         u.created_at::text,

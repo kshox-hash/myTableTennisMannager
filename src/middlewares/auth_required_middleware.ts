@@ -16,6 +16,17 @@ declare global {
   }
 }
 
+const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+// Con la prueba vencida igual puede cerrar sesión, cambiar su contraseña y
+// marcar avisos como leídos.
+const ALLOWED_WHEN_EXPIRED = [/\/api\/v\d+\/auth\//, /\/api\/v\d+\/notifications(\/|$|\?)/];
+
+export function blockedForExpiredTrial(req: Request): boolean {
+  if (READ_METHODS.has(req.method)) return false;
+  const url = req.originalUrl ?? req.url;
+  return !ALLOWED_WHEN_EXPIRED.some((re) => re.test(url));
+}
+
 export function authRequired(req: Request, res: Response, next: NextFunction) {
   const header = req.headers.authorization ?? "";
   const [type, token] = header.split(" ");
@@ -64,8 +75,9 @@ export function authRequired(req: Request, res: Response, next: NextFunction) {
   // token viejo seguía diciendo "player" y recibía "Acceso denegado" hasta
   // cerrar sesión y volver a entrar).
   DB.getPool()
-    .query<{ email: string; role: DbRole }>(
-      `SELECT u.email, r.name AS role
+    .query<{ email: string; role: DbRole; trial_expired: boolean }>(
+      `SELECT u.email, r.name AS role,
+              (u.trial_expires_at IS NOT NULL AND u.trial_expires_at < now()) AS trial_expired
        FROM users u JOIN roles r ON r.id_role = u.id_role
        WHERE u.id_user = $1 AND u.deleted_at IS NULL`,
       [req.user!.id_user]
@@ -80,6 +92,16 @@ export function authRequired(req: Request, res: Response, next: NextFunction) {
         });
       }
       req.user!.role = resolveEffectiveRole(row.email, row.role);
+      // Prueba gratis vencida: solo lectura. Puede entrar y ver todo, pero
+      // no crear ni cambiar nada (salvo sesión y avisos) hasta que el súper
+      // usuario la active o le dé más días.
+      if (row.trial_expired && req.user!.role !== "superadmin" && blockedForExpiredTrial(req)) {
+        return res.status(403).json({
+          ok: false,
+          code: "TRIAL_EXPIRED",
+          message: "Tu prueba gratis terminó. Puedes ver todo, pero para crear o editar escríbenos y activamos tu cuenta.",
+        });
+      }
       return next();
     })
     .catch(next);

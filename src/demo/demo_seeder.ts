@@ -77,7 +77,7 @@ function makeResult(level: Map<string, number>) {
   };
 }
 
-function demoPassword() {
+export function demoPassword() {
   // Fácil de dictar: 3 bloques sin caracteres ambiguos.
   const abc = "abcdefghjkmnpqrstuvwxyz23456789";
   const bytes = randomBytes(12);
