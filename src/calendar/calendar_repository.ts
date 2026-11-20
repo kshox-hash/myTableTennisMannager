@@ -13,6 +13,9 @@ export type CalendarEventRow = {
   gender: string;
   status: string;
   phase: string;
+  /** Inscripción pagada (el Inicio muestra "Falta pagar" si cobra y no está pagada). */
+  paid: boolean;
+  inscription_price: number;
 };
 
 export class CalendarRepository {
@@ -49,7 +52,9 @@ export class CalendarRepository {
           c.category_range,
           c.gender,
           c.phase,
-          e.status
+          e.status,
+          e.paid,
+          COALESCE(c.inscription_price, 0)::float AS inscription_price
         FROM enrollments e
         JOIN tournament_categories c ON c.id_category = e.id_category
         JOIN tournaments t           ON t.id_tournament = e.id_tournament
@@ -64,7 +69,8 @@ export class CalendarRepository {
           AND t.status <> 'cancelled'
       )
       SELECT day::text AS date, 'tournament' AS type, tournament_id, tournament_name, address,
-             category_id, category_type, category_range, gender, phase, status
+             category_id, category_type, category_range, gender, phase, status,
+             paid, inscription_price
         FROM ev
        WHERE day >= $2::date AND day <= $3::date
        ORDER BY day ASC, tournament_name ASC, category_type ASC, category_range ASC;
