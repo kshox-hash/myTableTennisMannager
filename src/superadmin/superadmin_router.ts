@@ -170,12 +170,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const r = await clubs.rejectClubRequest(req.params.id_request, req.user!.id_user);
     if (!r.ok) return res.status(404).json({ ok: false, message: "Solicitud no encontrada" });
-    await notifications.create({
-      idUser: r.data.idUser,
-      type: "club_join_rejected",
-      title: "No agregamos tu club",
-      message: `Revisamos tu solicitud de ${r.data.name} y no la agregamos al catálogo. Si crees que es un error, escríbenos.`,
-    });
+    // Rechazo silencioso: al jugador no le llega ninguna notificación.
     return res.json({ ok: true });
   })
 );
