@@ -180,43 +180,38 @@ const check = (label: string, cond: boolean, extra = "") => {
     console.log("   (no hay dos cupos de 2° en la misma mitad)");
   }
 
-  // ── Terminan los grupos que faltaban: los cupos se llenan solos y se arma la Plata ──
+  // ── Terminan los grupos que faltaban: NADIE entra solo (decisión 2026-11-21);
+  //    la mesa ubica a cada clasificado a mano y recién ahí se arma la Plata ──
   for (const g of ordered.slice(5)) await playGroup(g);
   matches = await bm();
-  const empty = matches.filter((m: any) => (m.player1_source_group && !m.player1_id) || (m.player2_source_group && !m.player2_id)).length;
-  check("al terminar los grupos, todos los cupos quedan llenos", empty === 0, `${empty} vacíos`);
+  const emptyBefore = matches.filter((m: any) => (m.player1_source_group && !m.player1_id) || (m.player2_source_group && !m.player2_id));
+  check("al terminar los grupos, nadie entra solo a la llave", emptyBefore.length === 10, `${emptyBefore.length} cupos libres`);
   const quals = (await q(`SELECT gs.id_user, gs.qualification_label, gs.id_group FROM group_standings gs JOIN category_groups cg ON cg.id_group = gs.id_group WHERE cg.id_category = $1 AND gs.qualified_to_bracket`, [gold])).rows;
+  check("los 20 quedan marcados como clasificados", quals.length === 20, `${quals.length}`);
+  // La mesa ubica a cada uno en su lugar reservado (la recomendación).
+  for (const x of quals) {
+    const rank = x.qualification_label === "first" ? 1 : 2;
+    const m = (await bm()).find(
+      (mm: any) => (mm.player1_source_group === x.id_group && mm.player1_source_rank === rank && !mm.player1_id) || (mm.player2_source_group === x.id_group && mm.player2_source_rank === rank && !mm.player2_id)
+    );
+    if (!m) continue; // ya estaba en la llave (grupo terminado antes de adelantarla)
+    const slot = m.player1_source_group === x.id_group && m.player1_source_rank === rank ? 1 : 2;
+    await call("POST", `/bracket/tournaments/${t}/categories/${gold}/place-qualifier`, { id_user: x.id_user, id_match: m.id_match, slot });
+  }
+  matches = await bm();
+  const empty = matches.filter((m: any) => (m.player1_source_group && !m.player1_id) || (m.player2_source_group && !m.player2_id)).length;
+  check("al ubicarlos la mesa, todos los cupos quedan llenos", empty === 0, `${empty} vacíos`);
   const inGold = (id: string) => matches.some((m: any) => m.player1_id === id || m.player2_id === id);
-  check("los 20 clasificados están en la llave", quals.length === 20 && quals.every((x: any) => inGold(x.id_user)));
+  check("los 20 clasificados están en la llave", quals.every((x: any) => inGold(x.id_user)));
+  check(
+    "lo que ubica la mesa entra confirmado: sus partidos con dos jugadores quedan listos",
+    matches.every((m: any) => !m.player1_unconfirmed && !m.player2_unconfirmed) &&
+      matches.filter((m: any) => m.round === 1 && m.player1_id && m.player2_id && !m.is_bye && !m.winner_id).every((m: any) => m.status === "ready")
+  );
   const silverPlayers = new Set(
     (await q(`SELECT player1_id, player2_id FROM bracket_matches WHERE id_category = $1`, [silver])).rows.flatMap((r: any) => [r.player1_id, r.player2_id]).filter(Boolean)
   );
   check("la Plata se armó sola con los 10 terceros", silverPlayers.size === 10, `${silverPlayers.size}`);
-
-  // ── Confirmación de la mesa: los recién clasificados entran "por confirmar" ──
-  {
-    const waiting = (await bm()).filter((m: any) => m.player1_unconfirmed || m.player2_unconfirmed);
-    check(
-      "al terminar un grupo, sus clasificados quedan por confirmar y su partido no queda listo",
-      waiting.length > 0 && waiting.every((m: any) => m.status === "pending"),
-      `${waiting.length} partidos en espera`
-    );
-    const groupsToConfirm = new Set<string>(
-      waiting.flatMap((m: any) => [m.player1_unconfirmed ? m.player1_source_group : null, m.player2_unconfirmed ? m.player2_source_group : null]).filter(Boolean)
-    );
-    for (const g of groupsToConfirm) {
-      await call("POST", `/bracket/tournaments/${t}/categories/${gold}/confirm-entry`, { group_id: g });
-    }
-    const after = await bm();
-    const stillWaiting = after.filter((m: any) => m.player1_unconfirmed || m.player2_unconfirmed).length;
-    const readyNow = after.filter((m: any) => waiting.some((w: any) => w.id_match === m.id_match) && m.player1_id && m.player2_id);
-    check(
-      "al confirmar cada grupo, sus partidos con los dos jugadores quedan listos para mesa",
-      stillWaiting === 0 && readyNow.every((m: any) => m.status === "ready"),
-      `${groupsToConfirm.size} grupos confirmados`
-    );
-    matches = after;
-  }
 
   // ── Un cruce de club que aparece después (como al llenarse un cupo): la app lo detecta y propone ──
   {

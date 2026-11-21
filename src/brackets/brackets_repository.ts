@@ -968,16 +968,17 @@ export class BracketsRepository {
     tournamentId: string,
     categoryId: string,
     ids: string[]
-  ): Promise<Map<string, { name: string; club: string | null; clubName: string | null; group: string | null; label: string | null }>> {
+  ): Promise<Map<string, { name: string; club: string | null; clubName: string | null; clubCrest: string | null; group: string | null; label: string | null }>> {
     const r = await this.pool.query<{
       id_user: string;
       name: string;
       id_club: string | null;
       club_name: string | null;
+      club_crest: string | null;
       id_group: string | null;
       label: string | null;
     }>(
-      `SELECT u.id_user, TRIM(CONCAT(u.first_name, ' ', u.last_name)) AS name, u.id_club, c.name AS club_name,
+      `SELECT u.id_user, TRIM(CONCAT(u.first_name, ' ', u.last_name)) AS name, u.id_club, c.name AS club_name, c.crest_image_url AS club_crest,
               g.id_group, gs.qualification_label AS label
          FROM users u
          LEFT JOIN clubs c ON c.id_club = u.id_club
@@ -993,7 +994,7 @@ export class BracketsRepository {
       [tournamentId, categoryId, ids]
     );
     return new Map(
-      r.rows.map((x) => [x.id_user, { name: x.name, club: x.id_club, clubName: x.club_name, group: x.id_group, label: x.label }])
+      r.rows.map((x) => [x.id_user, { name: x.name, club: x.id_club, clubName: x.club_name, clubCrest: x.club_crest, group: x.id_group, label: x.label }])
     );
   }
 
@@ -2130,6 +2131,76 @@ export class BracketsRepository {
       [categoryId]
     );
     return (res.rowCount ?? 0) > 0;
+  }
+
+  /**
+   * Llave adelantada, ubicación a mano: pone al clasificado (grupo + puesto)
+   * en el cupo sin llenar que eligió la mesa. Si no es el cupo reservado para
+   * su puesto, los dos cupos intercambian su reserva (así cada grupo/puesto
+   * sigue teniendo exactamente un cupo y las correcciones de grupo funcionan
+   * igual). Entra confirmado: lo puso la mesa.
+   */
+  async placeQualifierInSlot(
+    categoryId: string,
+    groupId: string,
+    rank: number,
+    userId: string,
+    matchId: string,
+    targetSlot: 1 | 2
+  ): Promise<"ok" | "ALREADY_PLACED" | "SLOT_TAKEN" | "NO_SLOT"> {
+    return this.withTransaction(async (client) => {
+      const own = (
+        await client.query<{ id_match: string; slot: number; player: string | null }>(
+          `SELECT id_match,
+                  CASE WHEN player1_source_group = $2 AND player1_source_rank = $3 THEN 1 ELSE 2 END AS slot,
+                  CASE WHEN player1_source_group = $2 AND player1_source_rank = $3 THEN player1_id ELSE player2_id END AS player
+             FROM bracket_matches
+            WHERE id_category = $1
+              AND ((player1_source_group = $2 AND player1_source_rank = $3) OR (player2_source_group = $2 AND player2_source_rank = $3))
+            FOR UPDATE`,
+          [categoryId, groupId, rank]
+        )
+      ).rows[0];
+      if (!own) return "NO_SLOT";
+      if (own.player) return "ALREADY_PLACED";
+      const s = targetSlot === 1 ? "player1" : "player2";
+      const target = (
+        await client.query<{ player: string | null; g: string | null; r: number | null }>(
+          `SELECT ${s}_id AS player, ${s}_source_group AS g, ${s}_source_rank AS r
+             FROM bracket_matches WHERE id_match = $1 AND id_category = $2 FOR UPDATE`,
+          [matchId, categoryId]
+        )
+      ).rows[0];
+      if (!target || target.player || !target.g) return "SLOT_TAKEN";
+      if (!(own.id_match === matchId && own.slot === targetSlot)) {
+        const o = own.slot === 1 ? "player1" : "player2";
+        await client.query(`UPDATE bracket_matches SET ${o}_source_group = $2, ${o}_source_rank = $3 WHERE id_match = $1`, [
+          own.id_match,
+          target.g,
+          target.r,
+        ]);
+        await client.query(`UPDATE bracket_matches SET ${s}_source_group = $2, ${s}_source_rank = $3 WHERE id_match = $1`, [
+          matchId,
+          groupId,
+          rank,
+        ]);
+      }
+      await client.query(
+        `UPDATE bracket_matches SET ${s}_id = $2, ${s}_filled_at = now(), ${s}_unconfirmed = FALSE WHERE id_match = $1`,
+        [matchId, userId]
+      );
+      await client.query(
+        `UPDATE bracket_matches SET winner_id = COALESCE(player1_id, player2_id) WHERE id_match = $1 AND is_bye AND winner_id IS NULL`,
+        [matchId]
+      );
+      await client.query(
+        `UPDATE bracket_matches SET status = 'ready'
+          WHERE id_match = $1 AND status = 'pending' AND player1_id IS NOT NULL AND player2_id IS NOT NULL
+            AND NOT player1_unconfirmed AND NOT player2_unconfirmed`,
+        [matchId]
+      );
+      return "ok";
+    });
   }
 
   async fillGroupSlots(groupId: string, qualifiers: Array<{ id_user: string; rank_in_group: number }>): Promise<void> {

@@ -780,18 +780,34 @@ export class BracketsService {
     return groupId ? this.closeAbsentMatches(groupId) : 0;
   }
 
-  // Llave adelantada: al terminar el grupo, sus clasificados entran a la llave.
+  // Llave adelantada: al terminar el grupo sus clasificados NO entran solos a
+  // la llave (decisión 2026-11-21): quedan marcados como clasificados y la
+  // mesa de control los ubica a mano (placeGroupQualifier), con las
+  // recomendaciones a la vista.
   private async fillBracketSlotsIfGroupFinished(groupId: string, tournamentId: string, categoryId: string): Promise<void> {
     if (!(await this.repo.groupHasBracketSlots(groupId))) return;
     const qualifiers = (await this.repo.loadGroupQualifiers(tournamentId, categoryId)).filter((q) => q.id_group === groupId);
     if (qualifiers.length === 0 || !qualifiers[0].group_finished) return;
-
-    await this.repo.fillGroupSlots(groupId, qualifiers);
     await this.repo.markGroupQualifiers(tournamentId, categoryId, [groupId]);
+  }
+
+  /** Llave adelantada: la mesa ubica a un clasificado en el cupo que eligió. */
+  async placeGroupQualifier(
+    tournamentId: string,
+    categoryId: string,
+    userId: string,
+    matchId: string,
+    slot: 1 | 2
+  ): Promise<"ok" | "NOT_QUALIFIED" | "GROUP_PLAYING" | "ALREADY_PLACED" | "SLOT_TAKEN" | "NO_SLOT"> {
+    const q = (await this.repo.loadGroupQualifiers(tournamentId, categoryId)).find((x) => x.id_user === userId);
+    if (!q) return "NOT_QUALIFIED";
+    if (!q.group_finished) return "GROUP_PLAYING";
+    const r = await this.repo.placeQualifierInSlot(categoryId, q.id_group, q.rank_in_group, userId, matchId, slot);
+    if (r !== "ok") return r;
 
     const names = await this.repo.getTournamentCategoryNames(tournamentId, categoryId);
     if (names) {
-      await this.repo.notifications.createForMany(qualifiers.map((q) => q.id_user), {
+      await this.repo.notifications.createForMany([userId], {
         type: "bracket_generated",
         title: "Clasificaste a la llave",
         message: `Ya estás en la llave de ${names.categoryType} ${names.categoryRange} (${names.tournamentName}). Mira contra quién te toca.`,
@@ -804,6 +820,7 @@ export class BracketsService {
       void notifyGroupOutcome(categoryId, seeded.map((p) => p.id_user));
       await this.onAllGroupSlotsFilled?.(tournamentId, categoryId);
     }
+    return "ok";
   }
 
   // Deshace un resultado de partido de grupo ya cargado (ej: error de digitación).
@@ -968,7 +985,7 @@ export class BracketsService {
     const clubInfo = await this.repo.bracketPlayerInfo(tournamentId, categoryId, allIds.filter((id) => !isGroupSlotId(id)));
     const clubFields = (idUser: string | null) => {
       const c = idUser ? clubInfo.get(idUser) : undefined;
-      return { club_id: c?.club ?? null, club_name: c?.clubName ?? null };
+      return { club_id: c?.club ?? null, club_name: c?.clubName ?? null, club_crest_url: c?.clubCrest ?? null };
     };
     const originOf = new Map(seededPlayers.map((p, i) => [p.id_user, i]));
     const nameFields = (idUser: string | null) => {

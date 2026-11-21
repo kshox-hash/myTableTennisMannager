@@ -278,6 +278,45 @@ router.post(
   })
 );
 
+// Llave adelantada: la mesa ubica a mano a un clasificado de un grupo que ya
+// terminó, en el cupo sin llenar que elige (ver BracketsService.placeGroupQualifier).
+// POST /api/v1/bracket/tournaments/:id_tournament/categories/:id_category/place-qualifier
+const placeQualifierSchema = z
+  .object({ id_user: z.string().uuid(), id_match: z.string().uuid(), slot: z.union([z.literal(1), z.literal(2)]) })
+  .strict();
+router.post(
+  "/tournaments/:id_tournament/categories/:id_category/place-qualifier",
+  authRequired,
+  requireRole("admin"),
+  requireTournamentOwnership(),
+  validateBody(placeQualifierSchema),
+  asyncHandler(async (req, res) => {
+    const tournamentId = String(req.params.id_tournament);
+    const categoryId = String(req.params.id_category);
+    const { id_user, id_match, slot } = req.body as z.infer<typeof placeQualifierSchema>;
+    const r = await service.placeGroupQualifier(tournamentId, categoryId, id_user, id_match, slot);
+    if (r !== "ok") {
+      const messages: Record<string, string> = {
+        NOT_QUALIFIED: "Ese jugador no clasificó a esta llave",
+        GROUP_PLAYING: "Su grupo todavía está jugando",
+        ALREADY_PLACED: "Ese jugador ya está ubicado en la llave",
+        SLOT_TAKEN: "Ese lugar ya está ocupado",
+        NO_SLOT: "Este grupo no tiene lugares en la llave",
+      };
+      return res.status(409).json({ ok: false, message: messages[r] ?? r });
+    }
+    const names = await repo.getUserNames([id_user]);
+    const n = names.get(id_user);
+    await repo.activityLog.record(
+      tournamentId,
+      req.user!.id_user,
+      "bracket_entry_confirmed",
+      n ? [n.first_name, n.last_name].filter(Boolean).join(" ") : null
+    );
+    return res.json({ ok: true, data: { placed: true } });
+  })
+);
+
 // Recomendaciones para la mesa de control: cruces del mismo club que todavía
 // se pueden cambiar, con el cambio que no rompe reglas. No cambia nada.
 // GET /api/v1/bracket/tournaments/:id_tournament/categories/:id_category/suggestions
