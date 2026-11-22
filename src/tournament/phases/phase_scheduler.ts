@@ -1,3 +1,4 @@
+import { registerTask, runTask, taskFailed } from "../../core/health/system_monitor";
 import { TournamentPhaseRepository } from "./tournament_phase_repository";
 import { TournamentPhaseService } from "./tournament_phase_service";
 import { BracketsRepository } from "../../brackets/brackets_repository";
@@ -13,13 +14,15 @@ export function startPhaseScheduler(intervalMs = 30_000) {
   // curso" y celebraciones que faltan.
   void phaseService.repairFinishedCategories();
 
-  setInterval(async () => {
+  registerTask("phases", "Avance de fases", intervalMs);
+  setInterval(() => void runTask("phases", async () => {
     try {
       await phaseService.processScheduled();
     } catch (err) {
+      taskFailed("phases", err);
       console.error("[PhaseScheduler] error:", err);
     }
-  }, intervalMs);
+  }), intervalMs);
 
   console.log(`[PhaseScheduler] iniciado — revisando cada ${intervalMs / 1000}s`);
 }

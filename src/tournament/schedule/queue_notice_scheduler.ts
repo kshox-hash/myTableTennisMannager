@@ -1,3 +1,4 @@
+import { registerTask, runTask, taskFailed } from "../../core/health/system_monitor";
 import DB from "../../db/db_configuration";
 import { TablesRepository } from "../tables/tables_repository";
 import { NotificationsRepository } from "../../notifications/notifications_repository";
@@ -16,7 +17,8 @@ export function startQueueNoticeScheduler(intervalMs = 30_000) {
   const tablesRepo = new TablesRepository();
   const notifications = new NotificationsRepository();
 
-  setInterval(async () => {
+  registerTask("queue_notice", "Avisos de la cola de mesas", intervalMs);
+  setInterval(() => void runTask("queue_notice", async () => {
     try {
       const live = await pool.query<{ id_tournament: string }>(
         `SELECT DISTINCT t.id_tournament
@@ -98,9 +100,10 @@ export function startQueueNoticeScheduler(intervalMs = 30_000) {
         }
       }
     } catch (err) {
+      taskFailed("queue_notice", err);
       console.error("[QueueNoticeScheduler] error:", err);
     }
-  }, intervalMs);
+  }), intervalMs);
 
   console.log(`[QueueNoticeScheduler] iniciado — revisando cada ${intervalMs / 1000}s`);
 }

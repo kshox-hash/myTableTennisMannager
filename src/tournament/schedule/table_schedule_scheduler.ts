@@ -1,3 +1,4 @@
+import { registerTask, runTask, taskFailed } from "../../core/health/system_monitor";
 import { ScheduleRepository } from "./schedule_repository";
 import { TablesRepository } from "../tables/tables_repository";
 
@@ -18,7 +19,8 @@ export function startTableScheduleScheduler(intervalMs = 30_000) {
   const scheduleRepo = new ScheduleRepository();
   const tablesRepo = new TablesRepository();
 
-  setInterval(async () => {
+  registerTask("table_schedule", "Horario de mesas", intervalMs);
+  setInterval(() => void runTask("table_schedule", async () => {
     try {
       const due = await scheduleRepo.getDueScheduledMatches();
       for (const match of due) {
@@ -36,9 +38,10 @@ export function startTableScheduleScheduler(intervalMs = 30_000) {
         }
       }
     } catch (err) {
+      taskFailed("table_schedule", err);
       console.error("[TableScheduleScheduler] error:", err);
     }
-  }, intervalMs);
+  }), intervalMs);
 
   console.log(`[TableScheduleScheduler] iniciado — revisando cada ${intervalMs / 1000}s`);
 }

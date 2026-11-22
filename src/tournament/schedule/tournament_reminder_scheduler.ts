@@ -1,3 +1,4 @@
+import { registerTask, runTask, taskFailed } from "../../core/health/system_monitor";
 import DB from "../../db/db_configuration";
 import { NotificationsRepository } from "../../notifications/notifications_repository";
 import { notifyFollowers } from "../../notifications/followers";
@@ -11,7 +12,8 @@ export function startTournamentReminderScheduler(intervalMs = 10 * 60_000) {
   const pool = DB.getPool();
   const notifications = new NotificationsRepository();
 
-  const run = async () => {
+  registerTask("reminders", "Recordatorios de torneos", intervalMs);
+  const run = () => runTask("reminders", async () => {
     try {
       const hour = await pool.query<{ h: number }>(
         `SELECT EXTRACT(HOUR FROM now() AT TIME ZONE 'America/Santiago')::int AS h`
@@ -69,9 +71,10 @@ export function startTournamentReminderScheduler(intervalMs = 10 * 60_000) {
         });
       }
     } catch (e) {
+      taskFailed("reminders", e);
       console.error("[TournamentReminderScheduler]", e);
     }
-  };
+  });
 
   console.log("[TournamentReminderScheduler] iniciado — revisando cada 10 min");
   void run();

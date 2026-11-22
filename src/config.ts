@@ -3,6 +3,7 @@ import { normalizeTextBody } from "./middlewares/normalize_text_middleware";
 import helmet  from "helmet";
 import cors from "cors";
 import compression from "compression";
+import { requestMonitor } from "./core/health/system_monitor";
 
 export default (app : express.Express) => {
     app.disable("x-powered-by");
@@ -13,6 +14,10 @@ export default (app : express.Express) => {
     // tira ERR_ERL_UNEXPECTED_X_FORWARDED_FOR. `1` = confiar en 1 salto
     // (el load balancer de Render), no en toda la cadena.
     app.set("trust proxy", 1);
+
+    // Tráfico para "Estado del sistema" (súper usuario): cuenta cada
+    // petición, cuánto tardó y si fue error del servidor. Solo en memoria.
+    app.use(requestMonitor);
 
     // gzip de las respuestas JSON: antes ninguna iba comprimida (ej. los
     // partidos de un torneo, 85 KB → ~10 KB). Lo que más se nota en el

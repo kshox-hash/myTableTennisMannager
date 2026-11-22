@@ -16,6 +16,7 @@ import { UserService } from "../users/user_service";
 import { createDemoAccount, deleteDemoAccount, deleteTrialAccount, demoPassword, slugOf } from "../demo/demo_seeder";
 import { mailConfigured, sendMail } from "../core/mailer";
 import { trialAccessEmail } from "../emails/trial_access";
+import { systemStatus } from "../core/health/system_monitor";
 
 const router = Router();
 const repo = new SuperadminRepository();
@@ -197,6 +198,15 @@ router.patch(
     ]);
     if (!r.rowCount) return res.status(404).json({ ok: false, message: "No existe" });
     return res.json({ ok: true, data: r.rows[0] });
+  })
+);
+
+// GET /api/v1/superadmin/system-status — salud del servidor: memoria,
+// retraso, tráfico, tareas automáticas y base de datos, con alertas.
+router.get(
+  "/system-status",
+  asyncHandler(async (_req, res) => {
+    return res.json({ ok: true, data: await systemStatus() });
   })
 );
 
