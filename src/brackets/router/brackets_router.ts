@@ -548,12 +548,19 @@ router.post(
 function liveScoreHandler(table: "group_matches" | "bracket_matches") {
   return asyncHandler(async (req, res) => {
     const sets = (req.body.set_scores as Array<{ p1: number; p2: number }>).filter((x) => x.p1 !== 0 || x.p2 !== 0);
+    // Tarjetas: solo si vienen (las apps viejas no las mandan y no se borran).
+    const cards = Array.isArray(req.body.cards) ? JSON.stringify(req.body.cards) : null;
+    // Tiempo muerto: solo se toca si viene la clave (null = terminó).
+    const hasTimeout = Object.prototype.hasOwnProperty.call(req.body, "timeout");
+    const timeout = hasTimeout && req.body.timeout ? JSON.stringify(req.body.timeout) : null;
     const updated = await DB.getPool().query(
       `UPDATE ${table}
-          SET set_scores = $1::jsonb
+          SET set_scores = $1::jsonb,
+              cards = CASE WHEN $3::text IS NULL THEN cards ELSE $3::jsonb END,
+              live_timeout = CASE WHEN $4::boolean THEN $5::jsonb ELSE live_timeout END
         WHERE id_match = $2 AND status NOT IN ('played', 'walkover', 'bye') AND player1_id IS NOT NULL AND player2_id IS NOT NULL
         RETURNING id_match`,
-      [JSON.stringify(sets), req.params.id_match]
+      [JSON.stringify(sets), req.params.id_match, cards, hasTimeout, timeout]
     );
     if ((updated.rowCount ?? 0) === 0) {
       return res.status(409).json({ ok: false, message: "El partido ya tiene resultado final o no existe." });

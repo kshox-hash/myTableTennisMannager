@@ -1247,7 +1247,7 @@ export class BracketsRepository {
       await client.query(
         `UPDATE group_matches
          SET winner_id = NULL, sets_player1 = 0, sets_player2 = 0,
-             status = 'walkover', played_at = NOW(), set_scores = NULL, result_reason = 'double_no_show',
+             status = 'walkover', played_at = NOW(), set_scores = NULL, cards = NULL, live_timeout = NULL, result_reason = 'double_no_show',
              played_table_number = table_number, table_number = NULL
          WHERE id_match = $1`,
         [matchId]
@@ -1289,7 +1289,7 @@ export class BracketsRepository {
       await client.query(
         `UPDATE group_matches
          SET winner_id = NULL, sets_player1 = 0, sets_player2 = 0,
-             status = 'scheduled', played_at = NULL, set_scores = NULL, result_reason = NULL,
+             status = 'scheduled', played_at = NULL, set_scores = NULL, cards = NULL, live_timeout = NULL, result_reason = NULL,
              table_number = played_table_number, played_table_number = NULL
          WHERE id_match = $1`,
         [matchId]
@@ -1562,7 +1562,7 @@ export class BracketsRepository {
       await client.query(
         `UPDATE group_matches
          SET winner_id = NULL, sets_player1 = 0, sets_player2 = 0,
-             status = 'scheduled', played_at = NULL, set_scores = NULL, result_reason = NULL,
+             status = 'scheduled', played_at = NULL, set_scores = NULL, cards = NULL, live_timeout = NULL, result_reason = NULL,
              table_number = played_table_number, played_table_number = NULL
          WHERE id_match = $1`,
         [matchId]
@@ -1714,7 +1714,7 @@ export class BracketsRepository {
       await client.query(
         `UPDATE bracket_matches
          SET winner_id = NULL, sets_player1 = 0, sets_player2 = 0,
-             status = 'ready', played_at = NULL, set_scores = NULL, result_reason = NULL,
+             status = 'ready', played_at = NULL, set_scores = NULL, cards = NULL, live_timeout = NULL, result_reason = NULL,
              table_number = played_table_number, played_table_number = NULL
          WHERE id_match = $1`,
         [matchId]
@@ -2245,7 +2245,7 @@ export class BracketsRepository {
         [groupId]
       );
       await client.query(
-        `UPDATE bracket_matches SET status = 'pending', table_number = NULL, referee_id = NULL, set_scores = NULL
+        `UPDATE bracket_matches SET status = 'pending', table_number = NULL, referee_id = NULL, set_scores = NULL, cards = NULL, live_timeout = NULL
          WHERE (player1_source_group = $1 OR player2_source_group = $1) AND status = 'ready'`,
         [groupId]
       );

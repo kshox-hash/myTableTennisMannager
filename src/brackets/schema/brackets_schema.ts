@@ -42,6 +42,25 @@ export const matchResultSchema = z
 export const liveScoreSchema = z
   .object({
     set_scores: z.array(setScoreSchema).max(7),
+    // Tarjetas del partido (amarilla, amarilla+roja 1 y 2 puntos, roja).
+    cards: z
+      .array(
+        z
+          .object({
+            player: z.union([z.literal(1), z.literal(2)]),
+            kind: z.enum(["yellow", "yr1", "yr2", "red"]),
+            set: z.number().int().min(1).max(7),
+          })
+          .strict(),
+      )
+      .max(20)
+      .optional(),
+    // Tiempo muerto en curso (null = terminó); se muestra en vivo.
+    timeout: z
+      .object({ player: z.union([z.literal(1), z.literal(2)]), ends_at: z.string().max(40) })
+      .strict()
+      .nullable()
+      .optional(),
   })
   .strict();
 

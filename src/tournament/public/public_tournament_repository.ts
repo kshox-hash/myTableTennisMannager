@@ -728,7 +728,7 @@ export class PublicTournamentRepository {
       this.pool.query(
         `SELECT gm.id_group, gm.id_match, gm.player1_id, u1.first_name AS p1_first, u1.last_name AS p1_last, u1.avatar_url AS p1_avatar,
                 gm.player2_id, u2.first_name AS p2_first, u2.last_name AS p2_last, u2.avatar_url AS p2_avatar,
-                gm.sets_player1, gm.sets_player2, gm.status, gm.best_of_sets, gm.set_scores, gm.result_reason
+                gm.sets_player1, gm.sets_player2, gm.status, gm.best_of_sets, gm.set_scores, gm.result_reason, gm.live_timeout
          FROM group_matches gm
          JOIN users u1 ON u1.id_user = gm.player1_id
          JOIN users u2 ON u2.id_user = gm.player2_id
@@ -783,6 +783,7 @@ export class PublicTournamentRepository {
           best_of_sets: r.best_of_sets,
           set_scores: r.set_scores ?? null,
           result_reason: r.result_reason ?? null,
+          live_timeout: r.live_timeout ?? null,
         })),
       });
     }
@@ -845,7 +846,7 @@ export class PublicTournamentRepository {
         gm.player2_id,
         COALESCE(NULLIF(TRIM(p2.first_name || ' ' || p2.last_name), ''), 'Jugador sin nombre') AS player2_name,
         p2cl.name AS player2_club, p2.avatar_url AS player2_avatar_url,
-        gm.winner_id, gm.sets_player1, gm.sets_player2, gm.set_scores, gm.result_reason,
+        gm.winner_id, gm.sets_player1, gm.sets_player2, gm.set_scores, gm.cards, gm.live_timeout, gm.result_reason,
         gm.status, gm.played_at::text, gm.table_number, gm.played_table_number,
         NULL::int AS seed1, NULL::int AS seed2
       FROM group_matches gm
@@ -872,7 +873,7 @@ export class PublicTournamentRepository {
         bm.player2_id,
         COALESCE(NULLIF(TRIM(p2.first_name || ' ' || p2.last_name), ''), 'Jugador sin nombre') AS player2_name,
         p2cl.name AS player2_club, p2.avatar_url AS player2_avatar_url,
-        bm.winner_id, bm.sets_player1, bm.sets_player2, bm.set_scores, bm.result_reason,
+        bm.winner_id, bm.sets_player1, bm.sets_player2, bm.set_scores, bm.cards, bm.live_timeout, bm.result_reason,
         bm.status, bm.played_at::text, bm.table_number, bm.played_table_number,
         bm.seed1, bm.seed2
       FROM bracket_matches bm
