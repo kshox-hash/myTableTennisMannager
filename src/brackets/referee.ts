@@ -87,6 +87,27 @@ export async function notifyRefereeAssigned(type: "group" | "bracket", idMatch: 
   }
 }
 
+/** Al árbitro que el organizador sacó (o cambió por otro) se le avisa. Nunca lanza. */
+export async function notifyRefereeRemoved(type: "group" | "bracket", idMatch: string, refereeId: string | null) {
+  if (!refereeId) return;
+  try {
+    const m = await matchInfo(type, idMatch);
+    if (!m || m.status === "played" || m.status === "walkover") return;
+    await new NotificationsRepository(pool()).create({
+      idUser: refereeId,
+      type: "referee_removed",
+      title: "Ya no arbitras este partido",
+      message: `El organizador cambió el árbitro de ${m.player1_name ?? "Por definir"} vs ${m.player2_name ?? "Por definir"} · ${m.category_display} (${m.tournament_name}).`,
+      idTournament: m.id_tournament,
+      idCategory: m.id_category,
+      idMatch: m.id_match,
+      matchType: type,
+    });
+  } catch (err) {
+    console.error("[notifyRefereeRemoved]", err);
+  }
+}
+
 /** Partidos sin terminar donde el usuario es árbitro (para "Tienes un partido para arbitrar"). */
 export async function myRefereeMatches(idUser: string): Promise<MatchInfo[]> {
   const where = `WHERE m.referee_id = $1 AND m.status NOT IN ('played', 'walkover', 'bye')

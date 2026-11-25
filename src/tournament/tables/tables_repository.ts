@@ -60,6 +60,7 @@ export class TablesRepository {
   private async notifyPlayersTableAssigned(params: {
     player1Id: string | null;
     player2Id: string | null;
+    refereeId?: string | null;
     tableNumber: number;
     idTournament: string;
     idCategory: string | null;
@@ -67,9 +68,22 @@ export class TablesRepository {
     idMatch: string;
     matchType: "group" | "bracket";
   }): Promise<void> {
-    const { player1Id, player2Id, tableNumber, idTournament, idCategory, categoryLabel, idMatch, matchType } = params;
+    const { player1Id, player2Id, refereeId, tableNumber, idTournament, idCategory, categoryLabel, idMatch, matchType } = params;
     const userIds = [player1Id, player2Id].filter((id): id is string => !!id);
     if (userIds.length === 0) return;
+
+    // El árbitro también tiene que ir a la mesa: su aviso lo lleva directo a anotar.
+    if (refereeId && !userIds.includes(refereeId)) {
+      await this.notifications.createForMany([refereeId], {
+        type: "referee_on_table",
+        title: `¡A arbitrar! Mesa ${tableNumber}`,
+        message: `El partido que arbitras de ${categoryLabel} ya tiene mesa: Mesa ${tableNumber}. Ve para allá y anota el marcador desde la app.`,
+        idTournament,
+        idCategory,
+        idMatch,
+        matchType,
+      });
+    }
 
     await this.notifications.createForMany(userIds, {
       type: "match_on_table",
@@ -468,6 +482,7 @@ export class TablesRepository {
     await this.notifyPlayersTableAssigned({
       player1Id: match.player1_id,
       player2Id: match.player2_id,
+      refereeId: match.referee_id,
       tableNumber: table_number,
       idTournament: match.id_tournament,
       idCategory: match.id_category,

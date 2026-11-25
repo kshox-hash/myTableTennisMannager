@@ -43,6 +43,8 @@ export const PUSH_TYPES: ReadonlySet<string> = new Set([
   "club_join_approved",
   "club_join_rejected",
   "referee_assigned",
+  "referee_on_table",
+  "referee_removed",
   "tournament_finished",
   "organizer_invited",
   // Campeonato que sigues sin jugarlo (ver followers.ts).
@@ -75,6 +77,8 @@ export type NotificationType =
   | "groups_ending"
   | "player_unenrolled"
   | "referee_assigned"
+  | "referee_on_table"
+  | "referee_removed"
   | "tournament_finished"
   | "tournament_reminder"
   // Coorganizadores: te sumaron (o te cambiaron el rol) / te sacaron.

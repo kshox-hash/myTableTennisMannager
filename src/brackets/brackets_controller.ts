@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { currentReferee, notifyRefereeAssigned } from "./referee";
+import { currentReferee, notifyRefereeAssigned, notifyRefereeRemoved } from "./referee";
 import { BracketsService } from "./brackets_service";
 import { BRACKETS_ERRORS } from "./dto/brackets_dto";
 import type { TournamentPhaseService } from "../tournament/phases/tournament_phase_service";
@@ -173,6 +173,7 @@ export class BracketsController {
     // Árbitro nuevo: se le avisa (puede anotar el marcador desde la app).
     const after = req.body.referee_id ?? null;
     if (after && after !== before) void notifyRefereeAssigned("group", matchId, after);
+    if (before && before !== after) void notifyRefereeRemoved("group", matchId, before);
 
     return res.json({ ok: true, data: result.data });
   };
@@ -302,6 +303,7 @@ export class BracketsController {
     // Árbitro nuevo: se le avisa (puede anotar el marcador desde la app).
     const after = req.body.referee_id ?? null;
     if (after && after !== before) void notifyRefereeAssigned("bracket", matchId, after);
+    if (before && before !== after) void notifyRefereeRemoved("bracket", matchId, before);
 
     return res.json({ ok: true, data: result.data });
   };
