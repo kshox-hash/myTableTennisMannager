@@ -1,6 +1,7 @@
 import type { Pool } from "pg";
 import DB from "../db/db_configuration";
 import { ROLE_IDS, type DbRole, getSuperadminEmails } from "../core/constants/roles";
+import { foldSql, foldLike } from "../core/search_fold";
 
 export type AdminSummaryRow = {
   id_user: string;
@@ -103,14 +104,13 @@ export class SuperadminRepository {
        JOIN roles r ON r.id_role = u.id_role
        WHERE u.is_team = false
          AND (
-           u.email ILIKE $1
-           OR COALESCE(u.first_name, '') ILIKE $1
-           OR COALESCE(u.last_name, '') ILIKE $1
-           OR TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) ILIKE $1
+           ${foldSql("u.email")} LIKE $1
+           OR ${foldSql("TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, ''))")} LIKE $1
+           OR ${foldSql("TRIM(COALESCE(u.last_name, '') || ' ' || COALESCE(u.first_name, ''))")} LIKE $1
          )
        ORDER BY u.last_name NULLS LAST, u.first_name NULLS LAST, u.email ASC
        LIMIT $2`,
-      [`%${q}%`, limit]
+      [foldLike(q), limit]
     );
     return res.rows;
   }
@@ -200,13 +200,14 @@ export class SuperadminRepository {
          AND u.deleted_at IS NULL
          AND u.email NOT LIKE 'sin-registro+%@myttm.local'
          AND ($1 = '%%'
-           OR u.email ILIKE $1
-           OR TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) ILIKE $1)
+           OR ${foldSql("u.email")} LIKE $1
+           OR ${foldSql("TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, ''))")} LIKE $1
+           OR ${foldSql("TRIM(COALESCE(u.last_name, '') || ' ' || COALESCE(u.first_name, ''))")} LIKE $1)
          AND (NOT $2 OR en.names IS NOT NULL)
          AND (NOT $5 OR u.created_at >= NOW() - INTERVAL '7 days')
        ORDER BY u.created_at DESC, u.id_user
        LIMIT $3 OFFSET $4`,
-      [`%${params.q}%`, params.enrolledOnly, params.limit, params.offset, params.newOnly ?? false]
+      [foldLike(params.q ?? ""), params.enrolledOnly, params.limit, params.offset, params.newOnly ?? false]
     );
     return { players: res.rows, total: res.rows[0]?.total ?? 0 };
   }

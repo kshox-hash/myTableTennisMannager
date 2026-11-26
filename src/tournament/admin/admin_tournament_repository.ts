@@ -5,6 +5,7 @@ import { NotificationsRepository } from "../../notifications/notifications_repos
 import { notifyFollowers } from "../../notifications/followers";
 import { ActivityLogRepository, type ActivityLogRow } from "../../activity/activity_log_repository";
 import { BracketsRepository } from "../../brackets/brackets_repository";
+import { foldSql, foldLike } from "../../core/search_fold";
 
 import type {
   TournamentCreateDTO,
@@ -923,13 +924,13 @@ export class AdminTournamentRepository {
 
     if (q) {
       where.push(`(
-        t.tournament_name ILIKE $${i}
-        OR COALESCE(t.region, '')        ILIKE $${i}
-        OR COALESCE(t.address, '')       ILIKE $${i}
-        OR COALESCE(c.category_type, '') ILIKE $${i}
-        OR COALESCE(c.category_range, '') ILIKE $${i}
+        ${foldSql("t.tournament_name")} LIKE ${i}
+        OR ${foldSql("COALESCE(t.region, '')")} LIKE ${i}
+        OR ${foldSql("COALESCE(t.address, '')")} LIKE ${i}
+        OR ${foldSql("COALESCE(c.category_type, '') || ' ' || COALESCE(c.category_range, '')")} LIKE ${i}
       )`);
-      values.push(`%${q}%`);
+      // Sin importar mayúsculas ni tildes.
+      values.push(foldLike(q));
       i++;
     }
 
@@ -1218,9 +1219,9 @@ export class AdminTournamentRepository {
 
     if (filters.q) {
       conditions.push(
-        `(t.tournament_name ILIKE $${i} OR t.address ILIKE $${i} OR t.region ILIKE $${i})`
+        `(${foldSql("t.tournament_name")} LIKE ${i} OR ${foldSql("COALESCE(t.address, '')")} LIKE ${i} OR ${foldSql("COALESCE(t.region, '')")} LIKE ${i})`
       );
-      values.push(`%${filters.q}%`);
+      values.push(foldLike(filters.q));
       i++;
     }
     if (!filters.includeCancelled) {

@@ -1,6 +1,7 @@
 import type { Pool } from "pg";
 import DB from "../../db/db_configuration";
 import { ROLE_IDS } from "../../core/constants/roles";
+import { foldSql, foldLike } from "../../core/search_fold";
 
 // Nombre público de un organizador — sin exponer el email (null si no tiene
 // nombre cargado, nunca el email como fallback). Prefiere el nombre de
@@ -191,8 +192,8 @@ export class PublicTournamentRepository {
     let i = 1;
 
     if (filters.q) {
-      conditions.push(`t.tournament_name ILIKE $${i++}`);
-      values.push(`%${filters.q}%`);
+      conditions.push(`${foldSql("t.tournament_name")} LIKE ${i++}`);
+      values.push(foldLike(filters.q));
     }
     if (filters.region) {
       conditions.push(`t.region = $${i++}`);
