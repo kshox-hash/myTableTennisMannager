@@ -16,6 +16,11 @@ export const GLOBAL_RANKING_ENABLED = true;
 // La posición NO se guarda — se calcula al leer. Un mismo fragmento de SQL
 // alimenta la pantalla de ranking (getGlobalRanking) y el sembrado de
 // grupos/llave (BracketsRepository.loadPlayersForCategory, SeedingRepository).
+/** Ranking general de MyTTM (lo que ve todo el mundo en la pestaña Ranking):
+ *  solo campeonatos aprobados por el súper usuario (migración 103). El
+ *  sembrado sigue usando RANKED_PLAYERS_CTE, que suma todo (sin cambios). */
+export const MYTTM_SCOPE = "(t.counts_myttm AND NOT t.is_demo)";
+
 export const RANKED_PLAYERS_CTE = `
   SELECT
     pts.id_user, pts.ranking_points,
@@ -26,6 +31,21 @@ export const RANKED_PLAYERS_CTE = `
       ORDER BY pts.ranking_points DESC, COALESCE(ps.matches_won, 0) DESC, pts.id_user ASC
     ) AS ranking_position
   FROM (${ittfTotalsSql()}) pts
+  LEFT JOIN player_stats ps ON ps.id_user = pts.id_user
+`;
+
+/** Igual que RANKED_PLAYERS_CTE pero solo con el ranking MyTTM (campeonatos
+ *  aprobados): lo que se MUESTRA al jugador (su posición, el ranking general). */
+export const MYTTM_RANKED_PLAYERS_CTE = `
+  SELECT
+    pts.id_user, pts.ranking_points,
+    COALESCE(ps.matches_played, 0) AS matches_played,
+    COALESCE(ps.matches_won, 0) AS matches_won,
+    COALESCE(ps.matches_lost, 0) AS matches_lost,
+    ROW_NUMBER() OVER (
+      ORDER BY pts.ranking_points DESC, COALESCE(ps.matches_won, 0) DESC, pts.id_user ASC
+    ) AS ranking_position
+  FROM (${ittfTotalsSql(MYTTM_SCOPE, "general")}) pts
   LEFT JOIN player_stats ps ON ps.id_user = pts.id_user
 `;
 
@@ -121,7 +141,7 @@ export class RankingRepository {
 
   async getGlobalRanking(limit = 200): Promise<RankingRow[]> {
     const q = `
-      WITH ranked_players AS (${RANKED_PLAYERS_CTE})
+      WITH ranked_players AS (${MYTTM_RANKED_PLAYERS_CTE})
       SELECT
         rp.id_user, u.first_name, u.last_name, u.email, u.avatar_url,
         cl.name AS club_name,
@@ -142,7 +162,7 @@ export class RankingRepository {
   // entra en RANKED_PLAYERS_CTE, que filtra matches_played > 0).
   async getPlayerRanking(idUser: string): Promise<RankingRow | null> {
     const q = `
-      WITH ranked_players AS (${RANKED_PLAYERS_CTE})
+      WITH ranked_players AS (${MYTTM_RANKED_PLAYERS_CTE})
       SELECT
         rp.id_user, u.first_name, u.last_name, u.email, u.avatar_url,
         cl.name AS club_name,
@@ -228,7 +248,7 @@ export class RankingRepository {
     const rankingId = scopeId ? await this.resolveRankingId(scopeId) : null;
     if (scopeId && !rankingId) return [];
     const q = `
-      WITH pts AS (${ittfTotalsSql(rankingId ? "t.id_ranking = $2" : "TRUE", copa)}),
+      WITH pts AS (${ittfTotalsSql(rankingId ? "t.id_ranking = $2" : MYTTM_SCOPE, copa)}),
       ranked AS (
         SELECT pts.id_user, pts.ranking_points,
                COALESCE(ps.matches_played, 0) AS matches_played,
@@ -278,7 +298,7 @@ export class RankingRepository {
   async getScopeTournaments(scopeId: string | null, copa: RankingCopa = "general"): Promise<{ id_tournament: string; tournament_name: string; event_date: string | null; ranking_level: string }[]> {
     const rankingId = scopeId ? await this.resolveRankingId(scopeId) : null;
     if (scopeId && !rankingId) return [];
-    const scope = rankingId ? "t.id_ranking = $1" : "TRUE";
+    const scope = rankingId ? "t.id_ranking = $1" : MYTTM_SCOPE;
     const q = `
       SELECT t.id_tournament, t.tournament_name, t.event_date::text AS event_date, t.ranking_level
       FROM tournaments t
@@ -373,7 +393,7 @@ export class RankingRepository {
   async getPlayerBreakdown(idUser: string, scopeId: string | null, copa: RankingCopa = "general") {
     const rankingId = scopeId ? await this.resolveRankingId(scopeId) : null;
     if (scopeId && !rankingId) return [];
-    const scope = rankingId ? "t.id_ranking = $2" : "TRUE";
+    const scope = rankingId ? "t.id_ranking = $2" : MYTTM_SCOPE;
     const q = `
       SELECT pc.id_tournament, pc.id_category, pc.points, t.tournament_name, t.event_date::text AS event_date,
              t.ranking_level, tc.category_type, tc.category_range,

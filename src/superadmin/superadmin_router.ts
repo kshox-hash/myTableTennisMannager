@@ -707,4 +707,42 @@ router.patch(
   })
 );
 
+// ── Ranking MyTTM: qué campeonatos suman ─────────────────────
+// El ranking general de la plataforma solo suma los campeonatos aprobados
+// acá (migración 103). Los rankings de cada organizador no cambian.
+
+// GET /api/v1/superadmin/myttm-ranking/tournaments — campeonatos puntuables
+router.get(
+  "/myttm-ranking/tournaments",
+  asyncHandler(async (_req, res) => {
+    const r = await DB.getPool().query(
+      `SELECT t.id_tournament, t.tournament_name, t.event_date::text AS event_date, t.ranking_level, t.counts_myttm,
+              COALESCE(NULLIF(TRIM(COALESCE(o.organizer_first_name, '') || ' ' || COALESCE(o.organizer_last_name, '')), ''),
+                       NULLIF(TRIM(COALESCE(o.first_name, '') || ' ' || COALESCE(o.last_name, '')), ''), o.email) AS organizer,
+              EXISTS (SELECT 1 FROM tournament_categories tc WHERE tc.id_tournament = t.id_tournament AND tc.phase = 'finished') AS has_finished
+       FROM tournaments t
+       JOIN users o ON o.id_user = t.created_by
+       WHERE t.is_ranked AND t.status <> 'cancelled' AND NOT t.is_demo AND t.kind = 'tournament'
+       ORDER BY t.event_date DESC NULLS LAST, t.tournament_name`
+    );
+    return res.json({ ok: true, data: r.rows });
+  })
+);
+
+const countsMyttmSchema = z.object({ counts: z.boolean() });
+
+// PATCH /api/v1/superadmin/myttm-ranking/tournaments/:id — aprobar o sacar
+router.patch(
+  "/myttm-ranking/tournaments/:id",
+  asyncHandler(async (req, res) => {
+    const { counts } = countsMyttmSchema.parse(req.body);
+    const r = await DB.getPool().query(
+      `UPDATE tournaments SET counts_myttm = $2 WHERE id_tournament = $1 RETURNING id_tournament, counts_myttm`,
+      [String(req.params.id), counts]
+    );
+    if (r.rowCount === 0) return res.status(404).json({ ok: false, message: "Campeonato no encontrado" });
+    return res.json({ ok: true, data: r.rows[0] });
+  })
+);
+
 export default router;

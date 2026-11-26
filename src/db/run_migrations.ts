@@ -108,6 +108,7 @@ const INCREMENTAL = [
   "100_trial_sent_to.sql",
   "101_match_cards.sql",
   "102_match_live_timeout.sql",
+  "103_tournament_counts_myttm.sql",
 ];
 
 export async function runMigrations(): Promise<void> {
