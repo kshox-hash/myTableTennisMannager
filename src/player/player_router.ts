@@ -24,6 +24,21 @@ router.get(
   })
 );
 
+// GET /api/v1/player/me/performance — "Mi juego › Rendimiento": sets a
+// 10-10, sets aplastantes, partidos al set decisivo, dónde quedó eliminado y
+// la comparación de sus últimos campeonatos.
+router.get(
+  "/me/performance",
+  authRequired,
+  requireRole(["admin", "player"]),
+  asyncHandler(async (req, res) => {
+    const id_user = (req as any).user?.id_user;
+    if (!id_user) return res.status(401).json({ ok: false, message: "Sin usuario en token" });
+    const data = await repo.getPerformance(id_user);
+    return res.json({ ok: true, data });
+  })
+);
+
 // GET /api/v1/player/me/live-summary — "En vivo" del Inicio: cómo va cada
 // categoría que estoy jugando (clasificados y eliminados, ronda en juego).
 router.get(

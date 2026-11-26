@@ -1,6 +1,7 @@
 import type { Pool } from "pg";
 import DB from "../db/db_configuration";
 import { TablesRepository } from "../tournament/tables/tables_repository";
+import { ittfPointsByCategorySql } from "../ranking/ittf_points";
 
 export type NextMatch = {
   id_match:        string;
@@ -874,5 +875,217 @@ export class PlayerRepository {
       [ids]
     );
     return res.rows;
+  }
+
+  // Rendimiento del jugador ("Mi juego"): números que el historial paginado
+  // no alcanza a dar (trae 50 y sin puntos por set). Se calcula con TODOS
+  // sus partidos terminados: sets a 10-10, sets aplastantes (rival bajo 5),
+  // partidos al set decisivo, dónde quedó eliminado y la comparación de sus
+  // últimos campeonatos (partidos, sets y puntos de ranking).
+  async getPerformance(id_user: string) {
+    const ids = await this.myIds(id_user);
+    const res = await this.pool.query<{
+      match_type: "group" | "bracket";
+      id_tournament: string;
+      id_category: string;
+      player1_id: string | null;
+      winner_id: string | null;
+      status: string;
+      sets_player1: number;
+      sets_player2: number;
+      best_of_sets: number | null;
+      set_scores: { p1: number; p2: number }[] | null;
+      round: number | null;
+      played_at: string | null;
+      tournament_name: string;
+      event_date: string;
+    }>(
+      `WITH m AS (
+         SELECT 'group'::text AS match_type, cg.id_tournament, cg.id_category,
+                gm.player1_id, gm.winner_id, gm.status, gm.sets_player1, gm.sets_player2,
+                gm.best_of_sets, gm.set_scores, NULL::int AS round, gm.played_at::text AS played_at
+         FROM group_matches gm
+         JOIN category_groups cg ON cg.id_group = gm.id_group
+         WHERE (gm.player1_id = ANY($1::uuid[]) OR gm.player2_id = ANY($1::uuid[]))
+           AND gm.status IN ('played', 'walkover')
+         UNION ALL
+         SELECT 'bracket'::text, bm.id_tournament, bm.id_category,
+                bm.player1_id, bm.winner_id, bm.status, bm.sets_player1, bm.sets_player2,
+                bm.best_of_sets, bm.set_scores, bm.round, bm.played_at::text AS played_at
+         FROM bracket_matches bm
+         WHERE (bm.player1_id = ANY($1::uuid[]) OR bm.player2_id = ANY($1::uuid[]))
+           AND bm.status IN ('played', 'walkover') AND bm.is_bye = FALSE
+       )
+       SELECT m.*, t.tournament_name, COALESCE(t.event_date, t.created_at::date)::text AS event_date
+       FROM m JOIN tournaments t ON t.id_tournament = m.id_tournament
+       WHERE t.status <> 'cancelled'`,
+      [ids]
+    );
+    const mine = new Set(ids);
+    const out = {
+      matches: { won: 0, lost: 0 },
+      sets: { won: 0, lost: 0 },
+      // Victorias sin ceder un set (2-0, 3-0).
+      clean_wins: 0,
+      // Partidos en que perdió el primer set: cuántos dio vuelta (won) y cuántos no (lost).
+      comeback: { won: 0, lost: 0 },
+      // Partidos en que ganó el primer set: los cerró (won) o se los dieron vuelta (lost).
+      first_set_won: { won: 0, lost: 0 },
+      // Derrotas sin ganar un set (0-2, 0-3).
+      clean_losses: 0,
+      deuce: { won: 0, lost: 0 }, // sets que llegaron a 10-10
+      crushing: { won: 0, lost: 0 }, // ganados con el rival bajo 5 / perdidos con uno bajo 5
+      decisive: { won: 0, lost: 0 }, // partidos que llegaron al último set
+      eliminations: { groups: 0, bracket: 0, champion: 0 },
+      // Partidos por formato (a 3, 5 y 7 sets).
+      formats: { "3": { won: 0, lost: 0 }, "5": { won: 0, lost: 0 }, "7": { won: 0, lost: 0 } } as Record<string, { won: number; lost: number }>,
+      // Finales de llave jugadas (ganadas / perdidas) y podios (1°, 2° o 3°).
+      finals: { won: 0, lost: 0 },
+      podiums: 0,
+      // Remontadas épicas: partidos en que fue perdiendo 0-2 (a 5) o 0-3 (a 7).
+      big_comeback: { won: 0, lost: 0 },
+      // Últimos 5 resultados (true = ganó), el más reciente primero.
+      recent: [] as boolean[],
+      tournaments: [] as {
+        id_tournament: string;
+        tournament_name: string;
+        event_date: string;
+        played: number;
+        won: number;
+        sets_won: number;
+        sets_lost: number;
+        points: number;
+      }[],
+    };
+    const byTournament = new Map<string, (typeof out.tournaments)[number]>();
+    // Por categoría: ¿llegó a la llave?, ¿perdió en la llave?, ¿ganó la final?
+    const byCategory = new Map<string, { inBracket: boolean; lostBracket: boolean; wonRound: number; lostRound: number }>();
+
+    for (const r of res.rows) {
+      const p1 = r.player1_id != null && mine.has(r.player1_id);
+      const won = r.winner_id != null && mine.has(r.winner_id);
+      const wo = r.status === "walkover";
+      if (won) out.matches.won++;
+      else if (r.winner_id) out.matches.lost++;
+      if (won && !wo && (p1 ? r.sets_player2 : r.sets_player1) === 0) out.clean_wins++;
+      if (!won && r.winner_id && !wo && (p1 ? r.sets_player1 : r.sets_player2) === 0) out.clean_losses++;
+
+      const myS = p1 ? r.sets_player1 : r.sets_player2;
+      const opS = p1 ? r.sets_player2 : r.sets_player1;
+      if (!wo) {
+        for (const s of r.set_scores ?? []) {
+          const me = p1 ? s.p1 : s.p2;
+          const op = p1 ? s.p2 : s.p1;
+          if (me === op) continue;
+          if (me >= 10 && op >= 10) me > op ? out.deuce.won++ : out.deuce.lost++;
+          if (me > op && op < 5) out.crushing.won++;
+          if (op > me && me < 5) out.crushing.lost++;
+        }
+        const first = (r.set_scores ?? [])[0];
+        if (first && r.winner_id) {
+          const lostFirst = p1 ? first.p1 < first.p2 : first.p2 < first.p1;
+          if (lostFirst) won ? out.comeback.won++ : out.comeback.lost++;
+          else won ? out.first_set_won.won++ : out.first_set_won.lost++;
+        }
+        const bo = r.best_of_sets ?? 0;
+        if (r.winner_id && out.formats[String(bo)]) won ? out.formats[String(bo)].won++ : out.formats[String(bo)].lost++;
+        // ¿Llegó a ir perdiendo 0-2 (a 5) o 0-3 (a 7)?
+        if (bo >= 5 && r.winner_id) {
+          const need = Math.ceil(bo / 2);
+          let me = 0, op = 0, deep = false;
+          for (const s of r.set_scores ?? []) {
+            const a = p1 ? s.p1 : s.p2;
+            const b = p1 ? s.p2 : s.p1;
+            if (a > b) me++;
+            else if (b > a) op++;
+            if (me === 0 && op === need - 1) deep = true;
+          }
+          if (deep) won ? out.big_comeback.won++ : out.big_comeback.lost++;
+        }
+        if (r.best_of_sets && r.sets_player1 + r.sets_player2 === r.best_of_sets && r.winner_id) {
+          won ? out.decisive.won++ : out.decisive.lost++;
+        }
+      }
+
+      let t = byTournament.get(r.id_tournament);
+      if (!t) {
+        t = { id_tournament: r.id_tournament, tournament_name: r.tournament_name, event_date: r.event_date, played: 0, won: 0, sets_won: 0, sets_lost: 0, points: 0 };
+        byTournament.set(r.id_tournament, t);
+      }
+      t.played++;
+      if (won) t.won++;
+      if (!wo) {
+        t.sets_won += myS;
+        t.sets_lost += opS;
+        out.sets.won += myS;
+        out.sets.lost += opS;
+      }
+
+      let c = byCategory.get(r.id_category);
+      if (!c) {
+        c = { inBracket: false, lostBracket: false, wonRound: 0, lostRound: 0 };
+        byCategory.set(r.id_category, c);
+      }
+      if (r.match_type === "bracket") {
+        c.inBracket = true;
+        if (won) c.wonRound = Math.max(c.wonRound, r.round ?? 0);
+        else if (r.winner_id) {
+          c.lostBracket = true;
+          c.lostRound = r.round ?? 0;
+        }
+      }
+    }
+
+    // Eliminaciones: solo categorías cuya llave ya existe (si no, todavía no se sabe).
+    const catIds = [...byCategory.keys()];
+    if (catIds.length) {
+      const rounds = await this.pool.query<{ id_category: string; max_round: number }>(
+        `SELECT id_category, MAX(round)::int AS max_round FROM bracket_matches
+         WHERE id_category = ANY($1::uuid[]) GROUP BY id_category`,
+        [catIds]
+      );
+      const maxRound = new Map(rounds.rows.map((x) => [x.id_category, x.max_round]));
+      for (const [id, c] of byCategory) {
+        const max = maxRound.get(id);
+        if (max == null) continue;
+        if (!c.inBracket) out.eliminations.groups++;
+        else if (c.wonRound >= max) {
+          out.eliminations.champion++;
+          out.finals.won++;
+          out.podiums++;
+        } else if (c.lostBracket) {
+          out.eliminations.bracket++;
+          if (c.lostRound === max) {
+            out.finals.lost++; // 2° lugar
+            out.podiums++;
+          } else if (max >= 2 && c.lostRound === max - 1) {
+            out.podiums++; // semifinal = 3° lugar
+          }
+        }
+      }
+    }
+
+    // Puntos de ranking de cada campeonato (tabla ITTF; 0 si no puntuaba o no terminó).
+    const tIds = [...byTournament.keys()];
+    if (tIds.length) {
+      const pts = await this.pool.query<{ id_tournament: string; points: number }>(
+        `SELECT id_tournament, SUM(points)::int AS points
+         FROM (${ittfPointsByCategorySql("t.id_tournament = ANY($1::uuid[])", false)}) x
+         WHERE x.id_user = ANY($2::uuid[])
+         GROUP BY id_tournament`,
+        [tIds, ids]
+      );
+      for (const p of pts.rows) {
+        const t = byTournament.get(p.id_tournament);
+        if (t) t.points = p.points;
+      }
+    }
+    out.recent = res.rows
+      .filter((r) => r.winner_id)
+      .sort((a, b) => (b.played_at ?? "").localeCompare(a.played_at ?? ""))
+      .slice(0, 5)
+      .map((r) => mine.has(r.winner_id as string));
+    out.tournaments = [...byTournament.values()].sort((a, b) => b.event_date.localeCompare(a.event_date)).slice(0, 5);
+    return out;
   }
 }
