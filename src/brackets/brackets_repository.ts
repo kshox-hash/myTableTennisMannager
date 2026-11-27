@@ -3060,13 +3060,17 @@ export class BracketsRepository {
       const group = groupRes.rows[0];
       if (!group) return { added: false, error: "GROUP_NOT_FOUND" as BracketsError };
 
-      const phaseRes = await client.query<{ phase: string }>(
-        `SELECT phase FROM tournament_categories WHERE id_category = $1 FOR UPDATE`,
+      const phaseRes = await client.query<{ phase: string; competition_format: string }>(
+        `SELECT phase, competition_format FROM tournament_categories WHERE id_category = $1 FOR UPDATE`,
         [group.id_category]
       );
       if ((phaseRes.rows[0]?.phase ?? "enrollment") !== "groups") {
         return { added: false, error: "GROUPS_LOCKED" as BracketsError };
       }
+      // Todos contra todos: un solo grupo con toda la categoría (sin tope de
+      // 4). Así se puede sumar a alguien que llegó tarde con el campeonato ya
+      // empezado: se le arman sus partidos contra todos los del grupo.
+      const roundRobin = phaseRes.rows[0]?.competition_format === "round_robin";
 
       const enrolledRes = await client.query(
         `SELECT 1 FROM enrollments
@@ -3097,7 +3101,7 @@ export class BracketsRepository {
       // El tope de 4 es del formato todos-contra-todos automático — un
       // grupo manual (group_kind = 'manual') no lo tiene, a pedido: se le
       // puede aplicar cualquier cantidad de jugadores.
-      if (group.group_kind !== "manual" && count + 1 > 4) {
+      if (group.group_kind !== "manual" && !roundRobin && count + 1 > 4) {
         return { added: false, error: "TARGET_GROUP_FULL" as BracketsError };
       }
 
