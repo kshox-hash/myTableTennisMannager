@@ -19,6 +19,8 @@ export type TableMatch = {
   player2_name:  string | null;
   table_number:  number;
   called_out_of_order?: boolean;
+  /** Sets anotados hasta ahora (marcador en vivo); null si no ha empezado. */
+  set_scores?: { p1: number; p2: number }[] | null;
 };
 
 export type TableStatus = {
@@ -125,6 +127,7 @@ export class TablesRepository {
            gm.match_number,
            gm.table_number,
            gm.called_out_of_order,
+           gm.set_scores,
            gm.player1_id, gm.player2_id, gm.referee_id,
            COALESCE(NULLIF(TRIM(u1.first_name || ' ' || u1.last_name), ''), 'Jugador sin nombre') AS player1_name,
            COALESCE(NULLIF(TRIM(u2.first_name || ' ' || u2.last_name), ''), 'Jugador sin nombre') AS player2_name
@@ -147,6 +150,7 @@ export class TablesRepository {
            bm.match_number,
            bm.table_number,
            bm.called_out_of_order,
+           bm.set_scores,
            bm.player1_id, bm.player2_id, bm.referee_id,
            COALESCE(NULLIF(TRIM(u1.first_name || ' ' || u1.last_name), ''), 'Jugador sin nombre') AS player1_name,
            COALESCE(NULLIF(TRIM(u2.first_name || ' ' || u2.last_name), ''), 'Jugador sin nombre') AS player2_name
